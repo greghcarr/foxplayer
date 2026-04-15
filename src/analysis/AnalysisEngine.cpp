@@ -1,0 +1,122 @@
+#include "AnalysisEngine.h"
+#include "BpmDetector.h"
+#include "KeyDetector.h"
+#include "audio/FoxpFile.h"
+
+namespace FoxPlayer
+{
+
+AnalysisEngine::AnalysisEngine()
+    : juce::Thread("FoxPlayer.AnalysisEngine")
+{
+    formatManager_.registerBasicFormats();
+}
+
+AnalysisEngine::~AnalysisEngine()
+{
+    cancelAll();
+}
+
+void AnalysisEngine::enqueue(const TrackInfo& track)
+{
+    // Skip if the sidecar already has both BPM and key.
+    if (track.bpm > 0.0 && track.musicalKey.isNotEmpty())
+        return;
+
+    {
+        juce::ScopedLock sl(queueLock_);
+        queue_.push_back(track);
+    }
+
+    if (!isThreadRunning())
+        startThread(juce::Thread::Priority::low);
+}
+
+void AnalysisEngine::enqueueAll(const std::vector<TrackInfo>& tracks)
+{
+    {
+        juce::ScopedLock sl(queueLock_);
+        for (const auto& t : tracks)
+        {
+            if (t.bpm > 0.0 && t.musicalKey.isNotEmpty())
+                continue;
+            queue_.push_back(t);
+        }
+    }
+
+    if (!queue_.empty() && !isThreadRunning())
+        startThread(juce::Thread::Priority::low);
+}
+
+void AnalysisEngine::cancelAll()
+{
+    {
+        juce::ScopedLock sl(queueLock_);
+        queue_.clear();
+    }
+    signalThreadShouldExit();
+    stopThread(4000);
+}
+
+bool AnalysisEngine::isAnalysing() const
+{
+    return isThreadRunning();
+}
+
+void AnalysisEngine::run()
+{
+    while (!threadShouldExit())
+    {
+        TrackInfo track;
+        {
+            juce::ScopedLock sl(queueLock_);
+            if (queue_.empty()) break;
+            track = queue_.front();
+            queue_.pop_front();
+        }
+
+        analyseOne(track);
+    }
+}
+
+void AnalysisEngine::analyseOne(TrackInfo track)
+{
+    DBG("AnalysisEngine - analysing: " + track.file.getFileName());
+
+    bool changed = false;
+
+    if (track.bpm <= 0.0)
+    {
+        const double bpm = BpmDetector::detect(track.file, formatManager_, {});
+        if (bpm > 0.0)
+        {
+            track.bpm = bpm;
+            changed = true;
+            DBG("AnalysisEngine - BPM: " + juce::String(bpm, 1));
+        }
+    }
+
+    if (threadShouldExit()) return;
+
+    if (track.musicalKey.isEmpty())
+    {
+        const juce::String key = KeyDetector::detect(track.file, formatManager_, {});
+        if (key.isNotEmpty())
+        {
+            track.musicalKey = key;
+            changed = true;
+            DBG("AnalysisEngine - Key: " + key);
+        }
+    }
+
+    if (changed)
+    {
+        FoxpFile::save(track);
+
+        juce::MessageManager::callAsync([this, t = track]() mutable {
+            if (onTrackAnalysed) onTrackAnalysed(std::move(t));
+        });
+    }
+}
+
+} // namespace FoxPlayer
