@@ -10,9 +10,11 @@ using namespace Constants;
 
 enum CommandIDs
 {
-    cmdChooseFolder = 0x1001,
-    cmdShowHidden   = 0x1002,
-    cmdQuit         = juce::StandardApplicationCommandIDs::quit,
+    cmdChooseFolder    = 0x1001,
+    cmdShowHidden      = 0x1002,
+    cmdShowAnalysisLog = 0x1003,
+    cmdPreferences     = 0x1004,
+    cmdQuit            = juce::StandardApplicationCommandIDs::quit,
 };
 
 static constexpr int orphanCheckIntervalMs = 30'000;
@@ -28,7 +30,12 @@ MainComponent::MainComponent()
     appProperties_.setStorageParameters(opts);
 
     playlistStore_ = std::make_unique<PlaylistStore>(appProperties_);
-    playlistStore_->onPlaylistsChanged = [this] { refreshSidebarPlaylists(); };
+    playlistStore_->onPlaylistsChanged = [this] {
+        refreshSidebarPlaylists();
+        // A rename to the currently-open playlist should update the search placeholder.
+        if (activeSidebarId_ >= 1000)
+            libraryTable_.setSearchPlaceholder(sourceNameForSidebar(activeSidebarId_));
+    };
 
     // Commands
     commandManager_.registerAllCommandsForTarget(this);
@@ -37,10 +44,12 @@ MainComponent::MainComponent()
     setSize(defaultWindowWidth, defaultWindowHeight);
 
     // Sub-components
-    addAndMakeVisible(sidebar_);
+    sidebarViewport_.setViewedComponent(&sidebar_, false);
+    addAndMakeVisible(sidebarViewport_);
     addAndMakeVisible(libraryTable_);
     addAndMakeVisible(transportBar_);
     addAndMakeVisible(queueView_);
+    addChildComponent(queueButton_);  // hidden until the queue has tracks
 
     // Empty-state prompt
     emptyPromptLabel_.setText("No music folder selected", juce::dontSendNotification);
@@ -66,17 +75,39 @@ MainComponent::MainComponent()
         showSongInfoEditor(track);
     };
 
+    libraryTable_.onAddToQueueRequested = [this](std::vector<TrackInfo> tracks) {
+        PlayQueue::QueueSource source;
+        source.sidebarId = activeSidebarId_;
+        source.name      = sourceNameForSidebar(activeSidebarId_);
+        queue_.appendTracks(std::move(tracks), source);
+    };
+
     libraryTable_.onLibraryChanged = [this] {
         // Sync fullLibrary_ from the table (hidden state may have changed).
         fullLibrary_ = libraryTable_.allTracks();
         menuItemsChanged();
     };
 
+    // Queue button (floats above transport bar)
+    queueButton_.onClick = [this] { toggleQueue(); };
+    updateQueueButtonIcon();
+
     // Transport bar callbacks
-    transportBar_.onPrevClicked          = [this] { playPrev(); };
-    transportBar_.onNextClicked          = [this] { playNext(); };
-    transportBar_.onQueueToggleClicked   = [this] { toggleQueue(); };
-    transportBar_.onChangeFolderClicked  = [this] { showFolderChooser(); };
+    transportBar_.onPrevClicked         = [this] { playPrev(); };
+    transportBar_.onNextClicked         = [this] { playNext(); };
+    transportBar_.onChangeFolderClicked = [this] { showFolderChooser(); };
+    transportBar_.onPlayingFromClicked  = [this](int sidebarId) {
+        sidebar_.setSelectedId(sidebarId);
+        showSidebarItem(sidebarId);
+    };
+    transportBar_.onShuffleToggled = [this](bool on) {
+        shuffleOn_ = on;
+        if (on) queue_.shuffleRemaining();
+        else    queue_.unshuffleRemaining();
+    };
+    transportBar_.onRepeatToggled = [this](int mode) {
+        repeatMode_ = mode;
+    };
 
     // Scanner callbacks
     scanner_.onBatchReady = [this](std::vector<TrackInfo> batch) {
@@ -85,21 +116,66 @@ MainComponent::MainComponent()
             libraryTable_.appendTracks(batch);
         showEmptyLibraryPrompt(false);
     };
-    scanner_.onScanComplete = [this](int /*total*/) {};
+    scanner_.onScanComplete = [this](int /*total*/) {
+        // Orphan-cleanup walks the entire music folder deleting any dot-prefixed
+        // .foxp sidecar whose audio file no longer exists. It's pure background
+        // housekeeping, so run it fire-and-forget on its own thread rather than
+        // blocking shutdown or the message thread.
+        const juce::File folder = currentMusicFolder_;
+        juce::Thread::launch([folder]() {
+            if (!folder.isDirectory()) return;
 
-    // Analysis callbacks
+            juce::Array<juce::File> foxpFiles;
+            folder.findChildFiles(foxpFiles, juce::File::findFiles, true, "*.foxp");
+
+            for (const auto& foxp : foxpFiles)
+            {
+                const juce::String audioPath = foxp.getFullPathName().dropLastCharacters(5);
+                if (! juce::File(audioPath).existsAsFile())
+                    foxp.deleteFile();
+            }
+        });
+    };
+
+    // Analysis log window (created hidden; shown via Window menu).
+    analysisLogWindow_ = std::make_unique<AnalysisLogWindow>();
+    preferencesWindow_ = std::make_unique<PreferencesWindow>(engine_.deviceManager());
+
+    // Analysis callbacks - feed both the library and the log window.
+    analysisEngine_.onTrackQueued = [this](TrackInfo t) {
+        if (analysisLogWindow_) analysisLogWindow_->log().trackQueued(t);
+    };
+    analysisEngine_.onTrackStarted = [this](TrackInfo t) {
+        if (analysisLogWindow_) analysisLogWindow_->log().trackStarted(t);
+    };
     analysisEngine_.onTrackAnalysed = [this](TrackInfo analysed) {
         updateTrackInLibrary(analysed);
+        if (analysisLogWindow_) analysisLogWindow_->log().trackAnalysed(analysed);
     };
 
     // Queue callbacks
     queue_.onQueueChanged = [this] {
         queueView_.refresh(queue_);
+
+        // Hide the queue button (and the panel itself) when the queue is empty.
+        const bool hasQueue = queue_.size() > 0;
+        queueButton_.setVisible(hasQueue);
+        if (!hasQueue && queueVisible_)
+        {
+            queueVisible_ = false;
+            queueView_.setVisible(false);
+            updateQueueButtonIcon();
+            resized();
+        }
     };
     queue_.onIndexChanged = [this](int index) {
-        libraryTable_.setPlayingIndex(-1);
         queueView_.refresh(queue_);
         juce::ignoreUnused(index);
+    };
+    // Reset shuffle button when a new queue replaces the old one.
+    queue_.onShuffleStateChanged = [this](bool on) {
+        shuffleOn_ = on;
+        transportBar_.setShuffleOn(on);
     };
 
     // Queue view double-click
@@ -149,7 +225,6 @@ MainComponent::~MainComponent()
 {
     stopTimer();
     removeKeyListener(this);
-    cleanupOrphanedFoxpFiles();
 }
 
 void MainComponent::timerCallback()
@@ -179,6 +254,8 @@ void MainComponent::updateTrackInLibrary(const TrackInfo& updated)
 
 void MainComponent::refreshCurrentView()
 {
+    libraryTable_.setSearchPlaceholder(sourceNameForSidebar(activeSidebarId_));
+
     if (activeSidebarId_ == 1)
     {
         libraryTable_.setTracks(fullLibrary_);
@@ -288,24 +365,6 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track)
     opts.launchAsync();
 }
 
-void MainComponent::cleanupOrphanedFoxpFiles()
-{
-    if (!currentMusicFolder_.isDirectory()) return;
-
-    juce::Array<juce::File> foxpFiles;
-    currentMusicFolder_.findChildFiles(foxpFiles, juce::File::findFiles, true, "*.foxp");
-
-    for (const auto& foxp : foxpFiles)
-    {
-        // Strip the ".foxp" suffix to recover the original audio file path.
-        const juce::String audioPath = foxp.getFullPathName()
-                                           .dropLastCharacters(5); // ".foxp" = 5 chars
-        const juce::File audioFile(audioPath);
-        if (!audioFile.existsAsFile())
-            foxp.deleteFile();
-    }
-}
-
 void MainComponent::setupAudioEngineCallbacks()
 {
     engine_.onTrackStarted = [this](const TrackInfo& track) {
@@ -315,14 +374,26 @@ void MainComponent::setupAudioEngineCallbacks()
     };
 
     engine_.onTrackFinished = [this] {
-        if (queue_.hasNext())
+        if (repeatMode_ == 2)
+        {
+            // Repeat-one: replay the current track without advancing.
+            playCurrentQueueItem();
+        }
+        else if (queue_.hasNext())
         {
             queue_.advanceToNext();
+            playCurrentQueueItem();
+        }
+        else if (repeatMode_ == 1)
+        {
+            // Repeat-all: wrap back to the start of the queue.
+            queue_.jumpTo(0);
             playCurrentQueueItem();
         }
         else
         {
             transportBar_.clearTrack();
+            libraryTable_.setPlayingFile({});
         }
     };
 
@@ -347,8 +418,21 @@ void MainComponent::resized()
     if (queueVisible_)
         queueView_.setBounds(bounds.removeFromRight(queuePanelWidth));
 
+    // Queue toggle button: bottom-right of content area, just above transport bar
+    constexpr int qbSize = 32;
+    queueButton_.setBounds(bounds.getRight() - qbSize - 6,
+                           bounds.getBottom() - qbSize - 4,
+                           qbSize, qbSize);
+
     // Sidebar on the left
-    sidebar_.setBounds(bounds.removeFromLeft(sidebarWidth));
+    sidebarViewport_.setBounds(bounds.removeFromLeft(sidebarWidth));
+
+    // Viewport doesn't auto-size its viewed component's width, so sync it to the
+    // visible area (shrunk when a vertical scrollbar is shown). layoutItems()
+    // handles the height.
+    const int sbVisibleW = sidebarViewport_.getMaximumVisibleWidth();
+    if (sbVisibleW > 0 && sidebar_.getWidth() != sbVisibleW)
+        sidebar_.setSize(sbVisibleW, juce::jmax(sidebar_.getHeight(), 1));
 
     // Library fills remaining space
     libraryTable_.setBounds(bounds);
@@ -429,20 +513,47 @@ juce::File MainComponent::loadSavedMusicFolder()
     return {};
 }
 
+juce::String MainComponent::sourceNameForSidebar(int sidebarId) const
+{
+    if (sidebarId == 1)
+        return "All Music";
+    const auto* pl = playlistStore_->findById(sidebarId - 1000);
+    return pl ? pl->name : "Playlist";
+}
+
 void MainComponent::activateRow(int rowIndex, const std::vector<TrackInfo>& libraryTracks)
 {
-    std::vector<TrackInfo> queueTracks(
-        libraryTracks.begin() + rowIndex, libraryTracks.end());
+    // Capture shuffle state before setTracks resets it via onShuffleStateChanged.
+    const bool wasShuffled = shuffleOn_;
 
-    queue_.setTracks(std::move(queueTracks), 0);
+    std::vector<TrackInfo> queueTracks(libraryTracks.begin() + rowIndex, libraryTracks.end());
+
+    PlayQueue::QueueSource source;
+    source.sidebarId = activeSidebarId_;
+    source.name      = sourceNameForSidebar(activeSidebarId_);
+
+    queue_.setTracks(std::move(queueTracks), 0, source);
+
+    // Re-apply shuffle immediately so the new queue is shuffled from the start.
+    if (wasShuffled)
+    {
+        shuffleOn_ = true;
+        transportBar_.setShuffleOn(true);
+        queue_.shuffleRemaining();
+    }
+
     playCurrentQueueItem();
 }
 
 void MainComponent::playCurrentQueueItem()
 {
     if (!queue_.hasCurrent()) return;
-    engine_.play(queue_.current());
-    transportBar_.setCurrentTrack(queue_.current());
+    const auto& track = queue_.current();
+    engine_.play(track);
+    transportBar_.setCurrentTrack(track);
+    libraryTable_.setPlayingFile(track.file);
+    const auto src = queue_.currentSource();
+    transportBar_.setPlayingFrom(src.name, src.sidebarId);
     queueView_.refresh(queue_);
 }
 
@@ -472,7 +583,44 @@ void MainComponent::toggleQueue()
 {
     queueVisible_ = !queueVisible_;
     queueView_.setVisible(queueVisible_);
+    updateQueueButtonIcon();
     resized();
+}
+
+void MainComponent::updateQueueButtonIcon()
+{
+    const char* data = queueVisible_ ? BinaryData::caretdoublerightfill_svg
+                                     : BinaryData::queuefill_svg;
+    const int   size = queueVisible_ ? BinaryData::caretdoublerightfill_svgSize
+                                     : BinaryData::queuefill_svgSize;
+
+    const auto xmlStr = juce::String::createStringFromData(data, size);
+    if (auto xml = juce::XmlDocument::parse(xmlStr))
+        if (auto drawable = juce::Drawable::createFromSVG(*xml))
+        {
+            drawable->replaceColour(juce::Colours::black, Color::textSecondary);
+            queueButton_.setImages(drawable.get());
+            queueButton_.setTooltip(queueVisible_ ? "Hide Queue" : "Show Queue");
+        }
+}
+
+void MainComponent::toggleAnalysisLog()
+{
+    if (!analysisLogWindow_) return;
+
+    const bool shouldShow = !analysisLogWindow_->isVisible();
+    analysisLogWindow_->setVisible(shouldShow);
+    if (shouldShow)
+        analysisLogWindow_->toFront(true);
+
+    menuItemsChanged();
+}
+
+void MainComponent::showPreferences()
+{
+    if (!preferencesWindow_) return;
+    preferencesWindow_->setVisible(true);
+    preferencesWindow_->toFront(true);
 }
 
 void MainComponent::showEmptyLibraryPrompt(bool show)
@@ -484,7 +632,7 @@ void MainComponent::showEmptyLibraryPrompt(bool show)
 // juce::MenuBarModel
 juce::StringArray MainComponent::getMenuBarNames()
 {
-    return { "File", "View" };
+    return { "File", "Window" };
 }
 
 juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String& /*menuName*/)
@@ -493,10 +641,13 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String& /*
     if (index == 0)
     {
         menu.addCommandItem(&commandManager_, cmdChooseFolder);
+        menu.addCommandItem(&commandManager_, cmdShowHidden);
+        menu.addSeparator();
+        menu.addCommandItem(&commandManager_, cmdPreferences);
     }
     else if (index == 1)
     {
-        menu.addCommandItem(&commandManager_, cmdShowHidden);
+        menu.addCommandItem(&commandManager_, cmdShowAnalysisLog);
     }
     return menu;
 }
@@ -508,6 +659,8 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& commands)
 {
     commands.add(cmdChooseFolder);
     commands.add(cmdShowHidden);
+    commands.add(cmdShowAnalysisLog);
+    commands.add(cmdPreferences);
 }
 
 void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandInfo& info)
@@ -521,10 +674,28 @@ void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandI
             break;
 
         case cmdShowHidden:
-            info.setInfo("Show Hidden Songs", "Show hidden songs dimmed in the library",
-                         "View", 0);
+            info.setInfo("Show Hidden Songs in Library",
+                         "Show hidden songs dimmed in the library",
+                         "File", 0);
             info.setTicked(libraryTable_.showHidden());
-            info.addDefaultKeypress('h', juce::ModifierKeys::commandModifier);
+            info.addDefaultKeypress('.', juce::ModifierKeys::commandModifier
+                                       | juce::ModifierKeys::shiftModifier);
+            break;
+
+        case cmdShowAnalysisLog:
+            info.setInfo("Show Analysis Log",
+                         "Open the analysis log window",
+                         "Window", 0);
+            info.setTicked(analysisLogWindow_ && analysisLogWindow_->isVisible());
+            info.addDefaultKeypress('l', juce::ModifierKeys::commandModifier
+                                       | juce::ModifierKeys::shiftModifier);
+            break;
+
+        case cmdPreferences:
+            info.setInfo("Preferences...",
+                         "Open the FoxPlayer preferences window",
+                         "File", 0);
+            info.addDefaultKeypress(',', juce::ModifierKeys::commandModifier);
             break;
 
         default: break;
@@ -542,6 +713,14 @@ bool MainComponent::perform(const ApplicationCommandTarget::InvocationInfo& info
         case cmdShowHidden:
             libraryTable_.setShowHidden(!libraryTable_.showHidden());
             menuItemsChanged();
+            return true;
+
+        case cmdShowAnalysisLog:
+            toggleAnalysisLog();
+            return true;
+
+        case cmdPreferences:
+            showPreferences();
             return true;
 
         default:

@@ -1,0 +1,302 @@
+#include "PreferencesWindow.h"
+#include "Constants.h"
+
+namespace FoxPlayer
+{
+
+using namespace Constants;
+
+// ============================================================================
+// AudioPreferencesPanel
+// ============================================================================
+
+AudioPreferencesPanel::AudioPreferencesPanel(juce::AudioDeviceManager& dm)
+    : deviceManager_(dm)
+{
+    deviceLabel_.setText("Output Device", juce::dontSendNotification);
+    deviceLabel_.setColour(juce::Label::textColourId, Color::textSecondary);
+    deviceLabel_.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
+    addAndMakeVisible(deviceLabel_);
+
+    deviceCombo_.setColour(juce::ComboBox::backgroundColourId, Color::headerBackground);
+    deviceCombo_.setColour(juce::ComboBox::textColourId,       Color::textPrimary);
+    deviceCombo_.setColour(juce::ComboBox::outlineColourId,    Color::border);
+    deviceCombo_.setColour(juce::ComboBox::arrowColourId,      Color::textSecondary);
+    deviceCombo_.onChange = [this] { applySelectedDevice(); };
+    addAndMakeVisible(deviceCombo_);
+
+    rebuildDeviceList();
+    lastDefaultName_ = currentDefaultDeviceName();
+    deviceManager_.addChangeListener(this);
+
+    // Poll every 2s so we catch OS-level default-device changes that don't
+    // always come through AudioDeviceManager's change broadcaster.
+    startTimer(2000);
+}
+
+AudioPreferencesPanel::~AudioPreferencesPanel()
+{
+    stopTimer();
+    deviceManager_.removeChangeListener(this);
+}
+
+juce::String AudioPreferencesPanel::currentDefaultDeviceName() const
+{
+    auto* type = deviceManager_.getCurrentDeviceTypeObject();
+    if (type == nullptr) return {};
+
+    const int idx = type->getDefaultDeviceIndex(false);
+    const auto names = type->getDeviceNames(false);
+    if (juce::isPositiveAndBelow(idx, names.size()))
+        return names[idx];
+    return {};
+}
+
+void AudioPreferencesPanel::timerCallback()
+{
+    if (auto* type = deviceManager_.getCurrentDeviceTypeObject())
+        type->scanForDevices();
+
+    const auto name = currentDefaultDeviceName();
+    if (name == lastDefaultName_) return;
+
+    lastDefaultName_ = name;
+    rebuildDeviceList();
+
+    // If the user's selection is "System default", move the audio engine
+    // to the new default device so output follows the OS.
+    if (usingDefault_)
+        applySelectedDevice();
+}
+
+static constexpr int kSystemDefaultId = 1;
+
+void AudioPreferencesPanel::rebuildDeviceList()
+{
+    deviceCombo_.clear(juce::dontSendNotification);
+
+    auto* type = deviceManager_.getCurrentDeviceTypeObject();
+    if (type == nullptr) return;
+
+    type->scanForDevices();
+    const auto devices = type->getDeviceNames(false);
+
+    // "System default" is always the top option; we annotate it with the name
+    // of whichever device macOS currently considers the default output.
+    const int defaultIndex = type->getDefaultDeviceIndex(false);
+    juce::String defaultLabel = "System default";
+    if (juce::isPositiveAndBelow(defaultIndex, devices.size()))
+        defaultLabel += " (" + devices[defaultIndex] + ")";
+
+    deviceCombo_.addItem(defaultLabel, kSystemDefaultId);
+    deviceCombo_.addSeparator();
+
+    juce::String currentName;
+    if (auto* device = deviceManager_.getCurrentAudioDevice())
+        currentName = device->getName();
+
+    int selectedId = 0;
+    for (int i = 0; i < devices.size(); ++i)
+    {
+        const int itemId = i + 2;   // ids 2+ ; reserve 1 for "System default"
+        deviceCombo_.addItem(devices[i], itemId);
+        if (!usingDefault_ && devices[i] == currentName)
+            selectedId = itemId;
+    }
+
+    if (usingDefault_)
+        deviceCombo_.setSelectedId(kSystemDefaultId, juce::dontSendNotification);
+    else if (selectedId > 0)
+        deviceCombo_.setSelectedId(selectedId, juce::dontSendNotification);
+}
+
+void AudioPreferencesPanel::applySelectedDevice()
+{
+    const int  id           = deviceCombo_.getSelectedId();
+    const bool wantsDefault = (id == kSystemDefaultId);
+
+    // Resolve "System default" to the actual current default-device name.
+    // Passing an empty outputDeviceName to AudioDeviceManager tells it to
+    // close the device entirely, which is why audio went silent before.
+    const juce::String desired = wantsDefault
+                                     ? currentDefaultDeviceName()
+                                     : deviceCombo_.getText();
+    if (desired.isEmpty())
+        return;
+
+    juce::AudioDeviceManager::AudioDeviceSetup setup;
+    deviceManager_.getAudioDeviceSetup(setup);
+
+    if (setup.outputDeviceName == desired && usingDefault_ == wantsDefault)
+        return;
+
+    setup.outputDeviceName = desired;
+    const auto err = deviceManager_.setAudioDeviceSetup(setup, /*treatAsChosenDevice*/ true);
+    if (err.isNotEmpty())
+    {
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::MessageBoxIconType::WarningIcon,
+            "Audio Device",
+            "Could not switch to \"" + (wantsDefault ? juce::String("System default") : desired)
+            + "\": " + err);
+        rebuildDeviceList();
+        return;
+    }
+
+    usingDefault_ = wantsDefault;
+}
+
+void AudioPreferencesPanel::changeListenerCallback(juce::ChangeBroadcaster*)
+{
+    rebuildDeviceList();
+}
+
+void AudioPreferencesPanel::paint(juce::Graphics& g)
+{
+    g.fillAll(Color::background);
+}
+
+void AudioPreferencesPanel::resized()
+{
+    auto bounds = getLocalBounds().reduced(24);
+
+    auto row = bounds.removeFromTop(32);
+    deviceLabel_.setBounds(row.removeFromLeft(140));
+    row.removeFromLeft(8);
+    deviceCombo_.setBounds(row);
+}
+
+// ============================================================================
+// PreferencesComponent
+// ============================================================================
+
+PreferencesComponent::PreferencesComponent(juce::AudioDeviceManager& dm)
+    : deviceManager_(dm)
+{
+    items_.push_back({ Category::Audio,   "Audio",   {} });
+    items_.push_back({ Category::Library, "Library", {} });
+
+    audioPanel_ = std::make_unique<AudioPreferencesPanel>(deviceManager_);
+
+    // Placeholder for the Library panel - just a centered "coming soon" label.
+    libraryPanel_ = std::make_unique<juce::Component>();
+    libraryPanel_->setOpaque(false);
+    addChildComponent(*libraryPanel_);
+    addChildComponent(*audioPanel_);
+
+    showPanel(current_);
+    setSize(640, 420);
+}
+
+void PreferencesComponent::showPanel(Category c)
+{
+    current_ = c;
+    if (audioPanel_)   audioPanel_->setVisible(c == Category::Audio);
+    if (libraryPanel_) libraryPanel_->setVisible(c == Category::Library);
+    repaint();
+}
+
+void PreferencesComponent::layoutSidebar()
+{
+    int y = 16;
+    for (auto& item : items_)
+    {
+        item.bounds = juce::Rectangle<int>(0, y, sidebarWidth, itemHeight);
+        y += itemHeight;
+    }
+}
+
+void PreferencesComponent::paint(juce::Graphics& g)
+{
+    g.fillAll(Color::background);
+
+    // Sidebar background
+    g.setColour(Color::headerBackground);
+    g.fillRect(0, 0, sidebarWidth, getHeight());
+
+    // Right border of sidebar
+    g.setColour(Color::border);
+    g.drawVerticalLine(sidebarWidth - 1, 0.0f, static_cast<float>(getHeight()));
+
+    // Items
+    for (const auto& item : items_)
+    {
+        const bool selected = (item.category == current_);
+
+        if (selected)
+        {
+            g.setColour(Color::background);
+            g.fillRect(item.bounds);
+            g.setColour(Color::accent);
+            g.fillRect(item.bounds.withWidth(3));
+        }
+
+        g.setColour(selected ? Color::textPrimary : Color::textSecondary);
+        g.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
+        g.drawText(item.label,
+                   item.bounds.reduced(16, 0),
+                   juce::Justification::centredLeft,
+                   false);
+    }
+
+    // "Library settings coming soon" message in the content area.
+    if (current_ == Category::Library)
+    {
+        g.setColour(Color::textDim);
+        g.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)).italicised());
+        g.drawText("Library settings coming soon.",
+                   juce::Rectangle<int>(sidebarWidth, 0,
+                                        getWidth() - sidebarWidth, getHeight()),
+                   juce::Justification::centred,
+                   false);
+    }
+}
+
+void PreferencesComponent::resized()
+{
+    layoutSidebar();
+
+    const auto content = juce::Rectangle<int>(sidebarWidth, 0,
+                                              getWidth() - sidebarWidth, getHeight());
+    if (audioPanel_)   audioPanel_->setBounds(content);
+    if (libraryPanel_) libraryPanel_->setBounds(content);
+}
+
+void PreferencesComponent::mouseDown(const juce::MouseEvent& e)
+{
+    for (const auto& item : items_)
+    {
+        if (item.bounds.contains(e.getPosition()))
+        {
+            if (item.category != current_)
+                showPanel(item.category);
+            return;
+        }
+    }
+}
+
+// ============================================================================
+// PreferencesWindow
+// ============================================================================
+
+PreferencesWindow::PreferencesWindow(juce::AudioDeviceManager& dm)
+    : juce::DocumentWindow("Preferences",
+                           Color::background,
+                           juce::DocumentWindow::minimiseButton | juce::DocumentWindow::closeButton)
+{
+    setUsingNativeTitleBar(true);
+    setResizable(true, false);
+    setResizeLimits(420, 320, 1200, 900);
+
+    auto* content = new PreferencesComponent(dm);
+    setContentOwned(content, true);
+    centreWithSize(640, 420);
+    setVisible(false);
+}
+
+void PreferencesWindow::closeButtonPressed()
+{
+    setVisible(false);
+}
+
+} // namespace FoxPlayer

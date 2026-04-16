@@ -69,7 +69,7 @@ void QueueView::paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool 
     g.setFont(juce::Font(12.0f));
 
     const juce::String line = t.displayTitle() +
-                               (t.artist.isNotEmpty() ? " — " + t.artist : "");
+                               (t.artist.isNotEmpty() ? " - " + t.artist : "");
     g.drawText(line, 8, 0, w - 16, h, juce::Justification::centredLeft, true);
 }
 

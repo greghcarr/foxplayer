@@ -28,12 +28,15 @@ void AnalysisEngine::enqueue(const TrackInfo& track)
         queue_.push_back(track);
     }
 
+    if (onTrackQueued) onTrackQueued(track);
+
     if (!isThreadRunning())
         startThread(juce::Thread::Priority::low);
 }
 
 void AnalysisEngine::enqueueAll(const std::vector<TrackInfo>& tracks)
 {
+    std::vector<TrackInfo> added;
     {
         juce::ScopedLock sl(queueLock_);
         for (const auto& t : tracks)
@@ -41,8 +44,13 @@ void AnalysisEngine::enqueueAll(const std::vector<TrackInfo>& tracks)
             if (t.bpm > 0.0 && t.musicalKey.isNotEmpty())
                 continue;
             queue_.push_back(t);
+            added.push_back(t);
         }
     }
+
+    if (onTrackQueued)
+        for (auto& t : added)
+            onTrackQueued(t);
 
     if (!queue_.empty() && !isThreadRunning())
         startThread(juce::Thread::Priority::low);
@@ -83,6 +91,10 @@ void AnalysisEngine::analyseOne(TrackInfo track)
 {
     DBG("AnalysisEngine - analysing: " + track.file.getFileName());
 
+    juce::MessageManager::callAsync([this, t = track]() mutable {
+        if (onTrackStarted) onTrackStarted(std::move(t));
+    });
+
     bool changed = false;
 
     if (track.bpm <= 0.0)
@@ -110,13 +122,11 @@ void AnalysisEngine::analyseOne(TrackInfo track)
     }
 
     if (changed)
-    {
         FoxpFile::save(track);
 
-        juce::MessageManager::callAsync([this, t = track]() mutable {
-            if (onTrackAnalysed) onTrackAnalysed(std::move(t));
-        });
-    }
+    juce::MessageManager::callAsync([this, t = track]() mutable {
+        if (onTrackAnalysed) onTrackAnalysed(std::move(t));
+    });
 }
 
 } // namespace FoxPlayer

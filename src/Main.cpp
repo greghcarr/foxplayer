@@ -1,5 +1,7 @@
 #include <JuceHeader.h>
 #include "MainWindow.h"
+#include "Constants.h"
+#include "ui/Splash.h"
 
 class FoxPlayerApplication : public juce::JUCEApplication
 {
@@ -10,7 +12,24 @@ public:
 
     void initialise(const juce::String& /*commandLine*/) override
     {
-        mainWindow_ = std::make_unique<FoxPlayer::MainWindow>(getApplicationName());
+        // App-wide scrollbar styling: gray thumb, transparent track/background.
+        auto& laf = juce::LookAndFeel::getDefaultLookAndFeel();
+        laf.setColour(juce::ScrollBar::thumbColourId,      FoxPlayer::Constants::Color::scrollbarThumb);
+        laf.setColour(juce::ScrollBar::trackColourId,      juce::Colours::transparentBlack);
+        laf.setColour(juce::ScrollBar::backgroundColourId, juce::Colours::transparentBlack);
+
+        // Splash: transparent window, white Foxwhelp title with thick black outline.
+        splashWindow_ = std::make_unique<FoxPlayer::SplashWindow>();
+
+        // Defer main window creation one message loop iteration so the splash
+        // actually gets a paint cycle before MainComponent's constructor runs.
+        juce::Timer::callAfterDelay(60, [this]() {
+            mainWindow_ = std::make_unique<FoxPlayer::MainWindow>(juce::String());
+        });
+
+        juce::Timer::callAfterDelay(2500, [this]() {
+            splashWindow_.reset();
+        });
     }
 
     void shutdown() override
@@ -26,7 +45,8 @@ public:
     void anotherInstanceStarted(const juce::String& /*commandLine*/) override {}
 
 private:
-    std::unique_ptr<FoxPlayer::MainWindow> mainWindow_;
+    std::unique_ptr<FoxPlayer::MainWindow>   mainWindow_;
+    std::unique_ptr<FoxPlayer::SplashWindow> splashWindow_;
 };
 
 START_JUCE_APPLICATION(FoxPlayerApplication)

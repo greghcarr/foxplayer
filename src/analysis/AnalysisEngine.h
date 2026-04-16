@@ -26,8 +26,10 @@ public:
     void cancelAll();
     bool isAnalysing() const;
 
-    // Called on the message thread when a track has been fully analysed.
-    std::function<void(TrackInfo)> onTrackAnalysed;
+    // All callbacks fire on the message thread.
+    std::function<void(TrackInfo)> onTrackQueued;     // added to queue
+    std::function<void(TrackInfo)> onTrackStarted;    // analysis begun
+    std::function<void(TrackInfo)> onTrackAnalysed;   // analysis finished
 
 private:
     void run() override;

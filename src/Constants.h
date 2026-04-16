@@ -7,11 +7,13 @@ namespace FoxPlayer::Constants
     // Window
     static constexpr int defaultWindowWidth  = 1100;
     static constexpr int defaultWindowHeight = 700;
-    static constexpr int minWindowWidth      = 700;
-    static constexpr int minWindowHeight     = 400;
+    static constexpr int minWindowWidth      = 410;   // allow a "mini mode" where only the transport bar stays useful
+    static constexpr int minWindowHeight     = 135;   // transport bar + small buffer; library above stays invisible
+    static constexpr int miniModeWidth       = 460;   // transport bar switches to mini layout below this width
+    static constexpr int compactHeight       = 150;   // at-or-below this height the library/sidebar are effectively hidden
 
     // Transport bar
-    static constexpr int transportBarHeight  = 72;
+    static constexpr int transportBarHeight  = 108;
 
     // Volume slider
     static constexpr int volumeSliderWidth = 80;
@@ -70,5 +72,6 @@ namespace FoxPlayer::Constants
         static const juce::Colour seekBarFill      { 0xff4a9eff };
         static const juce::Colour buttonText       { 0xffe8e8e8 };
         static const juce::Colour border           { 0xff2a2a2a };
+        static const juce::Colour scrollbarThumb   { 0xff707070 };
     }
 }

@@ -10,6 +10,9 @@
 #include "ui/QueueView.h"
 #include "ui/SongInfoEditor.h"
 #include "ui/SidebarComponent.h"
+#include "ui/AnalysisLogWindow.h"
+#include "ui/AutoHideViewport.h"
+#include "ui/PreferencesWindow.h"
 #include <JuceHeader.h>
 
 namespace FoxPlayer
@@ -58,10 +61,12 @@ private:
     void playNext();
     void playPrev();
     void toggleQueue();
+    void updateQueueButtonIcon();
     void showEmptyLibraryPrompt(bool show);
-    void cleanupOrphanedFoxpFiles();
     void deleteOldStyleFoxpFiles(const juce::File& folder);
     void showSongInfoEditor(const TrackInfo& track);
+    void toggleAnalysisLog();
+    void showPreferences();
 
     // Library view management
     void updateTrackInLibrary(const TrackInfo& updated);
@@ -72,6 +77,9 @@ private:
 
     // Drag-and-drop: add tracks to a playlist, with duplicate warning for single tracks.
     void handleTracksDroppedOnPlaylist(int sidebarId, const juce::StringArray& paths);
+
+    // Returns a human-readable name for the given sidebar item (used for "Playing from:").
+    juce::String sourceNameForSidebar(int sidebarId) const;
 
     // Wires AudioEngine callbacks to UI.
     void setupAudioEngineCallbacks();
@@ -84,20 +92,26 @@ private:
     LibraryScanner         scanner_;
     AnalysisEngine         analysisEngine_;
     SidebarComponent       sidebar_;
+    AutoHideViewport       sidebarViewport_;
     LibraryTableComponent  libraryTable_;
     TransportBar           transportBar_;
     QueueView              queueView_;
 
     juce::Label            emptyPromptLabel_;
     juce::TextButton       chooseFolderButton_ { "Choose Music Folder" };
+    juce::DrawableButton   queueButton_ { "queueToggle", juce::DrawableButton::ImageFitted };
 
     bool                   queueVisible_    { false };
+    bool                   shuffleOn_       { false };
+    int                    repeatMode_      { 0 };   // 0=off, 1=repeat-all, 2=repeat-one
     int                    activeSidebarId_ { 1 };
     std::vector<TrackInfo> fullLibrary_;
     juce::File             currentMusicFolder_;
     juce::ApplicationProperties   appProperties_;
-    std::unique_ptr<PlaylistStore> playlistStore_;
-    juce::ApplicationCommandManager commandManager_;
+    std::unique_ptr<PlaylistStore>      playlistStore_;
+    std::unique_ptr<AnalysisLogWindow>  analysisLogWindow_;
+    std::unique_ptr<PreferencesWindow>  preferencesWindow_;
+    juce::ApplicationCommandManager     commandManager_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

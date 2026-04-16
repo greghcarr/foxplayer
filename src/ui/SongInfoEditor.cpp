@@ -31,6 +31,7 @@ SongInfoEditor::SongInfoEditor(const TrackInfo& track)
         ed.setColour(juce::TextEditor::textColourId,       Color::textPrimary);
         ed.setColour(juce::TextEditor::outlineColourId,    Color::border);
         ed.setColour(juce::TextEditor::focusedOutlineColourId, Color::accent);
+        ed.setJustification(juce::Justification::centredLeft);
     };
 
     for (auto* lbl : { &titleLabel_, &artistLabel_, &albumLabel_,

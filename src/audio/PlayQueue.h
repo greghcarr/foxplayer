@@ -1,6 +1,7 @@
 #pragma once
 
 #include "TrackInfo.h"
+#include <JuceHeader.h>
 #include <vector>
 #include <functional>
 
@@ -10,9 +11,16 @@ namespace FoxPlayer
 class PlayQueue
 {
 public:
+    struct QueueSource
+    {
+        juce::String name;
+        int          sidebarId { 1 };
+    };
+
     PlayQueue() = default;
 
-    void setTracks(std::vector<TrackInfo> tracks, int startIndex = 0);
+    void setTracks(std::vector<TrackInfo> tracks, int startIndex, QueueSource source);
+    void appendTracks(std::vector<TrackInfo> tracks, QueueSource source);
     void clear();
 
     bool hasCurrent() const;
@@ -20,6 +28,7 @@ public:
     bool hasPrev()    const;
 
     const TrackInfo& current() const;
+    QueueSource      currentSource() const;
     int              currentIndex() const { return index_; }
     int              size()         const { return static_cast<int>(tracks_.size()); }
 
@@ -29,12 +38,24 @@ public:
 
     const std::vector<TrackInfo>& tracks() const { return tracks_; }
 
-    std::function<void()> onQueueChanged;
+    // Shuffle all tracks after the current index. Saves original order for restoration.
+    void shuffleRemaining();
+    // Restore the original pre-shuffle order, keeping the current track at its original position.
+    void unshuffleRemaining();
+    bool isShuffled() const { return isShuffled_; }
+
+    std::function<void()>    onQueueChanged;
     std::function<void(int)> onIndexChanged;
+    // Fired when shuffle state is reset externally (e.g., new tracks loaded).
+    std::function<void(bool)> onShuffleStateChanged;
 
 private:
-    std::vector<TrackInfo> tracks_;
-    int index_ { -1 };
+    std::vector<TrackInfo>   tracks_;
+    std::vector<QueueSource> sources_;  // parallel to tracks_
+    int                      index_      { -1 };
+    bool                     isShuffled_ { false };
+    std::vector<TrackInfo>   originalTracks_;
+    std::vector<QueueSource> originalSources_;
 };
 
 } // namespace FoxPlayer

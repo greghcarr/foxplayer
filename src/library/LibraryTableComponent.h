@@ -19,13 +19,19 @@ public:
     void appendTracks(const std::vector<TrackInfo>& tracks);
     void clearTracks();
 
+    // Updates the search box placeholder to "Search <viewName>..." so it
+    // reflects whatever sidebar item the user currently has open.
+    void setSearchPlaceholder(const juce::String& viewName);
+
     // Updates analysis fields and hidden flag for a track matched by file path.
     void updateTrack(const TrackInfo& updated);
 
     // Removes tracks whose files no longer exist on disk.
     void removeOrphanedTracks();
 
-    void setPlayingIndex(int index);
+    // Sets the currently playing file so its row is highlighted in green.
+    // The highlight persists when the view changes (e.g. switching playlists).
+    void setPlayingFile(const juce::File& file);
 
     // When true, hidden tracks are shown dimmed; when false they are invisible.
     void setShowHidden(bool show);
@@ -52,6 +58,9 @@ public:
     // Called when the user wants to edit a single track's metadata.
     std::function<void(TrackInfo)> onEditRequested;
 
+    // Called when the user chooses "Add to Queue" from the context menu.
+    std::function<void(std::vector<TrackInfo>)> onAddToQueueRequested;
+
     // juce::Component
     void resized() override;
     void paint(juce::Graphics& g) override;
@@ -66,11 +75,14 @@ public:
     void deleteKeyPressed(int lastRowSelected) override;
     void returnKeyPressed(int lastRowSelected) override;
     void backgroundClicked(const juce::MouseEvent&) override;
+    void sortOrderChanged(int newSortColumnId, bool isForwards) override;
     juce::String getCellTooltip(int row, int col) override;
 
 private:
     void buildTable();
     void applyFilter();
+    void applySort();
+    void refreshPlayingIndex();
     juce::String cellText(int row, int colId) const;
 
     // Hides (or unhides) all currently selected rows.
@@ -84,8 +96,11 @@ private:
 
     std::vector<TrackInfo>   tracks_;          // full library
     std::vector<TrackInfo*>  filteredTracks_;  // pointers into tracks_ for current view
+    juce::File               playingFile_;     // currently playing file (ground truth for highlight)
     int                      playingIndex_ { -1 };
     bool                     showHidden_   { false };
+    int                      sortColumnId_ { 0 };     // 0 = unsorted
+    bool                     sortForwards_ { true };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryTableComponent)
 };

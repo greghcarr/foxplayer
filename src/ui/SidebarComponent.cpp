@@ -13,7 +13,7 @@ SidebarComponent::SidebarComponent()
     library.heading       = "LIBRARY";
     library.collapsible   = false;
     library.rightClickable = false;
-    library.items.push_back({ juce::String(juce::CharPointer_UTF8("\xe2\x99\xab   Music")), 1, {} });
+    library.items.push_back({ juce::String(juce::CharPointer_UTF8("\xe2\x99\xab   All Music")), 1, {} });
     sections_.push_back(std::move(library));
 
     // PLAYLISTS section: collapsible, right-clickable for "Create New Playlist"
@@ -61,6 +61,13 @@ void SidebarComponent::layoutItems()
 
         y += 6; // gap between sections
     }
+
+    // Size the component to fit its content, but never smaller than the viewport,
+    // so the background fills the whole visible area even with few playlists.
+    const int visibleH = getParentHeight();
+    const int targetH  = juce::jmax(y, visibleH);
+    if (getHeight() != targetH)
+        setSize(getWidth(), targetH);
 }
 
 void SidebarComponent::drawDisclosureTriangle(juce::Graphics& g,
@@ -265,6 +272,7 @@ void SidebarComponent::startRename(int sidebarId)
     inlineEditor_->setColour(juce::TextEditor::textColourId,            Color::textPrimary);
     inlineEditor_->setColour(juce::TextEditor::outlineColourId,         Color::accent);
     inlineEditor_->setColour(juce::TextEditor::focusedOutlineColourId,  Color::accent);
+    inlineEditor_->setJustification(juce::Justification::centredLeft);
     inlineEditor_->setBounds(edX, rowBounds.getY() + 4, edW, rowBounds.getHeight() - 8);
 
     inlineEditor_->onReturnKey = [this] {

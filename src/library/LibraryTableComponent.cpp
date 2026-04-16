@@ -12,20 +12,22 @@ static constexpr int searchBarHeight = 30;
 LibraryTableComponent::LibraryTableComponent()
 {
     // Search box
-    searchBox_.setTextToShowWhenEmpty("Search library...", Color::textDim);
-    searchBox_.setFont(juce::Font(13.0f));
+    searchBox_.setTextToShowWhenEmpty("Search All Music...", Color::textDim);
+    searchBox_.setFont(juce::Font(14.0f));
     searchBox_.setColour(juce::TextEditor::backgroundColourId, Color::headerBackground);
     searchBox_.setColour(juce::TextEditor::textColourId,       Color::textPrimary);
     searchBox_.setColour(juce::TextEditor::outlineColourId,    Color::border);
     searchBox_.setColour(juce::TextEditor::focusedOutlineColourId, Color::accent);
+    searchBox_.setJustification(juce::Justification::centredLeft);
     searchBox_.onTextChange = [this] { applyFilter(); };
     addAndMakeVisible(searchBox_);
 
     addAndMakeVisible(table_);
     table_.setModel(this);
     table_.addMouseListener(this, true);
-    table_.setColour(juce::ListBox::backgroundColourId,      Color::tableBackground);
-    table_.setColour(juce::TableListBox::backgroundColourId, Color::tableBackground);
+    // Transparent so LibraryTableComponent::paint() can draw the full-height stripes.
+    table_.setColour(juce::ListBox::backgroundColourId,      juce::Colours::transparentBlack);
+    table_.setColour(juce::TableListBox::backgroundColourId, juce::Colours::transparentBlack);
     table_.setRowHeight(rowHeight);
     table_.setMultipleSelectionEnabled(true);
     table_.getViewport()->setScrollBarsShown(true, false);
@@ -41,20 +43,14 @@ void LibraryTableComponent::buildTable()
     hdr.setColour(juce::TableHeaderComponent::textColourId,       Color::textSecondary);
     hdr.setColour(juce::TableHeaderComponent::outlineColourId,    Color::border);
 
-    hdr.addColumn("Title",  colIdTitle,  colWidthTitle,  80, 600,
-                  juce::TableHeaderComponent::defaultFlags);
-    hdr.addColumn("Artist", colIdArtist, colWidthArtist, 60, 400,
-                  juce::TableHeaderComponent::defaultFlags);
-    hdr.addColumn("Album",  colIdAlbum,  colWidthAlbum,  60, 400,
-                  juce::TableHeaderComponent::defaultFlags);
-    hdr.addColumn("Time",   colIdTime,   colWidthTime,   40, 80,
-                  juce::TableHeaderComponent::notSortable);
-    hdr.addColumn("BPM",    colIdBpm,    colWidthBpm,    40, 80,
-                  juce::TableHeaderComponent::notSortable);
-    hdr.addColumn("Key",    colIdKey,    colWidthKey,    40, 70,
-                  juce::TableHeaderComponent::notSortable);
-    hdr.addColumn("Plays",  colIdPlays,  colWidthPlays,  40, 80,
-                  juce::TableHeaderComponent::notSortable);
+    const auto flags = juce::TableHeaderComponent::defaultFlags;
+    hdr.addColumn("Title",  colIdTitle,  colWidthTitle,  80, 600, flags);
+    hdr.addColumn("Artist", colIdArtist, colWidthArtist, 60, 400, flags);
+    hdr.addColumn("Album",  colIdAlbum,  colWidthAlbum,  60, 400, flags);
+    hdr.addColumn("Time",   colIdTime,   colWidthTime,   40, 80,  flags);
+    hdr.addColumn("BPM",    colIdBpm,    colWidthBpm,    40, 80,  flags);
+    hdr.addColumn("Key",    colIdKey,    colWidthKey,    40, 70,  flags);
+    hdr.addColumn("Plays",  colIdPlays,  colWidthPlays,  40, 80,  flags);
 }
 
 void LibraryTableComponent::applyFilter()
@@ -79,7 +75,64 @@ void LibraryTableComponent::applyFilter()
         }
     }
 
+    applySort();
+    refreshPlayingIndex();
+    table_.updateContent();
+    table_.repaint();
+}
+
+void LibraryTableComponent::refreshPlayingIndex()
+{
     playingIndex_ = -1;
+    if (playingFile_.getFullPathName().isEmpty()) return;
+
+    for (int i = 0; i < static_cast<int>(filteredTracks_.size()); ++i)
+    {
+        if (filteredTracks_[static_cast<size_t>(i)]->file == playingFile_)
+        {
+            playingIndex_ = i;
+            return;
+        }
+    }
+}
+
+void LibraryTableComponent::applySort()
+{
+    if (sortColumnId_ == 0 || filteredTracks_.size() < 2) return;
+
+    const int  col = sortColumnId_;
+    const bool fwd = sortForwards_;
+
+    auto cmp = [col](const TrackInfo* a, const TrackInfo* b) -> int {
+        switch (col)
+        {
+            case colIdTitle:  return a->displayTitle().compareIgnoreCase(b->displayTitle());
+            case colIdArtist: return a->artist.compareIgnoreCase(b->artist);
+            case colIdAlbum:  return a->album.compareIgnoreCase(b->album);
+            case colIdTime:   return (a->durationSecs < b->durationSecs) ? -1
+                                  : (a->durationSecs > b->durationSecs) ?  1 : 0;
+            case colIdBpm:    return (a->bpm          < b->bpm)          ? -1
+                                  : (a->bpm          > b->bpm)          ?  1 : 0;
+            case colIdKey:    return a->musicalKey.compareIgnoreCase(b->musicalKey);
+            case colIdPlays:  return (a->playCount    < b->playCount)    ? -1
+                                  : (a->playCount    > b->playCount)    ?  1 : 0;
+            default:          return 0;
+        }
+    };
+
+    std::stable_sort(filteredTracks_.begin(), filteredTracks_.end(),
+        [&cmp, fwd](const TrackInfo* a, const TrackInfo* b) {
+            const int c = cmp(a, b);
+            return fwd ? (c < 0) : (c > 0);
+        });
+}
+
+void LibraryTableComponent::sortOrderChanged(int newSortColumnId, bool isForwards)
+{
+    sortColumnId_ = newSortColumnId;
+    sortForwards_ = isForwards;
+    applySort();
+    refreshPlayingIndex();
     table_.updateContent();
     table_.repaint();
 }
@@ -150,9 +203,10 @@ void LibraryTableComponent::clearTracks()
     table_.repaint();
 }
 
-void LibraryTableComponent::setPlayingIndex(int index)
+void LibraryTableComponent::setPlayingFile(const juce::File& file)
 {
-    playingIndex_ = index;
+    playingFile_ = file;
+    refreshPlayingIndex();
     table_.repaint();
 }
 
@@ -160,6 +214,12 @@ void LibraryTableComponent::setShowHidden(bool show)
 {
     showHidden_ = show;
     applyFilter();
+}
+
+void LibraryTableComponent::setSearchPlaceholder(const juce::String& viewName)
+{
+    searchBox_.setTextToShowWhenEmpty("Search " + viewName + "...", Color::textDim);
+    searchBox_.repaint();
 }
 
 void LibraryTableComponent::resized()
@@ -172,6 +232,22 @@ void LibraryTableComponent::resized()
 void LibraryTableComponent::paint(juce::Graphics& g)
 {
     g.fillAll(Color::tableBackground);
+
+    // Draw full-height alternating stripes behind the table so the pattern
+    // continues into the empty area below the last row. Actual row backgrounds
+    // painted by paintRowBackground() are opaque and sit on top of these stripes,
+    // but where no rows exist the stripes show through the transparent table background.
+    const int headerH = table_.getHeader().getHeight();
+    const int stripeTop = table_.getY() + headerH;
+    int y = stripeTop;
+    int row = 0;
+    while (y < getHeight())
+    {
+        g.setColour(row % 2 == 0 ? Color::tableBackground : Color::tableRowAlt);
+        g.fillRect(table_.getX(), y, table_.getWidth(), rowHeight);
+        y += rowHeight;
+        ++row;
+    }
 }
 
 int LibraryTableComponent::getNumRows()
@@ -201,7 +277,11 @@ void LibraryTableComponent::paintCell(juce::Graphics& g,
     if (row < 0 || row >= static_cast<int>(filteredTracks_.size())) return;
 
     const auto& t = *filteredTracks_[static_cast<size_t>(row)];
-    const bool isPlaying = (row == playingIndex_);
+    // Green on *every* row whose file is the currently-playing file, so duplicate
+    // entries in a playlist all show as playing. The blue row-background highlight
+    // (in paintRowBackground) still only marks the first match, via playingIndex_.
+    const bool isPlaying = (playingFile_.getFullPathName().isNotEmpty()
+                            && t.file == playingFile_);
 
     if (isPlaying)
         g.setColour(Color::playingGreen);
@@ -307,6 +387,8 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
     if (anyVisible)  menu.addItem(2, "Hide from Library");
     if (anyHidden)   menu.addItem(3, "Unhide from Library");
     menu.addSeparator();
+    menu.addItem(6, "Add to Queue");
+    menu.addSeparator();
     menu.addItem(4, "Analyze for Key and BPM");
     menu.addItem(5, "Edit Song Info");
 
@@ -323,6 +405,8 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
                 { if (onAnalyzeRequested) onAnalyzeRequested(selectedTracks); }
             else if (result == 5)
                 { if (onEditRequested) onEditRequested(clickedTrack); }
+            else if (result == 6)
+                { if (onAddToQueueRequested) onAddToQueueRequested(selectedTracks); }
         });
 }
 
