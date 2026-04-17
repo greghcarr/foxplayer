@@ -18,6 +18,11 @@ public:
         laf.setColour(juce::ScrollBar::trackColourId,      juce::Colours::transparentBlack);
         laf.setColour(juce::ScrollBar::backgroundColourId, juce::Colours::transparentBlack);
 
+        // App-wide typeface: use the native macOS system font (SF Pro) for the
+        // most "first-party" look. Every juce::Font() created without an
+        // explicit typeface falls through to this default.
+        laf.setDefaultSansSerifTypefaceName("Helvetica Neue");
+
         // Splash: transparent window, white Foxwhelp title with thick black outline.
         splashWindow_ = std::make_unique<FoxPlayer::SplashWindow>();
 

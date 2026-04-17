@@ -18,6 +18,12 @@ public:
     void trackStarted (const TrackInfo& track);
     void trackAnalysed(const TrackInfo& track);
 
+    // Apple Music lookup entries share the same table; the status column shows
+    // the lookup state and the BPM/Key columns are blank for lookup rows.
+    void lookupQueued   (const TrackInfo& track);
+    void lookupStarted  (const TrackInfo& track);
+    void lookupCompleted(const TrackInfo& track, const juce::String& summary);
+
     // juce::Component
     void resized() override;
     void paint(juce::Graphics&) override;
@@ -28,19 +34,22 @@ public:
     void paintCell(juce::Graphics&, int row, int col, int w, int h, bool selected) override;
 
 private:
-    enum class Status { Queued, Analyzing, Done };
+    enum class Type   { Analysis, Lookup };
+    enum class Status { Queued, Running, Done };
 
     struct Entry
     {
         juce::File   file;
         juce::String title;
         juce::String artist;
+        Type         type   { Type::Analysis };
         Status       status { Status::Queued };
         double       bpm    { 0.0 };
         juce::String key;
+        juce::String lookupSummary;   // populated for completed lookup rows
     };
 
-    int findEntryIndex(const juce::File& file) const;
+    int  findEntryIndex(const juce::File& file, Type type) const;
     void scrollToRow(int row);
 
     std::vector<Entry>    entries_;

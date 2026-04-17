@@ -30,6 +30,8 @@ private:
     juce::Label genreLabel_    { {}, "Genre" };
     juce::Label yearLabel_     { {}, "Year" };
     juce::Label trackNumLabel_ { {}, "Track #" };
+    juce::Label bpmLabel_      { {}, "BPM" };
+    juce::Label keyLabel_      { {}, "Key" };
     juce::Label fileLabel_;
 
     juce::TextEditor titleEdit_;
@@ -38,6 +40,8 @@ private:
     juce::TextEditor genreEdit_;
     juce::TextEditor yearEdit_;
     juce::TextEditor trackNumEdit_;
+    juce::TextEditor bpmEdit_;
+    juce::TextEditor keyEdit_;
 
     juce::TextButton saveButton_   { "Save" };
     juce::TextButton cancelButton_ { "Cancel" };

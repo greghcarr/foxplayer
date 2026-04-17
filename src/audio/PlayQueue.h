@@ -38,6 +38,14 @@ public:
 
     const std::vector<TrackInfo>& tracks() const { return tracks_; }
 
+    // Returns the original (un-shuffled) track order if shuffle is on, or the
+    // live track list otherwise. Used when persisting the queue so the user's
+    // un-shuffle mapping is preserved across sessions.
+    const std::vector<TrackInfo>& originalTracks() const
+    {
+        return isShuffled_ ? originalTracks_ : tracks_;
+    }
+
     // Shuffle all tracks after the current index. Saves original order for restoration.
     void shuffleRemaining();
     // Restore the original pre-shuffle order, keeping the current track at its original position.

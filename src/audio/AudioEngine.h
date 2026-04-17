@@ -22,6 +22,10 @@ public:
     // Loads and immediately plays the given track.
     void play(const TrackInfo& track);
 
+    // Loads the track and seeks to the given elapsed seconds, but stays paused
+    // (does not start the transport). Used to restore a persisted session.
+    void prepareTrackPaused(const TrackInfo& track, double elapsedSeconds);
+
     void pause();
     void resume();
     void stop();

@@ -32,6 +32,14 @@ public:
     // Each pair is { sidebarId, displayName }.
     void setPlaylists(const std::vector<std::pair<int, juce::String>>& playlists);
 
+    // Replaces the items shown under the Artists section.
+    // Each pair is { sidebarId, displayName }.
+    void setArtists(const std::vector<std::pair<int, juce::String>>& artists);
+
+    // Replaces the items shown under the Albums section.
+    // Each pair is { sidebarId, displayName }.
+    void setAlbums(const std::vector<std::pair<int, juce::String>>& albums);
+
     void paint(juce::Graphics& g) override;
     void resized() override;
     void mouseDown(const juce::MouseEvent& e) override;
@@ -64,7 +72,7 @@ private:
     void layoutItems();
     void selectId(int id);
     void drawDisclosureTriangle(juce::Graphics& g,
-                                juce::Rectangle<int> headerBounds,
+                                float x, int centreY,
                                 bool collapsed) const;
 
     // Returns the sidebar ID of the playlist item at pos, or -1 if none.
@@ -80,6 +88,12 @@ private:
     int                  editingItemId_  { -1 };
     juce::String         editingOriginalName_;
     std::unique_ptr<juce::TextEditor> inlineEditor_;
+
+    // Pre-loaded SVG drawables for row icons. Tinted lazily per-paint.
+    std::unique_ptr<juce::Drawable> musicIconDrawable_;
+    std::unique_ptr<juce::Drawable> playlistIconDrawable_;
+    std::unique_ptr<juce::Drawable> artistIconDrawable_;
+    std::unique_ptr<juce::Drawable> albumIconDrawable_;
 
     static constexpr int sectionHeaderH = 30;
     static constexpr int itemH          = 36;

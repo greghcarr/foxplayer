@@ -35,6 +35,7 @@ target_sources(FoxPlayer PRIVATE
     src/analysis/BpmDetector.cpp
     src/analysis/KeyDetector.cpp
     src/analysis/AnalysisEngine.cpp
+    src/analysis/AppleMusicLookup.cpp
     src/library/LibraryScanner.cpp
     src/library/LibraryTableComponent.cpp
     src/library/PlaylistStore.cpp
@@ -97,6 +98,11 @@ juce_add_binary_data(FoxPlayerIcons
         resources/icons/speaker-high-fill.svg
         resources/icons/speaker-x-fill.svg
         resources/icons/queue-fill.svg
+        resources/icons/pushpin-simple-fill.svg
+        resources/icons/music-notes-fill.svg
+        resources/icons/list-bullets-fill.svg
+        resources/icons/user-fill.svg
+        resources/icons/vinyl-record-fill.svg
         resources/icons/caret-double-right-fill.svg
         resources/fonts/Foxwhelp-Regular.ttf
         resources/app-icon.png

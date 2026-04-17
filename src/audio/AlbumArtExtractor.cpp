@@ -28,6 +28,15 @@ juce::Image AlbumArtExtractor::extractFromFile(const juce::File& file)
         std::free(raw);
     }
 
+    // Per-track sidecar art written by the Apple Music lookup task.
+    const juce::File parent = file.getParentDirectory();
+    const juce::File artSidecar = parent.getChildFile("." + file.getFileName() + ".foxp-art.jpg");
+    if (artSidecar.existsAsFile())
+    {
+        auto img = juce::ImageFileFormat::loadFrom(artSidecar);
+        if (img.isValid()) return img;
+    }
+
     // Fall back to common cover art filenames in the same directory.
     const juce::File dir = file.getParentDirectory();
     static const char* names[] = { "cover", "folder", "artwork", "album", "front", nullptr };

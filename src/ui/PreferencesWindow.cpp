@@ -15,7 +15,7 @@ AudioPreferencesPanel::AudioPreferencesPanel(juce::AudioDeviceManager& dm)
 {
     deviceLabel_.setText("Output Device", juce::dontSendNotification);
     deviceLabel_.setColour(juce::Label::textColourId, Color::textSecondary);
-    deviceLabel_.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
+    deviceLabel_.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)));
     addAndMakeVisible(deviceLabel_);
 
     deviceCombo_.setColour(juce::ComboBox::backgroundColourId, Color::headerBackground);
@@ -232,7 +232,7 @@ void PreferencesComponent::paint(juce::Graphics& g)
         }
 
         g.setColour(selected ? Color::textPrimary : Color::textSecondary);
-        g.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
+        g.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)));
         g.drawText(item.label,
                    item.bounds.reduced(16, 0),
                    juce::Justification::centredLeft,
@@ -243,7 +243,7 @@ void PreferencesComponent::paint(juce::Graphics& g)
     if (current_ == Category::Library)
     {
         g.setColour(Color::textDim);
-        g.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)).italicised());
+        g.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)).italicised());
         g.drawText("Library settings coming soon.",
                    juce::Rectangle<int>(sidebarWidth, 0,
                                         getWidth() - sidebarWidth, getHeight()),

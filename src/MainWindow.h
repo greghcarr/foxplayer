@@ -30,9 +30,16 @@ public:
 #endif
         setVisible(true);
 
+        // macOS app menu extras: Preferences sits at the top of the FoxPlayer
+        // menu, just above the automatic "Services" item and its divider.
+        juce::PopupMenu appleMenuExtras;
+        appleMenuExtras.addCommandItem(&mainComponent_->commandManager(),
+                                        MainComponent::cmdPreferences,
+                                        "Preferences...");
+
         // Wire up the macOS native menu bar.
         juce::MenuBarModel::setMacMainMenu(mainComponent_.get(),
-                                           nullptr,
+                                           &appleMenuExtras,
                                            "Hide FoxPlayer");
     }
 
@@ -46,19 +53,12 @@ public:
         juce::JUCEApplication::getInstance()->systemRequestedQuit();
     }
 
-    // Title bar is blank at normal sizes (the app already shows "FoxPlayer" in
-    // the Dock + app menu), but when the window shrinks to its compact "mini
-    // player" dimensions the library disappears, so we put the name back into
-    // the title bar to keep the window identifiable.
+    // "FoxPlayer" stays in the title bar at every window size for now.
     void resized() override
     {
         juce::DocumentWindow::resized();
-
-        const bool compact = getWidth()  < Constants::miniModeWidth
-                          || getHeight() < Constants::compactHeight;
-        const juce::String want = compact ? "FoxPlayer" : juce::String();
-        if (getName() != want)
-            setName(want);
+        if (getName() != "FoxPlayer")
+            setName("FoxPlayer");
     }
 
     MainComponent* getMainComponent() const { return mainComponent_.get(); }

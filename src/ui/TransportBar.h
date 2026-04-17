@@ -13,10 +13,14 @@ namespace FoxPlayer
 class TransportButton : public juce::Component
 {
 public:
-    enum class Icon { Prev, Play, Pause, Next, Shuffle, Repeat };
+    enum class Icon { Prev, Play, Pause, Next, Shuffle, Repeat, Pin };
 
     Icon icon        { Icon::Play };
     int  toggleState { 0 };   // 0=off, 1=on, 2=on-alt (repeat-one)
+    // When true, the button is visibly "off" (dim grey) in toggleState 0 and
+    // "on" (chrome + red icon) when toggleState > 0. When false, the button
+    // always uses the chrome/black look (e.g. play/prev/next have no off state).
+    bool toggleStyle { false };
     std::function<void()> onClick;
 
     TransportButton()
@@ -65,6 +69,9 @@ public:
     // Resets the shuffle button toggle state (called externally when queue is replaced).
     void setShuffleOn(bool on);
 
+    // Sets the repeat button state. 0=off, 1=repeat-all, 2=repeat-one.
+    void setRepeatMode(int mode);
+
     // Callbacks
     std::function<void()>    onPrevClicked;
     std::function<void()>    onNextClicked;
@@ -76,14 +83,25 @@ public:
     // Repeat: 0=off, 1=repeat-all, 2=repeat-one.
     std::function<void(bool)> onShuffleToggled;
     std::function<void(int)>  onRepeatToggled;
+    // Fired with the new 0..1 slider value after the user adjusts the volume.
+    // Does NOT fire for internal slider updates (mute/unmute).
+    std::function<void(double)> onVolumeChanged;
+
+    // Apply a persisted volume without firing onVolumeChanged. Call once at
+    // startup after wiring up the callback.
+    void setInitialVolume(double value);
 
     // juce::Component
     void paint(juce::Graphics& g) override;
     void resized() override;
+    juce::MouseCursor getMouseCursor() override;
 
 private:
     void timerCallback() override;
     void updateDisplay();
+    // Apply reduced alpha to the volume slider when it's silent (muted or
+    // manually set to zero), full alpha otherwise.
+    void refreshVolumeAlpha();
 
     juce::String formatSeconds(double secs) const;
 
@@ -105,7 +123,19 @@ private:
     TransportButton nextButton_;
     TransportButton repeatButton_;
 
-    juce::Slider volumeSlider_;
+    // Custom slider LookAndFeel that overlays a dark-grey "pressed" dot on the
+    // thumb while the user is dragging.
+    struct DraggingDotSliderLnF : public juce::LookAndFeel_V4
+    {
+        void drawLinearSlider(juce::Graphics& g,
+                              int x, int y, int width, int height,
+                              float sliderPos, float minPos, float maxPos,
+                              juce::Slider::SliderStyle style,
+                              juce::Slider& slider) override;
+    };
+
+    DraggingDotSliderLnF volumeSliderLnF_;
+    juce::Slider         volumeSlider_;
 
     juce::Label  elapsedLabel_;
     juce::Label  totalLabel_;
@@ -131,6 +161,10 @@ private:
 
     juce::String         playingFromName_;
     int                  playingFromSidebarId_ { 1 };
+
+    // Millisecond timestamp when the compact-line marquee started its current
+    // cycle. Reset on setCurrentTrack so each new track scrolls from the start.
+    juce::uint32 compactScrollStartMs_ { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TransportBar)
 };

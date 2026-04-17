@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Constants.h"
 #include "audio/AudioEngine.h"
 #include "audio/PlayQueue.h"
 #include "analysis/AnalysisEngine.h"
+#include "analysis/AppleMusicLookup.h"
 #include "library/LibraryScanner.h"
 #include "library/LibraryTableComponent.h"
 #include "library/PlaylistStore.h"
@@ -13,7 +15,9 @@
 #include "ui/AnalysisLogWindow.h"
 #include "ui/AutoHideViewport.h"
 #include "ui/PreferencesWindow.h"
+#include "ui/LoadingIndicator.h"
 #include <JuceHeader.h>
+#include <map>
 
 namespace FoxPlayer
 {
@@ -50,6 +54,16 @@ public:
 
     juce::ApplicationCommandManager& commandManager() { return commandManager_; }
 
+    enum CommandIDs
+    {
+        cmdChooseFolder    = 0x1001,
+        cmdShowHidden      = 0x1002,
+        cmdShowAnalysisLog = 0x1003,
+        cmdPreferences     = 0x1004,
+        cmdAlwaysOnTop     = 0x1005,
+        cmdFocusSearch     = 0x1006,
+    };
+
 private:
     void showFolderChooser();
     void loadMusicFolder(const juce::File& folder);
@@ -67,12 +81,24 @@ private:
     void showSongInfoEditor(const TrackInfo& track);
     void toggleAnalysisLog();
     void showPreferences();
+    void toggleAlwaysOnTop();
+    void applyAlwaysOnTop();
 
     // Library view management
     void updateTrackInLibrary(const TrackInfo& updated);
     void refreshCurrentView();
     void showSidebarItem(int sidebarId);
+    // Updates the library table's "now playing" row so it only highlights the
+    // track when the active view matches where playback was initiated from.
+    void updatePlayingHighlight();
     void refreshSidebarPlaylists();
+    // Recomputes the ARTISTS sidebar section from fullLibrary_. Each unique
+    // artist gets an id in the [2000, 2999] range, assigned by sorted order.
+    void refreshSidebarArtists();
+    // Recomputes the ALBUMS sidebar section from fullLibrary_. Each unique
+    // {artist, album} pair gets an id in the [3000, 3999] range, assigned
+    // by sorted "[ARTIST] - [ALBUM]" order.
+    void refreshSidebarAlbums();
     void incrementPlayCount(const juce::File& file);
 
     // Drag-and-drop: add tracks to a playlist, with duplicate warning for single tracks.
@@ -84,6 +110,12 @@ private:
     // Wires AudioEngine callbacks to UI.
     void setupAudioEngineCallbacks();
 
+    // Session persistence. Saved state covers the queue, active sidebar view,
+    // shuffle/repeat toggles, current track, and elapsed playback time.
+    void saveSessionState();
+    void saveSessionElapsed();
+    void restoreSessionState();
+
     // juce::Timer: periodic orphan check
     void timerCallback() override;
 
@@ -91,6 +123,7 @@ private:
     PlayQueue              queue_;
     LibraryScanner         scanner_;
     AnalysisEngine         analysisEngine_;
+    AppleMusicLookup       appleMusicLookup_;
     SidebarComponent       sidebar_;
     AutoHideViewport       sidebarViewport_;
     LibraryTableComponent  libraryTable_;
@@ -99,15 +132,61 @@ private:
 
     juce::Label            emptyPromptLabel_;
     juce::TextButton       chooseFolderButton_ { "Choose Music Folder" };
+    LoadingIndicator       loadingIndicator_;
     juce::DrawableButton   queueButton_ { "queueToggle", juce::DrawableButton::ImageFitted };
+    TransportButton        pinButton_;
+
+    // Thin draggable component sitting at the right edge of the sidebar. Drag
+    // horizontally to resize the sidebar between "icons only" and half window.
+    class SidebarDivider : public juce::Component
+    {
+    public:
+        std::function<void(int)> onDragged;     // new proposed sidebar width
+        std::function<int()>     currentWidth;
+
+        SidebarDivider()
+        {
+            setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+        }
+
+        void mouseDown(const juce::MouseEvent&) override
+        {
+            startWidth_ = currentWidth ? currentWidth() : 0;
+        }
+
+        void mouseDrag(const juce::MouseEvent& e) override
+        {
+            if (onDragged)
+                onDragged(startWidth_ + e.getDistanceFromDragStartX());
+        }
+
+    private:
+        int startWidth_ { 0 };
+    };
+    SidebarDivider        sidebarDivider_;
 
     bool                   queueVisible_    { false };
     bool                   shuffleOn_       { false };
     int                    repeatMode_      { 0 };   // 0=off, 1=repeat-all, 2=repeat-one
+    bool                   alwaysOnTop_     { false };
     int                    activeSidebarId_ { 1 };
+    int                    sidebarWidth_    { Constants::sidebarWidth };
     std::vector<TrackInfo> fullLibrary_;
+    // sidebarId (2000..2999) -> artist name, rebuilt by refreshSidebarArtists().
+    std::map<int, juce::String> artistIdToName_;
+    struct AlbumKey { juce::String artist; juce::String album; };
+    // sidebarId (3000..3999) -> {artist, album}, rebuilt by refreshSidebarAlbums().
+    std::map<int, AlbumKey> albumIdToInfo_;
     juce::File             currentMusicFolder_;
     juce::ApplicationProperties   appProperties_;
+    // Set while restoreSessionState is running so change callbacks don't try
+    // to re-save the half-applied state.
+    bool                   sessionRestoring_ { false };
+    // Set once restoreSessionState has completed so saveSessionState becomes
+    // a no-op until then (prevents the empty startup state from clobbering
+    // the persisted session before we've had a chance to read it back).
+    bool                   sessionRestored_  { false };
+
     std::unique_ptr<PlaylistStore>      playlistStore_;
     std::unique_ptr<AnalysisLogWindow>  analysisLogWindow_;
     std::unique_ptr<PreferencesWindow>  preferencesWindow_;

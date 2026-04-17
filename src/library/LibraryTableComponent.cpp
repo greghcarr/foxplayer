@@ -12,7 +12,7 @@ static constexpr int searchBarHeight = 30;
 LibraryTableComponent::LibraryTableComponent()
 {
     // Search box
-    searchBox_.setTextToShowWhenEmpty("Search All Music...", Color::textDim);
+    searchBox_.setTextToShowWhenEmpty("Search All Music... (Cmd-F)", Color::textDim);
     searchBox_.setFont(juce::Font(14.0f));
     searchBox_.setColour(juce::TextEditor::backgroundColourId, Color::headerBackground);
     searchBox_.setColour(juce::TextEditor::textColourId,       Color::textPrimary);
@@ -32,6 +32,16 @@ LibraryTableComponent::LibraryTableComponent()
     table_.setMultipleSelectionEnabled(true);
     table_.getViewport()->setScrollBarsShown(true, false);
 
+    // Give the vertical scrollbar a solid backdrop that matches the sidebar
+    // scrollbar's look. Without this the scrollbar's transparent track lets
+    // the alternating row colours show through, which creates a jarring
+    // static-striped effect while the rows beneath scroll past. Both the
+    // background and track colours need overriding because the app-wide
+    // LookAndFeel sets both to transparent.
+    auto& tableVsb = table_.getVerticalScrollBar();
+    tableVsb.setColour(juce::ScrollBar::backgroundColourId, Color::headerBackground);
+    tableVsb.setColour(juce::ScrollBar::trackColourId,      Color::headerBackground);
+
     buildTable();
     applyFilter();
 }
@@ -44,13 +54,156 @@ void LibraryTableComponent::buildTable()
     hdr.setColour(juce::TableHeaderComponent::outlineColourId,    Color::border);
 
     const auto flags = juce::TableHeaderComponent::defaultFlags;
-    hdr.addColumn("Title",  colIdTitle,  colWidthTitle,  80, 600, flags);
+    // Title is always visible; stripping appearsOnColumnMenu keeps the user
+    // from being able to uncheck it in the header's column chooser menu.
+    const auto titleFlags = flags & ~juce::TableHeaderComponent::appearsOnColumnMenu;
+    // "#" column is added/removed by setViewMode depending on context. Not
+    // added here so it doesn't appear in the column menu in Library/Artist
+    // views where no sane "#" value exists.
+    hdr.addColumn("Title",  colIdTitle,  colWidthTitle,  80, 600, titleFlags);
     hdr.addColumn("Artist", colIdArtist, colWidthArtist, 60, 400, flags);
     hdr.addColumn("Album",  colIdAlbum,  colWidthAlbum,  60, 400, flags);
+    hdr.addColumn("Genre",  colIdGenre,  colWidthGenre,  60, 300, flags);
     hdr.addColumn("Time",   colIdTime,   colWidthTime,   40, 80,  flags);
     hdr.addColumn("BPM",    colIdBpm,    colWidthBpm,    40, 80,  flags);
     hdr.addColumn("Key",    colIdKey,    colWidthKey,    40, 70,  flags);
     hdr.addColumn("Plays",  colIdPlays,  colWidthPlays,  40, 80,  flags);
+    hdr.addColumn("Format", colIdFormat, colWidthFormat, 40, 100, flags);
+}
+
+void LibraryTableComponent::setViewMode(ViewMode mode)
+{
+    if (viewMode_ == mode) return;
+    viewMode_ = mode;
+
+    auto& hdr = table_.getHeader();
+    const bool wantIndexColumn = (mode == ViewMode::Album || mode == ViewMode::Playlist);
+    const bool haveIndexColumn = (hdr.getIndexOfColumnId(colIdRow, false) >= 0);
+
+    if (wantIndexColumn && ! haveIndexColumn)
+    {
+        // Insert "#" as the first column so it lives to the left of Title.
+        hdr.addColumn("#", colIdRow, colWidthRow, 30, 80,
+                      juce::TableHeaderComponent::defaultFlags, 0);
+    }
+    else if (! wantIndexColumn && haveIndexColumn)
+    {
+        hdr.removeColumn(colIdRow);
+    }
+
+    // If the user was sorting by "#" and the column just disappeared, drop
+    // the sort so rows fall back to their setTracks() order.
+    if (! wantIndexColumn && sortColumnId_ == colIdRow)
+    {
+        sortColumnId_ = 0;
+        applyFilter();
+    }
+
+    table_.repaint();
+}
+
+void LibraryTableComponent::applyPlaylistDefaultSort()
+{
+    if (viewMode_ != ViewMode::Playlist) return;
+    table_.getHeader().setSortColumnId(colIdRow, true);
+}
+
+bool LibraryTableComponent::isInterestedInDragSource(const SourceDetails& details)
+{
+    // Only accept drops from this same table, only in playlist mode, and only
+    // when the user is currently sorted by the "#" column ascending. Any
+    // other sort would make the drop position meaningless. Album view is
+    // read-only; dragging doesn't reorder it.
+    if (viewMode_ != ViewMode::Playlist) return false;
+    if (sortColumnId_ != colIdRow) return false;
+    if (! sortForwards_) return false;
+    if (details.sourceComponent == nullptr) return false;
+    // startDragging passes this (LibraryTableComponent) as the source, so the
+    // drop is ours if the source IS us or one of our children.
+    return details.sourceComponent.get() == this
+        || isParentOf(details.sourceComponent.get());
+}
+
+namespace
+{
+    // Snap a vertical point within a list of equal-height rows to the nearest
+    // row boundary. Returns the index that a drop at that point would insert
+    // at (0 = before first row, N = after last row).
+    int dropIndexFromY(int yFromContentTop, int rowH, int numRows)
+    {
+        if (rowH <= 0) return numRows;
+        if (yFromContentTop < 0) return 0;
+        return juce::jlimit(0, numRows, (yFromContentTop + rowH / 2) / rowH);
+    }
+}
+
+void LibraryTableComponent::itemDragEnter(const SourceDetails& details)
+{
+    itemDragMove(details);
+}
+
+void LibraryTableComponent::itemDragMove(const SourceDetails& details)
+{
+    // Pixel Y of the boundary between the row before the drop target and the
+    // one after, drawn so the user can see exactly where the dragged rows
+    // would land if they released now.
+    const auto posInTable = table_.getLocalPoint(this, details.localPosition);
+    const int rowH    = table_.getRowHeight();
+    const int headerH = table_.getHeader().getHeight();
+    const int viewY   = table_.getViewport()->getViewPositionY();
+    const int yFromContent = posInTable.getY() - headerH + viewY;
+    const int idx     = dropIndexFromY(yFromContent,
+                                       rowH,
+                                       static_cast<int>(filteredTracks_.size()));
+
+    // Convert the drop index back into a y in our local coords.
+    const int indicatorInTable = headerH + idx * rowH - viewY;
+    const int indicatorHere    = table_.getY() + indicatorInTable;
+    // Clamp to visible table region so the line doesn't float over the header
+    // or under the last row beyond the table bounds.
+    const int minY = table_.getY() + headerH;
+    const int maxY = table_.getBottom();
+    dropIndicatorY_ = juce::jlimit(minY, maxY, indicatorHere);
+    repaint();
+}
+
+void LibraryTableComponent::itemDragExit(const SourceDetails&)
+{
+    dropIndicatorY_ = -1;
+    repaint();
+}
+
+void LibraryTableComponent::paintOverChildren(juce::Graphics& g)
+{
+    if (dropIndicatorY_ < 0) return;
+
+    // Horizontal drop indicator spanning the table's body width.
+    const int x1 = table_.getX();
+    const int x2 = table_.getRight();
+    g.setColour(Color::accent);
+    g.fillRect(x1, dropIndicatorY_ - 1, x2 - x1, 2);
+}
+
+void LibraryTableComponent::itemDropped(const SourceDetails& details)
+{
+    dropIndicatorY_ = -1;
+    repaint();
+
+    if (! onReorderRequested) return;
+
+    juce::StringArray paths;
+    paths.addTokens(details.description.toString(), "\n", "");
+    if (paths.isEmpty()) return;
+
+    const auto posInTable = table_.getLocalPoint(this, details.localPosition);
+    const int rowH    = table_.getRowHeight();
+    const int headerH = table_.getHeader().getHeight();
+    const int yFromContent = posInTable.getY() - headerH + table_.getViewport()->getViewPositionY();
+    const int targetIndex  = dropIndexFromY(yFromContent,
+                                            rowH,
+                                            static_cast<int>(filteredTracks_.size()));
+
+    onReorderRequested(paths, targetIndex);
 }
 
 void LibraryTableComponent::applyFilter()
@@ -103,12 +256,28 @@ void LibraryTableComponent::applySort()
     const int  col = sortColumnId_;
     const bool fwd = sortForwards_;
 
-    auto cmp = [col](const TrackInfo* a, const TrackInfo* b) -> int {
+    auto cmp = [col, this](const TrackInfo* a, const TrackInfo* b) -> int {
         switch (col)
         {
+            case colIdRow:
+            {
+                // Playlist view: sort by each track's position in the backing
+                // tracks_ vector (setTracks() fills it in playlist order).
+                // Album view: sort by the static trackNumber tag.
+                if (viewMode_ == ViewMode::Album)
+                {
+                    return (a->trackNumber < b->trackNumber) ? -1
+                         : (a->trackNumber > b->trackNumber) ?  1 : 0;
+                }
+                const auto* base = tracks_.data();
+                const int ai = static_cast<int>(a - base);
+                const int bi = static_cast<int>(b - base);
+                return (ai < bi) ? -1 : (ai > bi) ? 1 : 0;
+            }
             case colIdTitle:  return a->displayTitle().compareIgnoreCase(b->displayTitle());
             case colIdArtist: return a->artist.compareIgnoreCase(b->artist);
             case colIdAlbum:  return a->album.compareIgnoreCase(b->album);
+            case colIdGenre:  return a->genre.compareIgnoreCase(b->genre);
             case colIdTime:   return (a->durationSecs < b->durationSecs) ? -1
                                   : (a->durationSecs > b->durationSecs) ?  1 : 0;
             case colIdBpm:    return (a->bpm          < b->bpm)          ? -1
@@ -116,6 +285,7 @@ void LibraryTableComponent::applySort()
             case colIdKey:    return a->musicalKey.compareIgnoreCase(b->musicalKey);
             case colIdPlays:  return (a->playCount    < b->playCount)    ? -1
                                   : (a->playCount    > b->playCount)    ?  1 : 0;
+            case colIdFormat: return a->file.getFileExtension().compareIgnoreCase(b->file.getFileExtension());
             default:          return 0;
         }
     };
@@ -218,14 +388,27 @@ void LibraryTableComponent::setShowHidden(bool show)
 
 void LibraryTableComponent::setSearchPlaceholder(const juce::String& viewName)
 {
-    searchBox_.setTextToShowWhenEmpty("Search " + viewName + "...", Color::textDim);
+    searchBox_.setTextToShowWhenEmpty("Search " + viewName + "... (Cmd-F)", Color::textDim);
     searchBox_.repaint();
+}
+
+void LibraryTableComponent::focusSearchBox()
+{
+    searchBox_.grabKeyboardFocus();
+    searchBox_.selectAll();
 }
 
 void LibraryTableComponent::resized()
 {
     auto bounds = getLocalBounds();
-    searchBox_.setBounds(bounds.removeFromTop(searchBarHeight).reduced(0, 2));
+
+    // Reserve a small gap at the right edge of the search bar so the always-
+    // on-top pin button (owned by MainComponent) can sit neatly next to it.
+    constexpr int rightReserve = 30;
+    auto searchRow = bounds.removeFromTop(searchBarHeight).reduced(0, 2);
+    searchRow.removeFromRight(rightReserve);
+    searchBox_.setBounds(searchRow);
+
     table_.setBounds(bounds);
 }
 
@@ -237,16 +420,29 @@ void LibraryTableComponent::paint(juce::Graphics& g)
     // continues into the empty area below the last row. Actual row backgrounds
     // painted by paintRowBackground() are opaque and sit on top of these stripes,
     // but where no rows exist the stripes show through the transparent table background.
-    const int headerH = table_.getHeader().getHeight();
-    const int stripeTop = table_.getY() + headerH;
+    // Stripes stop at the scrollbar's left edge: the scrollbar area gets a
+    // solid backdrop instead, otherwise these static stripes visibly fail to
+    // move when the user scrolls the rows beneath.
+    const int headerH     = table_.getHeader().getHeight();
+    const int stripeTop   = table_.getY() + headerH;
+    const int sbW         = table_.getVerticalScrollBar().getWidth();
+    const int stripeRight = table_.getRight() - sbW;
+    const int stripeW     = stripeRight - table_.getX();
+
     int y = stripeTop;
     int row = 0;
     while (y < getHeight())
     {
         g.setColour(row % 2 == 0 ? Color::tableBackground : Color::tableRowAlt);
-        g.fillRect(table_.getX(), y, table_.getWidth(), rowHeight);
+        g.fillRect(table_.getX(), y, stripeW, rowHeight);
         y += rowHeight;
         ++row;
+    }
+
+    if (sbW > 0)
+    {
+        g.setColour(Color::headerBackground);
+        g.fillRect(stripeRight, stripeTop, sbW, getHeight() - stripeTop);
     }
 }
 
@@ -262,8 +458,6 @@ void LibraryTableComponent::paintRowBackground(juce::Graphics& g,
     juce::ignoreUnused(w, h);
     if (selected)
         g.fillAll(Color::tableSelected);
-    else if (row == playingIndex_)
-        g.fillAll(Color::tableSelected.withAlpha(0.5f));
     else
         g.fillAll(row % 2 == 0 ? Color::tableBackground : Color::tableRowAlt);
 }
@@ -284,13 +478,13 @@ void LibraryTableComponent::paintCell(juce::Graphics& g,
                             && t.file == playingFile_);
 
     if (isPlaying)
-        g.setColour(Color::playingGreen);
+        g.setColour(Color::playingHighlight);
     else if (t.hidden)
         g.setColour(Color::textDim);
     else
         g.setColour(Color::textPrimary);
 
-    g.setFont(juce::Font(13.0f));
+    g.setFont(juce::Font(15.0f));
 
     const juce::String text = cellText(row, col);
     g.drawText(text, 4, 0, w - 8, h, juce::Justification::centredLeft, true);
@@ -301,13 +495,34 @@ juce::String LibraryTableComponent::cellText(int row, int colId) const
     const auto& t = *filteredTracks_[static_cast<size_t>(row)];
     switch (colId)
     {
+        case colIdRow:
+        {
+            // Album view: show the static track number tag. Playlist view:
+            // show the 1-based index in the backing tracks_ vector (set by
+            // setTracks in playlist order).
+            if (viewMode_ == ViewMode::Album)
+                return t.trackNumber > 0 ? juce::String(t.trackNumber) : juce::String();
+
+            const auto* base = tracks_.data();
+            const int idx = static_cast<int>(&t - base) + 1;
+            return juce::String(idx);
+        }
         case colIdTitle:  return t.displayTitle();
         case colIdArtist: return t.artist;
         case colIdAlbum:  return t.album;
+        case colIdGenre:  return t.genre;
         case colIdTime:   return t.formattedDuration();
         case colIdBpm:    return t.bpm > 0.0 ? juce::String(t.bpm, 1) : juce::String();
         case colIdKey:    return t.musicalKey;
         case colIdPlays:  return t.playCount > 0 ? juce::String(t.playCount) : juce::String();
+        case colIdFormat:
+        {
+            // Strip the leading dot and lowercase, e.g. ".MP3" -> "mp3".
+            juce::String ext = t.file.getFileExtension();
+            if (ext.startsWithChar('.'))
+                ext = ext.substring(1);
+            return ext.toLowerCase();
+        }
         default:          return {};
     }
 }
@@ -382,15 +597,17 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
     const TrackInfo clickedTrack = *filteredTracks_[static_cast<size_t>(row)];
 
     juce::PopupMenu menu;
+    menu.addItem(6, "Add to Queue");
+    menu.addSeparator();
+    menu.addItem(5, "Edit Song Info");
+    menu.addItem(8, "Clear Song Info");
+    menu.addItem(4, "Analyze for Key and BPM");
+    menu.addItem(7, "Look up on Apple Music");
+    menu.addSeparator();
     menu.addItem(1, "Show in Finder");
     menu.addSeparator();
     if (anyVisible)  menu.addItem(2, "Hide from Library");
     if (anyHidden)   menu.addItem(3, "Unhide from Library");
-    menu.addSeparator();
-    menu.addItem(6, "Add to Queue");
-    menu.addSeparator();
-    menu.addItem(4, "Analyze for Key and BPM");
-    menu.addItem(5, "Edit Song Info");
 
     menu.showMenuAsync(juce::PopupMenu::Options{}.withTargetScreenArea(
         juce::Rectangle<int>().withPosition(e.getScreenPosition())),
@@ -407,6 +624,10 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
                 { if (onEditRequested) onEditRequested(clickedTrack); }
             else if (result == 6)
                 { if (onAddToQueueRequested) onAddToQueueRequested(selectedTracks); }
+            else if (result == 7)
+                { if (onAppleMusicLookupRequested) onAppleMusicLookupRequested(selectedTracks); }
+            else if (result == 8)
+                { if (onClearInfoRequested) onClearInfoRequested(selectedTracks); }
         });
 }
 
@@ -468,7 +689,7 @@ void LibraryTableComponent::mouseDrag(const juce::MouseEvent& e)
         g.setColour(juce::Colour(0xff4a9eff));
         g.drawRoundedRectangle(dragImg.getBounds().toFloat().reduced(0.5f), 5.0f, 1.0f);
         g.setColour(juce::Colours::white);
-        g.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
+        g.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)));
         for (int i = 0; i < labels.size(); ++i)
             g.drawText(labels[i], padX, padY + i * lineH, imgW - padX * 2, lineH,
                        juce::Justification::centredLeft, true);

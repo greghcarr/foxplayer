@@ -9,7 +9,8 @@ namespace FoxPlayer
 {
 
 class LibraryTableComponent : public juce::Component,
-                               public juce::TableListBoxModel
+                               public juce::TableListBoxModel,
+                               public juce::DragAndDropTarget
 {
 public:
     LibraryTableComponent();
@@ -19,9 +20,24 @@ public:
     void appendTracks(const std::vector<TrackInfo>& tracks);
     void clearTracks();
 
-    // Updates the search box placeholder to "Search <viewName>..." so it
-    // reflects whatever sidebar item the user currently has open.
+    // Updates the search box placeholder to "Search <viewName>... (Cmd-F)"
+    // so it reflects whatever sidebar item the user currently has open.
     void setSearchPlaceholder(const juce::String& viewName);
+
+    // Current view mode. Controls whether the leftmost "#" column is present
+    // at all (added/removed from the header so it doesn't even appear in the
+    // column chooser menu), what value that column shows, and whether the
+    // user can drag rows to reorder.
+    enum class ViewMode { Library, Artist, Album, Playlist };
+    void setViewMode(ViewMode mode);
+
+    // Forces the table header to sort by the "#" column (ascending). Called
+    // from MainComponent whenever the user navigates into a playlist so it
+    // opens in the playlist's natural order by default.
+    void applyPlaylistDefaultSort();
+
+    // Moves keyboard focus into the search box, hooking Cmd-F from the main menu.
+    void focusSearchBox();
 
     // Updates analysis fields and hidden flag for a track matched by file path.
     void updateTrack(const TrackInfo& updated);
@@ -58,8 +74,29 @@ public:
     // Called when the user wants to edit a single track's metadata.
     std::function<void(TrackInfo)> onEditRequested;
 
+    // Called when the user chooses "Clear Song Info" for a set of tracks.
+    std::function<void(std::vector<TrackInfo>)> onClearInfoRequested;
+
     // Called when the user chooses "Add to Queue" from the context menu.
     std::function<void(std::vector<TrackInfo>)> onAddToQueueRequested;
+
+    // Called when the user chooses "Look up on Apple Music" from the context menu.
+    std::function<void(std::vector<TrackInfo>)> onAppleMusicLookupRequested;
+
+    // Called when the user drags rows within the table to reorder them. Only
+    // fires in playlist mode when the table is sorted by the "#" column
+    // (ascending). `paths` are the dragged file paths in dragged order;
+    // `targetIndex` is the insert position in the playlist (0 = top, N = end).
+    std::function<void(juce::StringArray paths, int targetIndex)> onReorderRequested;
+
+    // juce::DragAndDropTarget
+    bool isInterestedInDragSource(const SourceDetails&) override;
+    void itemDragEnter(const SourceDetails&) override;
+    void itemDragMove (const SourceDetails&) override;
+    void itemDragExit (const SourceDetails&) override;
+    void itemDropped  (const SourceDetails&) override;
+
+    void paintOverChildren(juce::Graphics&) override;
 
     // juce::Component
     void resized() override;
@@ -101,6 +138,10 @@ private:
     bool                     showHidden_   { false };
     int                      sortColumnId_ { 0 };     // 0 = unsorted
     bool                     sortForwards_ { true };
+    ViewMode                 viewMode_     { ViewMode::Library };
+    // Y position (in this component's coords) of the drop-indicator line
+    // shown during a playlist drag-to-reorder. -1 means no indicator.
+    int                      dropIndicatorY_ { -1 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryTableComponent)
 };

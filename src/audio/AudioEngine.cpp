@@ -49,6 +49,20 @@ void AudioEngine::play(const TrackInfo& track)
     if (onStateChanged) onStateChanged();
 }
 
+void AudioEngine::prepareTrackPaused(const TrackInfo& track, double elapsedSeconds)
+{
+    loadTrack(track);
+    if (!trackLoaded_) return;
+
+    const double len = transportSource_.getLengthInSeconds();
+    const double pos = juce::jlimit(0.0, juce::jmax(0.0, len), elapsedSeconds);
+    transportSource_.setPosition(pos);
+    paused_ = true;
+
+    if (onTrackStarted) onTrackStarted(currentTrack_);
+    if (onStateChanged) onStateChanged();
+}
+
 void AudioEngine::pause()
 {
     if (!trackLoaded_ || paused_) return;

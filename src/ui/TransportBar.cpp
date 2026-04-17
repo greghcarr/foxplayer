@@ -11,7 +11,6 @@ static constexpr int skipBtnD   = 38;   // diameter of prev/next circles
 static constexpr int playBtnD   = 46;   // diameter of play/pause circle
 static constexpr int seekH      = 6;
 static constexpr int pad        = 10;
-static constexpr float fadeRadius  = 260.0f; // horizontal extent of title-fade gradient
 
 // ----------------------------------------------------------------------------
 // TransportButton
@@ -26,13 +25,22 @@ void TransportButton::paint(juce::Graphics& g)
     const float cy = h * 0.5f;
     const float r  = d * 0.5f;
 
-    // Circle fill and icon color depend on toggle state.
+    // Circle fill and icon color. Toggleable buttons (shuffle/repeat/pin) are
+    // dim grey when off and light up chrome + red when on. Non-toggle buttons
+    // (play/pause/prev/next) always show the chrome look.
     juce::Colour fill, iconColor;
-    if (toggleState > 0)
+    if (toggleStyle && toggleState == 0)
     {
-        fill      = pressed_ ? juce::Colour(0xff707070)
-                  : hovered_ ? juce::Colour(0xffb0b0b0)
-                  :             juce::Colour(0xff989898);
+        fill      = pressed_ ? juce::Colour(0xff3a3a3a)
+                  : hovered_ ? juce::Colour(0xff666666)
+                  :             juce::Colour(0xff505050);
+        iconColor = juce::Colour(0xff909090);
+    }
+    else if (toggleStyle)
+    {
+        fill      = pressed_ ? juce::Colour(0xff989898)
+                  : hovered_ ? juce::Colour(0xffe2e2e2)
+                  :             juce::Colour(0xffc4c4c4);
         iconColor = juce::Colour(0xffdd3333);
     }
     else
@@ -67,6 +75,8 @@ void TransportButton::paint(juce::Graphics& g)
         else
             { svgData = BinaryData::repeatfill_svg;     svgSize = BinaryData::repeatfill_svgSize;     }
         break;
+    case Icon::Pin:
+        svgData = BinaryData::pushpinsimplefill_svg;    svgSize = BinaryData::pushpinsimplefill_svgSize; break;
     }
 
     if (svgData == nullptr) return;
@@ -139,14 +149,51 @@ static std::unique_ptr<juce::Drawable> loadSvgTinted(const char* data, int size,
     return nullptr;
 }
 
+void TransportBar::DraggingDotSliderLnF::drawLinearSlider(juce::Graphics& g,
+                                                           int x, int y, int width, int height,
+                                                           float sliderPos, float minPos, float maxPos,
+                                                           juce::Slider::SliderStyle style,
+                                                           juce::Slider& slider)
+{
+    juce::LookAndFeel_V4::drawLinearSlider(g, x, y, width, height,
+                                            sliderPos, minPos, maxPos, style, slider);
+
+    if (slider.isMouseButtonDown())
+    {
+        const float thumbR = static_cast<float>(getSliderThumbRadius(slider));
+        // V4's thumb is visibly smaller than its hit-radius, so use a tighter
+        // ratio than the seek bar's 0.5 so the dot stays well inside the thumb.
+        const float dotD   = thumbR * 0.6f;
+
+        float thumbX, thumbY;
+        if (style == juce::Slider::LinearVertical)
+        {
+            thumbX = x + width * 0.5f;
+            thumbY = sliderPos;
+        }
+        else
+        {
+            thumbX = sliderPos;
+            thumbY = y + height * 0.5f;
+        }
+
+        g.setColour(juce::Colour(0xff404040));
+        g.fillEllipse(thumbX - dotD * 0.5f, thumbY - dotD * 0.5f, dotD, dotD);
+    }
+}
+
 TransportBar::TransportBar(AudioEngine& engine)
     : engine_(engine)
 {
+    volumeSlider_.setLookAndFeel(&volumeSliderLnF_);
     shuffleButton_.icon   = TransportButton::Icon::Shuffle;
     prevButton_.icon      = TransportButton::Icon::Prev;
     playPauseButton_.icon = TransportButton::Icon::Play;
     nextButton_.icon      = TransportButton::Icon::Next;
     repeatButton_.icon    = TransportButton::Icon::Repeat;
+
+    shuffleButton_.toggleStyle = true;
+    repeatButton_.toggleStyle  = true;
 
     addAndMakeVisible(shuffleButton_);
     addAndMakeVisible(prevButton_);
@@ -162,13 +209,17 @@ TransportBar::TransportBar(AudioEngine& engine)
     volumeSlider_.setColour(juce::Slider::trackColourId,      Color::seekBarFill);
     volumeSlider_.setColour(juce::Slider::backgroundColourId, Color::seekBarTrack);
     volumeSlider_.setColour(juce::Slider::thumbColourId,      Color::textPrimary);
+    volumeSlider_.setMouseCursor(juce::MouseCursor::PointingHandCursor);
     volumeSlider_.onValueChange = [this] {
         if (muted_)
         {
             muted_ = false;
             repaint();
         }
-        engine_.setVolume(static_cast<float>(volumeSlider_.getValue()));
+        const double v = volumeSlider_.getValue();
+        engine_.setVolume(static_cast<float>(v));
+        if (onVolumeChanged) onVolumeChanged(v);
+        refreshVolumeAlpha();
         repaint();  // update speaker icon
     };
     addAndMakeVisible(volumeSlider_);
@@ -184,7 +235,7 @@ TransportBar::TransportBar(AudioEngine& engine)
     for (auto* lbl : { &elapsedLabel_, &totalLabel_ })
     {
         lbl->setColour(juce::Label::textColourId, Color::textSecondary);
-        lbl->setFont(juce::Font(juce::FontOptions().withHeight(11.0f)));
+        lbl->setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
         lbl->setInterceptsMouseClicks(false, false);
         addAndMakeVisible(lbl);
     }
@@ -225,6 +276,7 @@ TransportBar::TransportBar(AudioEngine& engine)
 TransportBar::~TransportBar()
 {
     stopTimer();
+    volumeSlider_.setLookAndFeel(nullptr);
 }
 
 void TransportBar::setCurrentTrack(const TrackInfo& track)
@@ -232,14 +284,37 @@ void TransportBar::setCurrentTrack(const TrackInfo& track)
     currentTrack_ = track;
     hasTrack_ = true;
     albumArt_ = AlbumArtExtractor::extractFromFile(track.file);
+    compactScrollStartMs_ = juce::Time::getMillisecondCounter();
     resized();
     updateDisplay();
+}
+
+void TransportBar::setInitialVolume(double value)
+{
+    value = juce::jlimit(0.0, 1.0, value);
+    volumeSlider_.setValue(value, juce::dontSendNotification);
+    engine_.setVolume(static_cast<float>(value));
+    muted_ = false;
+    refreshVolumeAlpha();
+    repaint();
+}
+
+void TransportBar::refreshVolumeAlpha()
+{
+    const bool silent = muted_ || volumeSlider_.getValue() <= 0.0;
+    volumeSlider_.setAlpha(silent ? 0.25f : 1.0f);
 }
 
 void TransportBar::setShuffleOn(bool on)
 {
     shuffleButton_.toggleState = on ? 1 : 0;
     shuffleButton_.repaint();
+}
+
+void TransportBar::setRepeatMode(int mode)
+{
+    repeatButton_.toggleState = juce::jlimit(0, 2, mode);
+    repeatButton_.repaint();
 }
 
 void TransportBar::setPlayingFrom(const juce::String& sourceName, int sourceSidebarId)
@@ -279,51 +354,117 @@ void TransportBar::paint(juce::Graphics& g)
     const float     infoAlpha = juce::jlimit(0.0f, 1.0f,
         (static_cast<float>(getWidth()) - fadeToW) / (fadeFromW - fadeToW));
 
+    // Measure the widest info-text line so the gradient can anchor its
+    // transparent-left edge just past the info text's right edge. That way
+    // the fade only starts to obscure the title/artist/source once the text
+    // is about to collide with the current-time label.
+    auto textWidth = [](const juce::Font& f, const juce::String& text) -> int {
+        juce::GlyphArrangement ga;
+        ga.addLineOfText(f, text, 0.0f, 0.0f);
+        return static_cast<int>(std::ceil(ga.getBoundingBox(0, -1, true).getWidth()));
+    };
+
+    // Title rendering depends on whether there's a real title tag or we're
+    // falling back to the filename. Real title -> italic, tag text only.
+    // Filename fallback -> regular weight, include the file extension.
+    const bool         hasRealTitle  = currentTrack_.title.isNotEmpty();
+    const juce::String titleText     = hasRealTitle
+                                           ? currentTrack_.title
+                                           : currentTrack_.file.getFileName();
+
+    const juce::Font titleFontBase   = juce::Font(juce::FontOptions().withHeight(17.0f));
+    const juce::Font titleFont       = titleFontBase;
+    const juce::Font artistFont      = juce::Font(juce::FontOptions().withHeight(15.0f));
+    const juce::Font noArtistFont    = juce::Font(juce::FontOptions().withHeight(15.0f)).italicised();
+    const juce::Font prefixFont      = juce::Font(juce::FontOptions().withHeight(15.0f)).italicised();
+    const juce::Font sourceFont(juce::FontOptions().withHeight(15.0f));
+
+    int infoMaxTextW = 0;
+    int prefixTextW  = 0;
+    int sourceTextW  = 0;
+    if (hasTrack_ && !infoAreaBounds_.isEmpty())
+    {
+        infoMaxTextW = textWidth(titleFont, titleText);
+        const bool noArtist = currentTrack_.artist.isEmpty();
+        infoMaxTextW = juce::jmax(infoMaxTextW,
+            noArtist ? textWidth(noArtistFont, juce::String("(no artist)"))
+                     : textWidth(artistFont,   currentTrack_.artist));
+        if (playingFromName_.isNotEmpty())
+        {
+            prefixTextW = textWidth(prefixFont, juce::String("Playing from: "));
+            sourceTextW = textWidth(sourceFont, playingFromName_);
+            infoMaxTextW = juce::jmax(infoMaxTextW, prefixTextW + sourceTextW);
+        }
+    }
+
+    // Gradient boundaries. Solid region spans current-time -> total-time. The
+    // left transparent edge is anchored to the info text's right edge (plus a
+    // small gap) so the fade only impinges on the info text when it's close to
+    // colliding with the current-time label. A minimum fade width keeps the
+    // transition smooth even when the text overruns.
+    float gradLeftTransparent = 0.0f, gradRightTransparent = 0.0f;
+    float gradLeftSolidX = 0.0f,      gradRightSolidX      = 0.0f;
+    bool  gradValid = false;
     if (hasTrack_)
     {
-        // Seek bar track + fill
-        g.setColour(Color::seekBarTrack);
-        g.fillRect(seekBarBounds_);
-        const double pos = draggingSeek_ ? seekDragPos_ : engine_.normalizedPosition();
-        const int fillW = static_cast<int>(pos * seekBarBounds_.getWidth());
+        constexpr float safeGap      = 6.0f;
+        constexpr float minFadeWidth = 24.0f;
+        constexpr float maxFadeWidth = 60.0f;
 
-        g.setColour(Color::seekBarFill);
-        g.fillRect(seekBarBounds_.withWidth(fillW));
+        const float pbCx = playPauseButton_.getBoundsInParent().toFloat().getCentreX();
+        gradLeftSolidX  = !seekBarBounds_.isEmpty()
+                              ? static_cast<float>(elapsedLabel_.getBounds().getX())
+                              : pbCx;
+        gradRightSolidX = !seekBarBounds_.isEmpty()
+                              ? static_cast<float>(totalLabel_.getBounds().getRight())
+                              : pbCx;
 
-        // Seek thumb: white circle at current position, enlarges while dragging.
-        const auto  seekF  = seekBarBounds_.toFloat();
-        const float thumbD = draggingSeek_ ? 16.0f : 12.0f;
-        const float thumbX = seekF.getX() + static_cast<float>(pos) * seekF.getWidth();
-        const float thumbY = seekF.getCentreY();
-        g.setColour(juce::Colours::white);
-        g.fillEllipse(thumbX - thumbD * 0.5f, thumbY - thumbD * 0.5f, thumbD, thumbD);
+        // Where we'd *like* the fade to start from the left: right after the
+        // info text (or album art if there's no text).
+        float desiredStart = gradLeftSolidX;
+        if (infoMaxTextW > 0)
+            desiredStart = static_cast<float>(infoAreaBounds_.getX() + infoMaxTextW) + safeGap;
+        else if (!albumArtBounds_.isEmpty())
+            desiredStart = static_cast<float>(albumArtBounds_.getRight()) + safeGap;
+
+        // Preferred range: fade stays within [minFadeWidth, maxFadeWidth] of
+        // the solid region so the gradient hugs the current-time label rather
+        // than reaching back to the info text unless they're close to colliding.
+        const float earliestStart = gradLeftSolidX - maxFadeWidth;
+        const float latestStart   = gradLeftSolidX - minFadeWidth;
+        gradLeftTransparent = juce::jlimit(earliestStart, latestStart, desiredStart);
+
+        // Hard floor: never start the fade to the left of the album art. The
+        // gradient must never paint over the album art at any window size.
+        if (!albumArtBounds_.isEmpty())
+        {
+            const float albumFloor = static_cast<float>(albumArtBounds_.getRight()) + safeGap;
+            gradLeftTransparent = juce::jmax(gradLeftTransparent, albumFloor);
+        }
+        // Hard ceiling: fade must have non-negative width.
+        gradLeftTransparent = juce::jmin(gradLeftTransparent, gradLeftSolidX);
+
+        const float leftFadeWidth = gradLeftSolidX - gradLeftTransparent;
+        gradRightTransparent = gradRightSolidX + leftFadeWidth;
+        gradValid = leftFadeWidth > 0.0f;
     }
 
     // Album art (or placeholder when track loaded but no art). Stays fully
-    // opaque - resized() shrinks it to fit rather than fading it out.
-    if (!albumArtBounds_.isEmpty())
+    // opaque - resized() shrinks it to fit rather than fading it out. A soft
+    // black drop shadow sits behind it to lift it off the transport bar.
+    if (!albumArtBounds_.isEmpty() && hasTrack_)
     {
-        if (albumArt_.isValid())
-        {
-            g.drawImageWithin(albumArt_,
-                              albumArtBounds_.getX(), albumArtBounds_.getY(),
-                              albumArtBounds_.getWidth(), albumArtBounds_.getHeight(),
-                              juce::RectanglePlacement::centred |
-                              juce::RectanglePlacement::onlyReduceInSize);
-        }
-        else if (hasTrack_)
-        {
-            const auto r = albumArtBounds_.toFloat();
-            g.setColour(juce::Colour(0xff2a2a2a));
-            g.fillRect(r);
-            g.setColour(juce::Colour(0xff555555));
-            g.drawRect(r, 1.0f);
-            const float inset = r.getWidth() * 0.25f;
-            g.drawLine(r.getX() + inset, r.getY() + inset,
-                       r.getRight() - inset, r.getBottom() - inset, 1.5f);
-            g.drawLine(r.getRight() - inset, r.getY() + inset,
-                       r.getX() + inset, r.getBottom() - inset, 1.5f);
-        }
+        juce::Path artPath;
+        artPath.addRectangle(albumArtBounds_.toFloat());
+        juce::DropShadow(juce::Colours::black.withAlpha(0.85f), 12, {}).drawForPath(g, artPath);
+    }
+    if (!albumArtBounds_.isEmpty() && albumArt_.isValid())
+    {
+        g.drawImageWithin(albumArt_,
+                          albumArtBounds_.getX(), albumArtBounds_.getY(),
+                          albumArtBounds_.getWidth(), albumArtBounds_.getHeight(),
+                          juce::RectanglePlacement::centred |
+                          juce::RectanglePlacement::onlyReduceInSize);
     }
 
     // Three-line track info - faded by infoAlpha so it dissolves smoothly into
@@ -340,18 +481,11 @@ void TransportBar::paint(juce::Graphics& g)
         const int infoX = infoAreaBounds_.getX();
         const int infoW = infoAreaBounds_.getWidth();
 
-        // Helper: measure text width with a given font.
-        auto textWidth = [](const juce::Font& f, const juce::String& text) -> int {
-            juce::GlyphArrangement ga;
-            ga.addLineOfText(f, text, 0.0f, 0.0f);
-            return static_cast<int>(std::ceil(ga.getBoundingBox(0, -1, true).getWidth()));
-        };
-
-        // Line 1: song title (italic)
-        const juce::Font titleFont = juce::Font(juce::FontOptions().withHeight(15.0f)).italicised();
+        // Line 1: song title. Nudged up 2px so there's a touch more breathing
+        // room above the artist line.
         g.setColour(Color::textPrimary.withMultipliedAlpha(infoAlpha));
         g.setFont(titleFont);
-        g.drawText(currentTrack_.displayTitle(), infoX, infoY, infoW, line1H,
+        g.drawText(titleText, infoX, infoY - 2, infoW, line1H,
                    juce::Justification::centredLeft, true);
 
         // Line 2: artist, or "(no artist)" in italics
@@ -360,52 +494,46 @@ void TransportBar::paint(juce::Graphics& g)
         g.setColour(Color::textSecondary.withMultipliedAlpha(infoAlpha));
         if (noArtist)
         {
-            g.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)).italicised());
+            g.setFont(noArtistFont);
             g.drawText("(no artist)", infoX, artist2Y, infoW, line2H,
                        juce::Justification::centredLeft, true);
         }
         else
         {
-            g.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
+            g.setFont(artistFont);
             g.drawText(currentTrack_.artist, infoX, artist2Y, infoW, line2H,
                        juce::Justification::centredLeft, true);
         }
 
-        // Line 3: "Playing from: [source]" where source is accent-colored and clickable
+        // Line 3: "Playing from: [source]" where source is accent-colored and
+        // clickable. Nudged down 2px for a bit more separation from the artist.
         if (playingFromName_.isNotEmpty())
         {
-            const int source3Y = artist2Y + line2H + lineGap;
-            const juce::Font sourceFont(juce::FontOptions().withHeight(13.0f));
-            g.setFont(sourceFont);
-
-            const juce::String prefix = "Playing from: ";
-            const juce::Font prefixFont = juce::Font(juce::FontOptions().withHeight(13.0f)).italicised();
-            const int prefixW = textWidth(prefixFont, prefix);
+            const int source3Y = artist2Y + line2H + lineGap + 2;
 
             g.setColour(Color::textDim.withMultipliedAlpha(infoAlpha));
             g.setFont(prefixFont);
-            g.drawText(prefix, infoX, source3Y, prefixW + 2, line3H,
+            g.drawText("Playing from: ", infoX, source3Y, prefixTextW + 2, line3H,
                        juce::Justification::centredLeft, false);
-            g.setFont(sourceFont);
 
-            const int linkX = infoX + prefixW;
-            const int linkW = textWidth(sourceFont, playingFromName_);
+            const int linkX = infoX + prefixTextW;
+            g.setFont(sourceFont);
             g.setColour(Color::accent.withMultipliedAlpha(infoAlpha));
-            g.drawText(playingFromName_, linkX, source3Y, infoW - prefixW, line3H,
+            g.drawText(playingFromName_, linkX, source3Y, infoW - prefixTextW, line3H,
                        juce::Justification::centredLeft, false);
 
             // Underline the source link
             g.drawHorizontalLine(source3Y + line3H - 1,
                                  static_cast<float>(linkX),
-                                 static_cast<float>(linkX + linkW));
+                                 static_cast<float>(linkX + sourceTextW));
 
             // Click hit-box: only cover the visible portion of the link. Once
             // the gradient starts fading the text out, the hidden tail stops
             // being clickable so we don't "fight" the visual effect.
-            const int gradStart = static_cast<int>(
-                playPauseButton_.getBoundsInParent().toFloat().getCentreX() - fadeRadius);
-            const int linkRight = juce::jmin(linkX + linkW + 4,
-                                             infoX + (infoW - prefixW),
+            const int gradStart = gradValid ? static_cast<int>(gradLeftTransparent)
+                                            : (infoX + infoW);
+            const int linkRight = juce::jmin(linkX + sourceTextW + 4,
+                                             infoX + (infoW - prefixTextW),
                                              gradStart);
             const int clippedW  = linkRight - linkX;
             sourceLinkBounds_ = (clippedW > 0)
@@ -418,53 +546,152 @@ void TransportBar::paint(juce::Graphics& g)
         }
     }
 
-    // Horizontal fade centred on the play button: opaque transport-bg at the
-    // centre, falling off to fully transparent at the edges. Paints over the
-    // info text above, so long titles dissolve into the background as they
-    // approach the middle button cluster. Clipped vertically to the upper
-    // band so it doesn't cover the seek bar or thumb beneath the buttons.
-    if (hasTrack_)
+    // Horizontal fade: solid transport-bg from the current-time label through
+    // to the total-time label, falling off to fully transparent past the album
+    // art (on the left) and past a symmetric point (on the right). Fills the
+    // full height so the seek bar, drawn next, sits on top of it and long info
+    // text behind it dissolves into the background as the window narrows.
+    if (gradValid)
     {
-        const float cx = playPauseButton_.getBoundsInParent().toFloat().getCentreX();
-
-        // Cap the radius so the gradient fully fades out before it reaches the
-        // right edge of the album art (plus a small gap). Symmetric on the
-        // right so the fade still looks balanced around the play button.
-        float effectiveRadius = fadeRadius;
-        if (!albumArtBounds_.isEmpty())
-        {
-            const float safeGap   = 6.0f;
-            const float maxRadius = cx - (static_cast<float>(albumArtBounds_.getRight()) + safeGap);
-            effectiveRadius = juce::jmin(effectiveRadius, juce::jmax(0.0f, maxRadius));
-        }
-
-        const float left       = cx - effectiveRadius;
-        const float fadeBottom = seekBarBounds_.isEmpty()
-                                    ? static_cast<float>(getHeight())
-                                    : static_cast<float>(seekBarBounds_.getY()) - 4.0f;
+        const float width          = gradRightTransparent - gradLeftTransparent;
+        const float leftSolidStop  = (gradLeftSolidX  - gradLeftTransparent) / width;
+        const float rightSolidStop = (gradRightSolidX - gradLeftTransparent) / width;
 
         juce::ColourGradient grad(
-            Color::transportBg.withAlpha(0.0f), left,                      0.0f,
-            Color::transportBg.withAlpha(0.0f), cx + effectiveRadius,      0.0f,
+            Color::transportBg.withAlpha(0.0f), gradLeftTransparent,  0.0f,
+            Color::transportBg.withAlpha(0.0f), gradRightTransparent, 0.0f,
             false);
-        grad.addColour(0.5, Color::transportBg);
+        grad.addColour(leftSolidStop,  Color::transportBg);
+        grad.addColour(rightSolidStop, Color::transportBg);
         g.setGradientFill(grad);
-        g.fillRect(juce::Rectangle<float>(left, 0.0f, effectiveRadius * 2.0f, fadeBottom));
+        g.fillRect(juce::Rectangle<float>(gradLeftTransparent, 0.0f,
+                                          width, static_cast<float>(getHeight())));
+    }
+
+    // Seek bar track + fill + thumb - drawn after the gradient so they stay
+    // visible on top of the solid-black band behind the buttons.
+    if (hasTrack_ && !seekBarBounds_.isEmpty())
+    {
+        g.setColour(Color::seekBarTrack);
+        g.fillRect(seekBarBounds_);
+        const double pos = draggingSeek_ ? seekDragPos_ : engine_.normalizedPosition();
+        const int fillW = static_cast<int>(pos * seekBarBounds_.getWidth());
+
+        g.setColour(Color::seekBarFill);
+        g.fillRect(seekBarBounds_.withWidth(fillW));
+
+        const auto  seekF  = seekBarBounds_.toFloat();
+        const float thumbD = draggingSeek_ ? 16.0f : 12.0f;
+        const float thumbX = seekF.getX() + static_cast<float>(pos) * seekF.getWidth();
+        const float thumbY = seekF.getCentreY();
+        g.setColour(juce::Colours::white);
+        g.fillEllipse(thumbX - thumbD * 0.5f, thumbY - thumbD * 0.5f, thumbD, thumbD);
+
+        // While dragging, render a dark-grey "pressed" dot in the centre of the
+        // thumb. Its diameter is half the thumb's diameter.
+        if (draggingSeek_)
+        {
+            const float dotD = thumbD * 0.5f;
+            g.setColour(juce::Colour(0xff404040));
+            g.fillEllipse(thumbX - dotD * 0.5f, thumbY - dotD * 0.5f, dotD, dotD);
+        }
     }
 
     // Mini-mode "Artist - Title" (or filename) line above the buttons. Drawn
     // after the gradient so it stays fully legible rather than being faded out.
-    if (hasTrack_ && !compactInfoBounds_.isEmpty())
-    {
-        const juce::String artist = currentTrack_.artist;
-        const juce::String title  = currentTrack_.displayTitle();
-        const juce::String label  = artist.isNotEmpty()
-                                        ? artist + " - " + title
-                                        : currentTrack_.file.getFileNameWithoutExtension();
+    // Left-aligned with the shuffle button; clipped at the repeat button. If
+    // the text is wider than that span, marquee-scrolls iTunes-style: pause
+    // at the start, scroll until the tail is visible, pause, then jump back.
+    // Fades in across a small window just above the mini-mode threshold so
+    // the appearance isn't abrupt.
+    constexpr float compactFadeStartW = static_cast<float>(miniModeWidth) + 25.0f;
+    constexpr float compactFadeEndW   = static_cast<float>(miniModeWidth);
+    const float compactAlpha = juce::jlimit(0.0f, 1.0f,
+        (compactFadeStartW - static_cast<float>(getWidth()))
+            / (compactFadeStartW - compactFadeEndW));
 
-        g.setColour(Color::textSecondary);
-        g.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
-        g.drawText(label, compactInfoBounds_, juce::Justification::centred, true);
+    if (hasTrack_ && !compactInfoBounds_.isEmpty() && compactAlpha > 0.0f)
+    {
+        // "Artist - Title" where the title portion follows the same rule as
+        // the full-mode title line: italic when it's a real tag, plain with
+        // extension when we're falling back to the filename.
+        const juce::String artistPrefix = currentTrack_.artist.isNotEmpty()
+                                              ? currentTrack_.artist + " - "
+                                              : juce::String();
+
+        const juce::Font compactRegular(juce::FontOptions().withHeight(15.0f));
+        const juce::Font compactTitleFont = hasRealTitle
+                                                ? compactRegular.italicised()
+                                                : compactRegular;
+
+        const int prefixW = artistPrefix.isNotEmpty()
+                                ? textWidth(compactRegular, artistPrefix) : 0;
+        const int titleW  = textWidth(compactTitleFont, titleText);
+        const int totalW  = prefixW + titleW;
+
+        const juce::Colour compactColor = Color::textPrimary.withMultipliedAlpha(compactAlpha);
+
+        auto drawAt = [&](int startX) {
+            const int y = compactInfoBounds_.getY();
+            const int h = compactInfoBounds_.getHeight();
+            g.setColour(compactColor);
+            if (prefixW > 0)
+            {
+                g.setFont(compactRegular);
+                g.drawText(artistPrefix, startX, y, prefixW + 4, h,
+                           juce::Justification::centredLeft, false);
+            }
+            g.setFont(compactTitleFont);
+            g.drawText(titleText, startX + prefixW, y, titleW + 4, h,
+                       juce::Justification::centredLeft, false);
+        };
+
+        if (totalW <= compactInfoBounds_.getWidth())
+        {
+            // Fits: centre above the play button.
+            const int startX = compactInfoBounds_.getX()
+                             + (compactInfoBounds_.getWidth() - totalW) / 2;
+            drawAt(startX);
+        }
+        else
+        {
+            // Doesn't fit: left-align with the shuffle button and marquee-scroll.
+            const int overflow = totalW - compactInfoBounds_.getWidth();
+            constexpr juce::uint32 pauseMs        = 3000;
+            constexpr float        scrollPxPerSec = 18.0f;
+            const juce::uint32 scrollMs = juce::jmax<juce::uint32>(
+                100, static_cast<juce::uint32>((static_cast<float>(overflow) / scrollPxPerSec) * 1000.0f));
+            // Ping-pong cycle: pause, scroll out, pause, scroll back.
+            const juce::uint32 cycleMs = 2 * (pauseMs + scrollMs);
+
+            const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
+            const juce::uint32 phase = (nowMs - compactScrollStartMs_) % cycleMs;
+
+            int offsetX;
+            if (phase < pauseMs)
+            {
+                offsetX = 0;
+            }
+            else if (phase < pauseMs + scrollMs)
+            {
+                const float t = static_cast<float>(phase - pauseMs) / static_cast<float>(scrollMs);
+                offsetX = -static_cast<int>(t * static_cast<float>(overflow));
+            }
+            else if (phase < 2 * pauseMs + scrollMs)
+            {
+                offsetX = -overflow;
+            }
+            else
+            {
+                const float t = static_cast<float>(phase - (2 * pauseMs + scrollMs)) / static_cast<float>(scrollMs);
+                offsetX = -overflow + static_cast<int>(t * static_cast<float>(overflow));
+            }
+
+            g.saveState();
+            g.reduceClipRegion(compactInfoBounds_);
+            drawAt(compactInfoBounds_.getX() + offsetX);
+            g.restoreState();
+        }
     }
 
     // Speaker icon - red X whenever output is silent (muted or slider at zero).
@@ -506,9 +733,25 @@ void TransportBar::resized()
     bounds.removeFromRight(volAreaW + 4);
 
     // Buttons are centered on the window, independent of any left-side layout.
+    // A small upward offset lifts the whole playback row + seek row off the
+    // bottom of the bar at normal widths. As the window narrows toward mini
+    // mode, the offset eases to zero so the row drops back to its original
+    // vertical position (matching the pre-offset look in mini player territory).
+    // With no track loaded the seek row is hidden, so the buttons sit dead-
+    // centre vertically in the bar.
+    constexpr int   playbackRowYOffsetMax   = 11;
+    constexpr float playbackOffsetFadeStart = 510.0f;
+    constexpr float playbackOffsetFadeEnd   = static_cast<float>(miniModeWidth);
+    const float playbackOffsetT = juce::jlimit(0.0f, 1.0f,
+        (static_cast<float>(getWidth()) - playbackOffsetFadeEnd)
+            / (playbackOffsetFadeStart - playbackOffsetFadeEnd));
+    const int playbackRowYOffset = hasTrack_
+                                       ? static_cast<int>(playbackOffsetT * playbackRowYOffsetMax)
+                                       : 0;
+
     const int btnGap     = 8;
     const int centerX    = getWidth() / 2;
-    const int btnCenterY = bounds.getCentreY();
+    const int btnCenterY = bounds.getCentreY() - playbackRowYOffset;
     const int skipOffY   = (playBtnD - skipBtnD) / 2;
     const int modOffY    = (playBtnD - modBtnD) / 2;
 
@@ -529,29 +772,26 @@ void TransportBar::resized()
     nextButton_.setBounds     (x3, btnCenterY - playBtnD / 2 + skipOffY, skipBtnD, skipBtnD);
     repeatButton_.setBounds   (x4, btnCenterY - playBtnD / 2 + modOffY,  modBtnD,  modBtnD);
 
-    // Album art: smoothly scales and repositions as the window shrinks, so
-    // there's no jump at any threshold.
-    //   Size  : from artMaxFull (80) at wide widths down to artMaxMini (44)
-    //           at the mini-mode threshold, linearly interpolated. Further
-    //           capped by the space between the left pad and shuffle button.
-    //   Position: from flush-left at `pad` when the window is wide, to
-    //             centred-between-the-left-edge-and-shuffle when narrow.
+    // Album art stays at full size (80px) at every window width. In normal
+    // mode it sits flush-left at `pad`. As the window narrows, instead of
+    // shrinking it slides leftward, ending partially off-screen at minimum
+    // width so its right portion can tuck behind the shuffle button.
     constexpr int   artMaxFull = 80;
-    constexpr int   artMaxMini = 44;
-    constexpr int   artGap     = 6;
-    constexpr float fadeFromW  = 540.0f;  // match the info-text fade range
-    const float fadeToW = static_cast<float>(Constants::miniModeWidth);
-    const float artT    = juce::jlimit(0.0f, 1.0f,
+    constexpr float fadeFromW  = 490.0f;
+    const float fadeToW = static_cast<float>(Constants::minWindowWidth);
+    const float artT = juce::jlimit(0.0f, 1.0f,
         (static_cast<float>(getWidth()) - fadeToW) / (fadeFromW - fadeToW));
-    const int artCeiling  = artMaxMini + static_cast<int>(artT * (artMaxFull - artMaxMini));
-    const int availForArt = x0 - pad - artGap;
-    const int artDim      = juce::jlimit(0, artCeiling, availForArt);
 
-    if (artDim > 0)
+    const int artDim = artMaxFull;
+
+    // Only reserve space for the album art when we actually have artwork to
+    // draw. Tracks without embedded art (and the no-track state) collapse the
+    // art column entirely so the info text can sit near the left edge.
+    if (hasTrack_ && albumArt_.isValid())
     {
-        const int leftX     = pad;
-        const int centeredX = (pad + x0 - artGap - artDim) / 2;
-        const int artX      = leftX + static_cast<int>((1.0f - artT) * (centeredX - leftX));
+        const int leftX        = pad;
+        constexpr int slidLeftX = -20; // left edge at min window width (partially off-screen)
+        const int artX = leftX + static_cast<int>((1.0f - artT) * (slidLeftX - leftX));
         albumArtBounds_ = { artX, (getHeight() - artDim) / 2, artDim, artDim };
     }
     else
@@ -559,10 +799,17 @@ void TransportBar::resized()
         albumArtBounds_ = {};
     }
 
-    // Remove the album-art column (plus gap) from the info-text working area
-    // in full mode only (mini mode doesn't use infoAreaBounds_).
-    if (!mini && !albumArtBounds_.isEmpty())
-        bounds.removeFromLeft(albumArtBounds_.getRight() - bounds.getX() + 8);
+    // Push the info-text area in slightly so the title/artist/source lines
+    // don't crowd whatever sits to their left (album art, or the window edge
+    // if the art is hidden). Mini mode doesn't use infoAreaBounds_.
+    constexpr int infoTextLeftGap = 13;
+    if (!mini)
+    {
+        if (!albumArtBounds_.isEmpty())
+            bounds.removeFromLeft(albumArtBounds_.getRight() - bounds.getX() + infoTextLeftGap);
+        else
+            bounds.removeFromLeft(infoTextLeftGap);
+    }
 
     // Seek row stays visible in both modes so the user can still scrub in
     // mini mode. In mini mode the bar itself widens a bit since we no longer
@@ -594,27 +841,24 @@ void TransportBar::resized()
         totalLabel_.setVisible(false);
     }
 
-    // Full-mode left-side info text vs. mini-mode centred "Artist - Title" line.
-    if (mini)
-    {
-        infoAreaBounds_ = {};
+    // Full-mode left-side info area.
+    infoAreaBounds_ = mini ? juce::Rectangle<int>() : bounds;
 
-        // Bounds are symmetric around the play button's centre so centred
-        // text actually lands above it. Album art on the left and the volume
-        // strip on the right each constrain how far we can extend; we take
-        // whichever side is tighter and mirror it.
-        const int compactH   = 20;
-        const int compactY   = btnCenterY - playBtnD / 2 - compactH - 3;
-        const int leftLimit  = albumArtBounds_.isEmpty() ? pad
-                                                         : albumArtBounds_.getRight() + 6;
-        const int rightLimit = speakerBounds_.isEmpty() ? getWidth() - pad
-                                                        : speakerBounds_.getX() - 6;
-        const int halfW      = juce::jmin(centerX - leftLimit, rightLimit - centerX);
-        compactInfoBounds_   = { centerX - halfW, compactY, halfW * 2, compactH };
+    // Compact "Artist - Title" line above the play button. Computed whenever
+    // the window is at or below the compact fade-in range (slightly above
+    // mini-mode), so the paint-time alpha can crossfade it in/out smoothly.
+    constexpr int compactFadeInMargin = 25;
+    if (getWidth() < Constants::miniModeWidth + compactFadeInMargin)
+    {
+        constexpr int compactH = 20;
+        const int compactY = btnCenterY - playBtnD / 2 - compactH - 3;
+        compactInfoBounds_ = {
+            shuffleButton_.getX(), compactY,
+            repeatButton_.getRight() - shuffleButton_.getX(), compactH
+        };
     }
     else
     {
-        infoAreaBounds_    = bounds;
         compactInfoBounds_ = {};
     }
 }
@@ -659,6 +903,7 @@ void TransportBar::mouseDown(const juce::MouseEvent& e)
             muted_ = false;
             volumeSlider_.setValue(premuteVolume_, juce::dontSendNotification);
             engine_.setVolume(static_cast<float>(premuteVolume_));
+            refreshVolumeAlpha();
             repaint();
         }
         else if (volumeSlider_.getValue() > 0.0)
@@ -668,6 +913,7 @@ void TransportBar::mouseDown(const juce::MouseEvent& e)
             muted_ = true;
             volumeSlider_.setValue(0.0, juce::dontSendNotification);
             engine_.setVolume(0.0f);
+            refreshVolumeAlpha();
             repaint();
         }
         // else: slider is already at 0 manually - clicking speaker is a no-op.
@@ -708,6 +954,29 @@ void TransportBar::mouseUp(const juce::MouseEvent& e)
     draggingSeek_ = false;
     engine_.seekToNormalized(seekBarNormalizedX(e.x));
     repaint();
+}
+
+juce::MouseCursor TransportBar::getMouseCursor()
+{
+    if (draggingSeek_)
+        return juce::MouseCursor::PointingHandCursor;
+
+    const auto pos = getMouseXYRelative();
+
+    // Seek-bar hit area: matches the expanded hit region used in mouseDown.
+    if (! seekBarBounds_.isEmpty()
+        && seekBarBounds_.expanded(0, 8).contains(pos))
+        return juce::MouseCursor::PointingHandCursor;
+
+    // Speaker icon.
+    if (! speakerBounds_.isEmpty() && speakerBounds_.contains(pos))
+        return juce::MouseCursor::PointingHandCursor;
+
+    // "Playing from: <source>" clickable link.
+    if (! sourceLinkBounds_.isEmpty() && sourceLinkBounds_.contains(pos))
+        return juce::MouseCursor::PointingHandCursor;
+
+    return juce::Component::getMouseCursor();
 }
 
 double TransportBar::seekBarNormalizedX(int x) const

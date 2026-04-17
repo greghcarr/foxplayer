@@ -40,11 +40,14 @@ AnalysisLogComponent::AnalysisLogComponent()
     hdr.addColumn("Key",    colKey,     60, 40,  100, nonSortable);
 }
 
-int AnalysisLogComponent::findEntryIndex(const juce::File& file) const
+int AnalysisLogComponent::findEntryIndex(const juce::File& file, Type type) const
 {
     for (int i = 0; i < static_cast<int>(entries_.size()); ++i)
-        if (entries_[static_cast<size_t>(i)].file == file)
+    {
+        const auto& e = entries_[static_cast<size_t>(i)];
+        if (e.file == file && e.type == type)
             return i;
+    }
     return -1;
 }
 
@@ -56,12 +59,13 @@ void AnalysisLogComponent::scrollToRow(int row)
 
 void AnalysisLogComponent::trackQueued(const TrackInfo& track)
 {
-    if (findEntryIndex(track.file) >= 0) return;
+    if (findEntryIndex(track.file, Type::Analysis) >= 0) return;
 
     Entry e;
     e.file   = track.file;
     e.title  = track.displayTitle();
     e.artist = track.artist;
+    e.type   = Type::Analysis;
     e.status = Status::Queued;
     e.bpm    = track.bpm;
     e.key    = track.musicalKey;
@@ -73,23 +77,60 @@ void AnalysisLogComponent::trackQueued(const TrackInfo& track)
 
 void AnalysisLogComponent::trackStarted(const TrackInfo& track)
 {
-    const int idx = findEntryIndex(track.file);
+    const int idx = findEntryIndex(track.file, Type::Analysis);
     if (idx < 0) return;
 
-    entries_[static_cast<size_t>(idx)].status = Status::Analyzing;
+    entries_[static_cast<size_t>(idx)].status = Status::Running;
     table_.repaint();
     scrollToRow(idx);
 }
 
 void AnalysisLogComponent::trackAnalysed(const TrackInfo& track)
 {
-    const int idx = findEntryIndex(track.file);
+    const int idx = findEntryIndex(track.file, Type::Analysis);
     if (idx < 0) return;
 
     auto& e = entries_[static_cast<size_t>(idx)];
     e.status = Status::Done;
     e.bpm    = track.bpm;
     e.key    = track.musicalKey;
+    table_.repaint();
+}
+
+void AnalysisLogComponent::lookupQueued(const TrackInfo& track)
+{
+    if (findEntryIndex(track.file, Type::Lookup) >= 0) return;
+
+    Entry e;
+    e.file   = track.file;
+    e.title  = track.displayTitle();
+    e.artist = track.artist;
+    e.type   = Type::Lookup;
+    e.status = Status::Queued;
+    entries_.push_back(std::move(e));
+
+    table_.updateContent();
+    table_.repaint();
+}
+
+void AnalysisLogComponent::lookupStarted(const TrackInfo& track)
+{
+    const int idx = findEntryIndex(track.file, Type::Lookup);
+    if (idx < 0) return;
+
+    entries_[static_cast<size_t>(idx)].status = Status::Running;
+    table_.repaint();
+    scrollToRow(idx);
+}
+
+void AnalysisLogComponent::lookupCompleted(const TrackInfo& track, const juce::String& summary)
+{
+    const int idx = findEntryIndex(track.file, Type::Lookup);
+    if (idx < 0) return;
+
+    auto& e = entries_[static_cast<size_t>(idx)];
+    e.status        = Status::Done;
+    e.lookupSummary = summary;
     table_.repaint();
 }
 
@@ -128,7 +169,7 @@ void AnalysisLogComponent::paintCell(juce::Graphics& g,
     if (row < 0 || row >= static_cast<int>(entries_.size())) return;
 
     const auto& e = entries_[static_cast<size_t>(row)];
-    g.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
+    g.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)));
 
     switch (col)
     {
@@ -136,11 +177,22 @@ void AnalysisLogComponent::paintCell(juce::Graphics& g,
         {
             juce::String label;
             juce::Colour colour;
+            const bool isLookup = (e.type == Type::Lookup);
             switch (e.status)
             {
-                case Status::Queued:    label = "Queued";       colour = Color::textSecondary; break;
-                case Status::Analyzing: label = "Analyzing...";  colour = Color::accent;        break;
-                case Status::Done:      label = "Done";          colour = Color::playingGreen;  break;
+                case Status::Queued:
+                    label  = isLookup ? "Lookup queued" : "Queued";
+                    colour = Color::textSecondary;
+                    break;
+                case Status::Running:
+                    label  = isLookup ? "Looking up..." : "Analyzing...";
+                    colour = Color::accent;
+                    break;
+                case Status::Done:
+                    label  = isLookup ? (e.lookupSummary.isNotEmpty() ? e.lookupSummary : juce::String("Done"))
+                                       : "Done";
+                    colour = Color::playingHighlight;
+                    break;
             }
             g.setColour(colour);
             g.drawText(label, 8, 0, w - 16, h, juce::Justification::centredLeft, true);
@@ -158,14 +210,20 @@ void AnalysisLogComponent::paintCell(juce::Graphics& g,
             break;
 
         case colBpm:
-            g.setColour(Color::textPrimary);
-            if (e.bpm > 0.0)
-                g.drawText(juce::String(e.bpm, 1), 4, 0, w - 8, h, juce::Justification::centredLeft, true);
+            if (e.type == Type::Analysis)
+            {
+                g.setColour(Color::textPrimary);
+                if (e.bpm > 0.0)
+                    g.drawText(juce::String(e.bpm, 1), 4, 0, w - 8, h, juce::Justification::centredLeft, true);
+            }
             break;
 
         case colKey:
-            g.setColour(Color::textPrimary);
-            g.drawText(e.key, 4, 0, w - 8, h, juce::Justification::centredLeft, true);
+            if (e.type == Type::Analysis)
+            {
+                g.setColour(Color::textPrimary);
+                g.drawText(e.key, 4, 0, w - 8, h, juce::Justification::centredLeft, true);
+            }
             break;
 
         default: break;

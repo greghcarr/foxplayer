@@ -131,4 +131,18 @@ void PlaylistStore::addTracksToPlaylist(int id, const std::vector<juce::String>&
     }
 }
 
+void PlaylistStore::setPlaylistTracks(int id, std::vector<juce::String> paths)
+{
+    for (auto& pl : playlists_)
+    {
+        if (pl.id == id)
+        {
+            pl.trackPaths = std::move(paths);
+            save();
+            if (onPlaylistsChanged) onPlaylistsChanged();
+            return;
+        }
+    }
+}
+
 } // namespace FoxPlayer

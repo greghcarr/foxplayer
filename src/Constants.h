@@ -7,7 +7,7 @@ namespace FoxPlayer::Constants
     // Window
     static constexpr int defaultWindowWidth  = 1100;
     static constexpr int defaultWindowHeight = 700;
-    static constexpr int minWindowWidth      = 410;   // allow a "mini mode" where only the transport bar stays useful
+    static constexpr int minWindowWidth      = 365;   // allow a "mini mode" where only the transport bar stays useful
     static constexpr int minWindowHeight     = 135;   // transport bar + small buffer; library above stays invisible
     static constexpr int miniModeWidth       = 460;   // transport bar switches to mini layout below this width
     static constexpr int compactHeight       = 150;   // at-or-below this height the library/sidebar are effectively hidden
@@ -33,6 +33,8 @@ namespace FoxPlayer::Constants
     static constexpr int colIdBpm    = 6;
     static constexpr int colIdKey    = 7;
     static constexpr int colIdPlays  = 8;
+    static constexpr int colIdFormat = 9;
+    static constexpr int colIdGenre  = 10;
 
     static constexpr int colWidthRow    = 40;
     static constexpr int colWidthTitle  = 280;
@@ -42,6 +44,8 @@ namespace FoxPlayer::Constants
     static constexpr int colWidthBpm    = 55;
     static constexpr int colWidthKey    = 50;
     static constexpr int colWidthPlays  = 55;
+    static constexpr int colWidthFormat = 60;
+    static constexpr int colWidthGenre  = 120;
 
     static constexpr int rowHeight = 24;
 
@@ -67,7 +71,7 @@ namespace FoxPlayer::Constants
         static const juce::Colour textSecondary    { 0xff909090 };
         static const juce::Colour textDim          { 0xff555555 };
         static const juce::Colour accent           { 0xff4a9eff };
-        static const juce::Colour playingGreen     { 0xff4caf50 };
+        static const juce::Colour playingHighlight { 0xff89cff0 };
         static const juce::Colour seekBarTrack     { 0xff333333 };
         static const juce::Colour seekBarFill      { 0xff4a9eff };
         static const juce::Colour buttonText       { 0xffe8e8e8 };

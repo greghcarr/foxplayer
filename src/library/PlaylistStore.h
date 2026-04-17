@@ -34,6 +34,10 @@ public:
     // Appends paths to the playlist (no duplicate filtering — callers decide).
     void addTracksToPlaylist(int id, const std::vector<juce::String>& paths);
 
+    // Replaces the playlist's track list with the given ordered paths. Used
+    // by the library view to persist drag-reordering within a playlist.
+    void setPlaylistTracks(int id, std::vector<juce::String> paths);
+
     std::function<void()> onPlaylistsChanged;
 
 private:

@@ -65,8 +65,8 @@ void QueueView::paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool 
         g.fillAll(row % 2 == 0 ? Color::tableBackground : Color::tableRowAlt);
 
     const auto& t = items_[static_cast<size_t>(row)];
-    g.setColour(isPlaying ? Color::playingGreen : Color::textPrimary);
-    g.setFont(juce::Font(12.0f));
+    g.setColour(isPlaying ? Color::playingHighlight : Color::textPrimary);
+    g.setFont(juce::Font(14.0f));
 
     const juce::String line = t.displayTitle() +
                                (t.artist.isNotEmpty() ? " - " + t.artist : "");

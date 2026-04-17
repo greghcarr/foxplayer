@@ -6,15 +6,47 @@ namespace FoxPlayer
 
 using namespace Constants;
 
+namespace
+{
+    std::unique_ptr<juce::Drawable> loadSvg(const char* data, int size)
+    {
+        const auto xmlStr = juce::String::createStringFromData(data, size);
+        if (auto xml = juce::XmlDocument::parse(xmlStr))
+            return juce::Drawable::createFromSVG(*xml);
+        return nullptr;
+    }
+}
+
 SidebarComponent::SidebarComponent()
 {
+    musicIconDrawable_    = loadSvg(BinaryData::musicnotesfill_svg,  BinaryData::musicnotesfill_svgSize);
+    playlistIconDrawable_ = loadSvg(BinaryData::listbulletsfill_svg, BinaryData::listbulletsfill_svgSize);
+    artistIconDrawable_   = loadSvg(BinaryData::userfill_svg,        BinaryData::userfill_svgSize);
+    albumIconDrawable_    = loadSvg(BinaryData::vinylrecordfill_svg, BinaryData::vinylrecordfill_svgSize);
+
     // LIBRARY section: not collapsible
     Section library;
     library.heading       = "LIBRARY";
     library.collapsible   = false;
     library.rightClickable = false;
-    library.items.push_back({ juce::String(juce::CharPointer_UTF8("\xe2\x99\xab   All Music")), 1, {} });
+    library.items.push_back({ "All Music", 1, {} });
     sections_.push_back(std::move(library));
+
+    // ARTISTS section: collapsible, populated from the library's unique artists.
+    Section artists;
+    artists.heading        = "ARTISTS";
+    artists.collapsible    = true;
+    artists.collapsed      = true;   // start collapsed since the list can be long
+    artists.rightClickable = false;
+    sections_.push_back(std::move(artists));
+
+    // ALBUMS section: collapsible, "[ARTIST] - [ALBUM]" entries.
+    Section albums;
+    albums.heading        = "ALBUMS";
+    albums.collapsible    = true;
+    albums.collapsed      = true;
+    albums.rightClickable = false;
+    sections_.push_back(std::move(albums));
 
     // PLAYLISTS section: collapsible, right-clickable for "Create New Playlist"
     Section playlists;
@@ -27,11 +59,30 @@ SidebarComponent::SidebarComponent()
 
 void SidebarComponent::setPlaylists(const std::vector<std::pair<int, juce::String>>& playlists)
 {
-    auto& section = sections_[1]; // PLAYLISTS is always index 1
+    auto& section = sections_[3]; // PLAYLISTS is always index 3
     section.items.clear();
-    const juce::String icon(juce::CharPointer_UTF8("\xf0\x9f\x93\x84   ")); // 📄 + 3 spaces
     for (const auto& [id, name] : playlists)
-        section.items.push_back({ icon + name, id, {} });
+        section.items.push_back({ name, id, {} });
+    layoutItems();
+    repaint();
+}
+
+void SidebarComponent::setArtists(const std::vector<std::pair<int, juce::String>>& artists)
+{
+    auto& section = sections_[1]; // ARTISTS is always index 1
+    section.items.clear();
+    for (const auto& [id, name] : artists)
+        section.items.push_back({ name, id, {} });
+    layoutItems();
+    repaint();
+}
+
+void SidebarComponent::setAlbums(const std::vector<std::pair<int, juce::String>>& albums)
+{
+    auto& section = sections_[2]; // ALBUMS is always index 2
+    section.items.clear();
+    for (const auto& [id, name] : albums)
+        section.items.push_back({ name, id, {} });
     layoutItems();
     repaint();
 }
@@ -39,6 +90,24 @@ void SidebarComponent::setPlaylists(const std::vector<std::pair<int, juce::Strin
 void SidebarComponent::setSelectedId(int id)
 {
     selectedId_ = id;
+
+    // Auto-expand the section that owns the selected item, so the user can
+    // actually see the selected row when something navigates them to it
+    // (e.g. clicking the "Playing from: <artist>" link).
+    for (auto& section : sections_)
+    {
+        if (! section.collapsible || ! section.collapsed) continue;
+        for (const auto& item : section.items)
+        {
+            if (item.id == id)
+            {
+                section.collapsed = false;
+                layoutItems();
+                break;
+            }
+        }
+    }
+
     repaint();
 }
 
@@ -71,12 +140,11 @@ void SidebarComponent::layoutItems()
 }
 
 void SidebarComponent::drawDisclosureTriangle(juce::Graphics& g,
-                                               juce::Rectangle<int> hdr,
+                                               float x, int centreY,
                                                bool isCollapsed) const
 {
     const float size = 6.0f;
-    const float x    = static_cast<float>(hdr.getRight()) - 16.0f;
-    const float cy   = static_cast<float>(hdr.getCentreY());
+    const float cy   = static_cast<float>(centreY);
 
     juce::Path tri;
     if (isCollapsed)
@@ -108,8 +176,9 @@ void SidebarComponent::paint(juce::Graphics& g)
     for (const auto& section : sections_)
     {
         // Section heading
+        const juce::Font headingFont(juce::FontOptions().withHeight(12.0f));
         g.setColour(Color::textDim);
-        g.setFont(juce::Font(juce::FontOptions().withHeight(10.0f)));
+        g.setFont(headingFont);
         g.drawText(section.heading,
                    itemPadL, section.headerBounds.getY(),
                    section.headerBounds.getWidth() - itemPadL - 20,
@@ -117,7 +186,14 @@ void SidebarComponent::paint(juce::Graphics& g)
                    juce::Justification::centredLeft, false);
 
         if (section.collapsible)
-            drawDisclosureTriangle(g, section.headerBounds, section.collapsed);
+        {
+            // Measure the heading so the triangle sits just to the right of it.
+            juce::GlyphArrangement ga;
+            ga.addLineOfText(headingFont, section.heading, 0.0f, 0.0f);
+            const float textW = ga.getBoundingBox(0, -1, true).getWidth();
+            const float triX  = static_cast<float>(itemPadL) + textW + 6.0f;
+            drawDisclosureTriangle(g, triX, section.headerBounds.getCentreY(), section.collapsed);
+        }
 
         if (!section.collapsed)
         {
@@ -147,13 +223,40 @@ void SidebarComponent::paint(juce::Graphics& g)
                     g.fillRect(rowBounds.withWidth(indicatorW));
                 }
 
+                // Icon: music notes for All Music, list-bullets for playlists.
+                constexpr int iconDim = 16;
+                constexpr int iconGap = 8;
+                // 1 = All Music, 2000..2999 = individual artists, 3000..3999
+                // = individual albums, else = playlists.
+                juce::Drawable* iconDrawable =
+                    (item.id == 1)                      ? musicIconDrawable_.get()
+                  : (item.id >= 2000 && item.id < 3000) ? artistIconDrawable_.get()
+                  : (item.id >= 3000 && item.id < 4000) ? albumIconDrawable_.get()
+                  :                                       playlistIconDrawable_.get();
+                const int iconX = rowBounds.getX() + itemPadL + indicatorW;
+                const int iconY = rowBounds.getY() + (rowBounds.getHeight() - iconDim) / 2;
+                if (iconDrawable)
+                {
+                    auto tinted = iconDrawable->createCopy();
+                    tinted->replaceColour(juce::Colours::black,
+                                          selected ? Color::textPrimary : Color::textSecondary);
+                    tinted->drawWithin(g,
+                                       juce::Rectangle<float>(static_cast<float>(iconX),
+                                                              static_cast<float>(iconY),
+                                                              static_cast<float>(iconDim),
+                                                              static_cast<float>(iconDim)),
+                                       juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize,
+                                       1.0f);
+                }
+
                 // Label
+                const int labelX = iconX + iconDim + iconGap;
                 g.setColour(selected ? Color::textPrimary : Color::textSecondary);
-                g.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
+                g.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)));
                 g.drawText(item.label,
-                           rowBounds.getX() + itemPadL + indicatorW,
+                           labelX,
                            rowBounds.getY(),
-                           rowBounds.getWidth() - itemPadL - indicatorW - 8,
+                           rowBounds.getRight() - labelX - 8,
                            rowBounds.getHeight(),
                            juce::Justification::centredLeft, true);
             }
@@ -241,14 +344,13 @@ void SidebarComponent::startRename(int sidebarId)
 
     juce::Rectangle<int> rowBounds;
     juce::String plainName;
-    const juce::String icon(juce::CharPointer_UTF8("\xf0\x9f\x93\x84   "));
 
     for (const auto& section : sections_)
         for (const auto& item : section.items)
             if (item.id == sidebarId)
             {
-                rowBounds  = item.bounds;
-                plainName  = item.label.substring(icon.length());
+                rowBounds = item.bounds;
+                plainName = item.label;
                 break;
             }
 
@@ -257,12 +359,11 @@ void SidebarComponent::startRename(int sidebarId)
     editingItemId_       = sidebarId;
     editingOriginalName_ = plainName;
 
-    const juce::Font f(juce::FontOptions().withHeight(13.0f));
-    juce::GlyphArrangement ga;
-    ga.addLineOfText(f, icon, 0.0f, 0.0f);
-    const int iconW = static_cast<int>(ga.getBoundingBox(0, -1, true).getWidth());
-    const int edX   = rowBounds.getX() + itemPadL + indicatorW + iconW;
-    const int edW   = rowBounds.getRight() - edX - 8;
+    const juce::Font f(juce::FontOptions().withHeight(15.0f));
+    // Must match the label offset used in paint() (icon + gap).
+    constexpr int labelIconOffset = 16 + 8;
+    const int edX = rowBounds.getX() + itemPadL + indicatorW + labelIconOffset;
+    const int edW = rowBounds.getRight() - edX - 8;
 
     inlineEditor_ = std::make_unique<juce::TextEditor>();
     inlineEditor_->setFont(f);

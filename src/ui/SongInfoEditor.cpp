@@ -7,7 +7,7 @@ namespace FoxPlayer
 using namespace Constants;
 
 static constexpr int dialogW      = 460;
-static constexpr int dialogH      = 270;
+static constexpr int dialogH      = 302;
 static constexpr int labelW       = 68;
 static constexpr int rowH         = 26;
 static constexpr int rowGap       = 6;
@@ -35,14 +35,16 @@ SongInfoEditor::SongInfoEditor(const TrackInfo& track)
     };
 
     for (auto* lbl : { &titleLabel_, &artistLabel_, &albumLabel_,
-                       &genreLabel_, &yearLabel_, &trackNumLabel_ })
+                       &genreLabel_, &yearLabel_, &trackNumLabel_,
+                       &bpmLabel_,   &keyLabel_ })
     {
         styleLabel(*lbl);
         addAndMakeVisible(*lbl);
     }
 
     for (auto* ed : { &titleEdit_, &artistEdit_, &albumEdit_,
-                      &genreEdit_, &yearEdit_, &trackNumEdit_ })
+                      &genreEdit_, &yearEdit_, &trackNumEdit_,
+                      &bpmEdit_,   &keyEdit_ })
     {
         styleEditor(*ed);
         addAndMakeVisible(*ed);
@@ -57,6 +59,10 @@ SongInfoEditor::SongInfoEditor(const TrackInfo& track)
                               ? juce::String(track_.trackNumber)
                               : juce::String(),
                           false);
+    bpmEdit_.setText(track_.bpm > 0.0 ? juce::String(track_.bpm, 1)
+                                      : juce::String(),
+                     false);
+    keyEdit_.setText(track_.musicalKey, false);
 
     fileLabel_.setText(track_.file.getFullPathName(), juce::dontSendNotification);
     fileLabel_.setColour(juce::Label::textColourId, Color::textDim);
@@ -85,6 +91,8 @@ void SongInfoEditor::save()
     track_.genre       = genreEdit_.getText().trim();
     track_.year        = yearEdit_.getText().trim();
     track_.trackNumber = trackNumEdit_.getText().trim().getIntValue();
+    track_.bpm         = bpmEdit_.getText().trim().getDoubleValue();
+    track_.musicalKey  = keyEdit_.getText().trim();
 
     if (onSave) onSave(track_);
 
@@ -129,6 +137,18 @@ void SongInfoEditor::resized()
         trackNumLabel_.setBounds(row.removeFromLeft(labelW));
         row.removeFromLeft(8);
         trackNumEdit_.setBounds(row.removeFromLeft(60));
+    }
+
+    // BPM + Key on the same row
+    {
+        auto row = nextRow();
+        bpmLabel_.setBounds(row.removeFromLeft(labelW));
+        row.removeFromLeft(8);
+        bpmEdit_.setBounds(row.removeFromLeft(80));
+        row.removeFromLeft(halfFieldGap);
+        keyLabel_.setBounds(row.removeFromLeft(labelW));
+        row.removeFromLeft(8);
+        keyEdit_.setBounds(row.removeFromLeft(60));
     }
 
     // File path
