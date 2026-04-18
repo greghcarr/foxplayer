@@ -6,6 +6,7 @@
 #include "analysis/AnalysisEngine.h"
 #include "analysis/AppleMusicLookup.h"
 #include "library/LibraryScanner.h"
+#include "library/LibraryCache.h"
 #include "library/LibraryTableComponent.h"
 #include "library/PlaylistStore.h"
 #include "ui/TransportBar.h"
@@ -56,7 +57,6 @@ public:
 
     enum CommandIDs
     {
-        cmdChooseFolder    = 0x1001,
         cmdShowHidden      = 0x1002,
         cmdShowAnalysisLog = 0x1003,
         cmdPreferences     = 0x1004,
@@ -65,10 +65,18 @@ public:
     };
 
 private:
-    void showFolderChooser();
-    void loadMusicFolder(const juce::File& folder);
-    void saveMusicFolder(const juce::File& folder);
-    juce::File loadSavedMusicFolder();
+    // Prompts the user for a folder and appends it to the library list.
+    void showAddFolderChooser();
+    // Applies the given folder list: re-scans the library, persists it.
+    void setMusicFolders(std::vector<juce::File> folders);
+    // Persist / load the set of music-library root folders.
+    void saveMusicFolders();
+    std::vector<juce::File> loadSavedMusicFolders();
+    // setMusicFolders variants: the keepLibrary form skips the
+    // clear-fullLibrary step (used after we've loaded the on-disk cache so
+    // the cached view stays visible while a refresh scan runs in the
+    // background).
+    void setMusicFolders(std::vector<juce::File> folders, bool keepLibrary);
 
     void activateRow(int rowIndex, const std::vector<TrackInfo>& libraryTracks);
     void playCurrentQueueItem();
@@ -91,6 +99,10 @@ private:
     // Updates the library table's "now playing" row so it only highlights the
     // track when the active view matches where playback was initiated from.
     void updatePlayingHighlight();
+    // After session restore, scroll the sidebar so the restored selection is
+    // vertically centred in the viewport. Falls back to the top of the list
+    // when the item is too close to the top to actually centre.
+    void scrollSelectedSidebarItemIntoView();
     void refreshSidebarPlaylists();
     // Recomputes the ARTISTS sidebar section from fullLibrary_. Each unique
     // artist gets an id in the [2000, 2999] range, assigned by sorted order.
@@ -136,6 +148,27 @@ private:
     juce::DrawableButton   queueButton_ { "queueToggle", juce::DrawableButton::ImageFitted };
     TransportButton        pinButton_;
 
+    // Full-bleed overlay shown while the Preferences window is open. Dims the
+    // main content, blocks clicks from reaching anything beneath, and offers
+    // two buttons: one to recentre the Preferences window on the main window,
+    // one to close Preferences and "unlock" the main window.
+    class PrefsLockOverlay : public juce::Component
+    {
+    public:
+        std::function<void()> onRecenterPrefs;
+        std::function<void()> onClosePrefs;
+
+        PrefsLockOverlay();
+        void paint(juce::Graphics& g) override;
+        void resized() override;
+
+    private:
+        juce::Label      message_ { {}, "Preferences window open." };
+        juce::TextButton openBtn_  { "Open Preferences" };
+        juce::TextButton closeBtn_ { "Close Preferences" };
+    };
+    PrefsLockOverlay      prefsLockOverlay_;
+
     // Thin draggable component sitting at the right edge of the sidebar. Drag
     // horizontally to resize the sidebar between "icons only" and half window.
     class SidebarDivider : public juce::Component
@@ -172,12 +205,19 @@ private:
     int                    activeSidebarId_ { 1 };
     int                    sidebarWidth_    { Constants::sidebarWidth };
     std::vector<TrackInfo> fullLibrary_;
+    // While true, scan results accumulate into scanBuffer_ instead of
+    // fullLibrary_. At scan complete, fullLibrary_ is swapped with the
+    // buffer and the UI is refreshed. Used when fullLibrary_ was already
+    // populated from the on-disk cache and we don't want to wipe the visible
+    // library while a confirmation scan runs in the background.
+    bool                   scanReplacingCachedLibrary_ { false };
+    std::vector<TrackInfo> scanBuffer_;
     // sidebarId (2000..2999) -> artist name, rebuilt by refreshSidebarArtists().
     std::map<int, juce::String> artistIdToName_;
     struct AlbumKey { juce::String artist; juce::String album; };
     // sidebarId (3000..3999) -> {artist, album}, rebuilt by refreshSidebarAlbums().
     std::map<int, AlbumKey> albumIdToInfo_;
-    juce::File             currentMusicFolder_;
+    std::vector<juce::File> musicFolders_;
     juce::ApplicationProperties   appProperties_;
     // Set while restoreSessionState is running so change callbacks don't try
     // to re-save the half-applied state.

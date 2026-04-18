@@ -37,6 +37,7 @@ target_sources(FoxPlayer PRIVATE
     src/analysis/AnalysisEngine.cpp
     src/analysis/AppleMusicLookup.cpp
     src/library/LibraryScanner.cpp
+    src/library/LibraryCache.cpp
     src/library/LibraryTableComponent.cpp
     src/library/PlaylistStore.cpp
     src/ui/TransportBar.cpp

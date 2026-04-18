@@ -15,14 +15,20 @@ LibraryScanner::~LibraryScanner()
     cancelScan();
 }
 
-void LibraryScanner::scanFolder(const juce::File& folder)
+void LibraryScanner::scanFolders(std::vector<juce::File> folders)
 {
     cancelScan();
     {
         juce::ScopedLock sl(lock_);
-        scanRoot_ = folder;
+        scanRoots_ = std::move(folders);
     }
-    startThread(juce::Thread::Priority::low);
+    DBG("LibraryScanner::scanFolders called with "
+        + juce::String((int) scanRoots_.size()) + " root(s)");
+    if (! scanRoots_.empty())
+        startThread(juce::Thread::Priority::low);
+    else if (onScanComplete)
+        // No folders: still fire completion so the UI can finalise its state.
+        juce::MessageManager::callAsync([this] { if (onScanComplete) onScanComplete(0); });
 }
 
 void LibraryScanner::cancelScan()
@@ -38,46 +44,49 @@ bool LibraryScanner::isScanning() const
 
 void LibraryScanner::run()
 {
-    juce::File root;
+    std::vector<juce::File> roots;
     {
         juce::ScopedLock sl(lock_);
-        root = scanRoot_;
+        roots = scanRoots_;
     }
 
-    if (!root.isDirectory()) return;
-
-    // Collect all audio files.
-    juce::Array<juce::File> allFiles;
-    root.findChildFiles(allFiles,
-                        juce::File::findFiles,
-                        true /* recursive */);
-
-    // Returns true if any path component (file or folder) starts with '.'.
-    auto hasHiddenComponent = [&](const juce::File& f) -> bool {
-        juce::File current = f;
-        while (current != root)
-        {
-            if (current.getFileName().startsWith("."))
-                return true;
-            current = current.getParentDirectory();
-        }
-        return false;
-    };
-
-    // Filter to supported extensions, excluding hidden files and folders.
+    // Collect audio files across every root, skipping hidden files/folders
+    // (any path component starting with '.').
     juce::Array<juce::File> audioFiles;
-    for (const auto& f : allFiles)
+    for (const auto& root : roots)
     {
         if (threadShouldExit()) return;
-        if (Constants::supportedExtensions.contains(
-                f.getFileExtension().trimCharactersAtStart(".").toLowerCase())
-            && !hasHiddenComponent(f))
+        if (! root.isDirectory()) continue;
+
+        juce::Array<juce::File> allFiles;
+        root.findChildFiles(allFiles,
+                            juce::File::findFiles,
+                            true /* recursive */);
+
+        auto hasHiddenComponent = [&root](const juce::File& f) -> bool {
+            juce::File current = f;
+            while (current != root)
+            {
+                if (current.getFileName().startsWith("."))
+                    return true;
+                current = current.getParentDirectory();
+            }
+            return false;
+        };
+
+        for (const auto& f : allFiles)
         {
-            audioFiles.add(f);
+            if (threadShouldExit()) return;
+            if (Constants::supportedExtensions.contains(
+                    f.getFileExtension().trimCharactersAtStart(".").toLowerCase())
+                && !hasHiddenComponent(f))
+            {
+                audioFiles.add(f);
+            }
         }
     }
 
-    // Sort alphabetically.
+    // Sort alphabetically across all roots so the library view is stable.
     audioFiles.sort();
 
     juce::AudioFormatManager fmgr;
@@ -114,6 +123,8 @@ void LibraryScanner::run()
     }
 
     const int finalTotal = total;
+    DBG("LibraryScanner: scan thread finished, total=" + juce::String(finalTotal)
+        + ", queueing onScanComplete on message thread");
     juce::MessageManager::callAsync([this, finalTotal]() {
         if (onScanComplete) onScanComplete(finalTotal);
     });

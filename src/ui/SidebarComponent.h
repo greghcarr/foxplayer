@@ -8,7 +8,8 @@ namespace FoxPlayer
 {
 
 class SidebarComponent : public juce::Component,
-                         public juce::DragAndDropTarget
+                         public juce::DragAndDropTarget,
+                         private juce::Timer
 {
 public:
     SidebarComponent();
@@ -27,6 +28,15 @@ public:
 
     int  selectedId() const { return selectedId_; }
     void setSelectedId(int id);
+
+    // Toggles a small spinning indicator next to the LIBRARY heading while
+    // the music-folder scanner is running.
+    void setLibraryLoading(bool loading);
+
+    // Returns the bounds (in this component's coord space) of the currently
+    // selected item, or an empty rectangle if no selected item is visible
+    // (e.g. it's inside a collapsed section or it has no match).
+    juce::Rectangle<int> boundsForSelectedItem() const;
 
     // Replaces the items shown under the Playlists section.
     // Each pair is { sidebarId, displayName }.
@@ -94,6 +104,12 @@ private:
     std::unique_ptr<juce::Drawable> playlistIconDrawable_;
     std::unique_ptr<juce::Drawable> artistIconDrawable_;
     std::unique_ptr<juce::Drawable> albumIconDrawable_;
+
+    // Spinning loading indicator next to the LIBRARY heading.
+    bool   libraryLoading_   { false };
+    float  loadingRotation_  { 0.0f };
+
+    void timerCallback() override;
 
     static constexpr int sectionHeaderH = 30;
     static constexpr int itemH          = 36;

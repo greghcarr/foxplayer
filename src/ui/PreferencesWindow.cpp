@@ -167,6 +167,135 @@ void AudioPreferencesPanel::resized()
 }
 
 // ============================================================================
+// LibraryPreferencesPanel
+// ============================================================================
+
+LibraryPreferencesPanel::LibraryPreferencesPanel()
+{
+    heading_.setText("Music Library Folders", juce::dontSendNotification);
+    heading_.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)).boldened());
+    heading_.setColour(juce::Label::textColourId, Color::textPrimary);
+    addAndMakeVisible(heading_);
+
+    list_.setModel(this);
+    list_.setColour(juce::ListBox::backgroundColourId, Color::headerBackground);
+    list_.setColour(juce::ListBox::outlineColourId,    Color::border);
+    list_.setOutlineThickness(1);
+    list_.setRowHeight(32);
+    list_.setMultipleSelectionEnabled(true);
+    addAndMakeVisible(list_);
+
+    auto styleButton = [](juce::TextButton& b) {
+        b.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a2a2a));
+        b.setColour(juce::TextButton::textColourOffId, Color::textPrimary);
+    };
+    styleButton(addButton_);
+    styleButton(removeButton_);
+    addButton_.onClick    = [this] { addFolder(); };
+    removeButton_.onClick = [this] { removeSelectedFolders(); };
+    addAndMakeVisible(addButton_);
+    addAndMakeVisible(removeButton_);
+}
+
+void LibraryPreferencesPanel::setFolders(std::vector<juce::File> folders)
+{
+    folders_ = std::move(folders);
+    list_.updateContent();
+    list_.repaint();
+}
+
+void LibraryPreferencesPanel::paint(juce::Graphics& g)
+{
+    g.fillAll(Color::background);
+}
+
+void LibraryPreferencesPanel::resized()
+{
+    constexpr int pad       = 16;
+    constexpr int headingH  = 24;
+    constexpr int gap       = 10;
+    constexpr int btnH      = 28;
+    constexpr int listRowH  = 32;
+    constexpr int listRows  = 5;  // ~5 folders visible before scrolling
+    constexpr int listH     = listRowH * listRows + 2;  // +2 for outline
+
+    auto area = getLocalBounds().reduced(pad, pad);
+    heading_.setBounds(area.removeFromTop(headingH));
+    area.removeFromTop(gap);
+
+    auto listArea = area.removeFromTop(listH);
+    list_.setBounds(listArea);
+
+    area.removeFromTop(gap);
+    auto btnRow = area.removeFromTop(btnH);
+    addButton_.setBounds(btnRow.removeFromLeft(120));
+    btnRow.removeFromLeft(8);
+    removeButton_.setBounds(btnRow.removeFromLeft(140));
+}
+
+int LibraryPreferencesPanel::getNumRows()
+{
+    return static_cast<int>(folders_.size());
+}
+
+void LibraryPreferencesPanel::paintListBoxItem(int row, juce::Graphics& g,
+                                                int width, int height, bool selected)
+{
+    if (row < 0 || row >= static_cast<int>(folders_.size())) return;
+
+    if (selected)
+        g.fillAll(Color::tableSelected);
+    else
+        g.fillAll(row % 2 == 0 ? Color::tableBackground : Color::tableRowAlt);
+
+    g.setColour(Color::textPrimary);
+    g.setFont(juce::Font(juce::FontOptions().withHeight(14.0f)));
+    g.drawText(folders_[static_cast<size_t>(row)].getFullPathName(),
+               12, 0, width - 24, height,
+               juce::Justification::centredLeft, true);
+}
+
+void LibraryPreferencesPanel::addFolder()
+{
+    auto chooser = std::make_shared<juce::FileChooser>(
+        "Add a music folder",
+        juce::File::getSpecialLocation(juce::File::userMusicDirectory));
+
+    chooser->launchAsync(
+        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+        [this, chooser](const juce::FileChooser& fc) {
+            const auto results = fc.getResults();
+            if (results.isEmpty()) return;
+            const auto folder = results[0];
+            for (const auto& f : folders_)
+                if (f == folder) return;   // no duplicates
+
+            auto updated = folders_;
+            updated.push_back(folder);
+            if (onFoldersChanged) onFoldersChanged(std::move(updated));
+        });
+}
+
+void LibraryPreferencesPanel::removeSelectedFolders()
+{
+    auto selected = list_.getSelectedRows();
+    if (selected.isEmpty()) return;
+
+    auto updated = folders_;
+    // Remove from the highest index downwards so earlier indices stay valid.
+    std::vector<int> rowsDesc;
+    for (int i = 0; i < selected.size(); ++i)
+        rowsDesc.push_back(selected[i]);
+    std::sort(rowsDesc.begin(), rowsDesc.end(), std::greater<int>());
+    for (int row : rowsDesc)
+        if (row >= 0 && row < static_cast<int>(updated.size()))
+            updated.erase(updated.begin() + row);
+
+    list_.deselectAllRows();
+    if (onFoldersChanged) onFoldersChanged(std::move(updated));
+}
+
+// ============================================================================
 // PreferencesComponent
 // ============================================================================
 
@@ -176,11 +305,8 @@ PreferencesComponent::PreferencesComponent(juce::AudioDeviceManager& dm)
     items_.push_back({ Category::Audio,   "Audio",   {} });
     items_.push_back({ Category::Library, "Library", {} });
 
-    audioPanel_ = std::make_unique<AudioPreferencesPanel>(deviceManager_);
-
-    // Placeholder for the Library panel - just a centered "coming soon" label.
-    libraryPanel_ = std::make_unique<juce::Component>();
-    libraryPanel_->setOpaque(false);
+    audioPanel_   = std::make_unique<AudioPreferencesPanel>(deviceManager_);
+    libraryPanel_ = std::make_unique<LibraryPreferencesPanel>();
     addChildComponent(*libraryPanel_);
     addChildComponent(*audioPanel_);
 
@@ -239,17 +365,6 @@ void PreferencesComponent::paint(juce::Graphics& g)
                    false);
     }
 
-    // "Library settings coming soon" message in the content area.
-    if (current_ == Category::Library)
-    {
-        g.setColour(Color::textDim);
-        g.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)).italicised());
-        g.drawText("Library settings coming soon.",
-                   juce::Rectangle<int>(sidebarWidth, 0,
-                                        getWidth() - sidebarWidth, getHeight()),
-                   juce::Justification::centred,
-                   false);
-    }
 }
 
 void PreferencesComponent::resized()
@@ -289,6 +404,7 @@ PreferencesWindow::PreferencesWindow(juce::AudioDeviceManager& dm)
     setResizeLimits(420, 320, 1200, 900);
 
     auto* content = new PreferencesComponent(dm);
+    prefsComponent_ = content;
     setContentOwned(content, true);
     centreWithSize(640, 420);
     setVisible(false);
@@ -297,6 +413,12 @@ PreferencesWindow::PreferencesWindow(juce::AudioDeviceManager& dm)
 void PreferencesWindow::closeButtonPressed()
 {
     setVisible(false);
+    if (onClosed) onClosed();
+}
+
+LibraryPreferencesPanel* PreferencesWindow::libraryPanel()
+{
+    return prefsComponent_ != nullptr ? &prefsComponent_->libraryPanel() : nullptr;
 }
 
 } // namespace FoxPlayer

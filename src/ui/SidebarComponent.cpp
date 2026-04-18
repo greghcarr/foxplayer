@@ -87,6 +87,35 @@ void SidebarComponent::setAlbums(const std::vector<std::pair<int, juce::String>>
     repaint();
 }
 
+juce::Rectangle<int> SidebarComponent::boundsForSelectedItem() const
+{
+    for (const auto& section : sections_)
+    {
+        if (section.collapsible && section.collapsed) continue;
+        for (const auto& item : section.items)
+            if (item.id == selectedId_)
+                return item.bounds;
+    }
+    return {};
+}
+
+void SidebarComponent::setLibraryLoading(bool loading)
+{
+    if (libraryLoading_ == loading) return;
+    libraryLoading_ = loading;
+    if (loading) startTimerHz(30);
+    else         stopTimer();
+    repaint();
+}
+
+void SidebarComponent::timerCallback()
+{
+    loadingRotation_ += juce::MathConstants<float>::pi * 0.08f;
+    if (loadingRotation_ > juce::MathConstants<float>::twoPi)
+        loadingRotation_ -= juce::MathConstants<float>::twoPi;
+    repaint();
+}
+
 void SidebarComponent::setSelectedId(int id)
 {
     selectedId_ = id;
@@ -193,6 +222,36 @@ void SidebarComponent::paint(juce::Graphics& g)
             const float textW = ga.getBoundingBox(0, -1, true).getWidth();
             const float triX  = static_cast<float>(itemPadL) + textW + 6.0f;
             drawDisclosureTriangle(g, triX, section.headerBounds.getCentreY(), section.collapsed);
+        }
+
+        // Spinning loading indicator beside the LIBRARY heading while the
+        // music-folder scan is running.
+        if (libraryLoading_ && section.heading == "LIBRARY")
+        {
+            juce::GlyphArrangement ga;
+            ga.addLineOfText(headingFont, section.heading, 0.0f, 0.0f);
+            const float textW = ga.getBoundingBox(0, -1, true).getWidth();
+
+            const float r  = 5.5f;
+            const float cx = static_cast<float>(itemPadL) + textW + 12.0f + r;
+            const float cy = static_cast<float>(section.headerBounds.getCentreY());
+
+            // Faint full ring
+            g.setColour(Color::textDim);
+            g.drawEllipse(cx - r, cy - r, r * 2.0f, r * 2.0f, 1.5f);
+
+            // Rotating accent arc
+            juce::Path arc;
+            const float sweep = juce::MathConstants<float>::pi * 1.55f;
+            arc.addCentredArc(cx, cy, r, r,
+                              0.0f,
+                              loadingRotation_,
+                              loadingRotation_ + sweep,
+                              true);
+            g.setColour(Color::accent);
+            g.strokePath(arc, juce::PathStrokeType(1.5f,
+                                                   juce::PathStrokeType::curved,
+                                                   juce::PathStrokeType::rounded));
         }
 
         if (!section.collapsed)

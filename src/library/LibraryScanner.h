@@ -16,7 +16,9 @@ public:
     LibraryScanner();
     ~LibraryScanner() override;
 
-    void scanFolder(const juce::File& folder);
+    // Scans one or more root folders. Calling this with a new set cancels
+    // any scan already in progress.
+    void scanFolders(std::vector<juce::File> folders);
     void cancelScan();
     bool isScanning() const;
 
@@ -32,8 +34,8 @@ private:
     TrackInfo buildTrackInfo(const juce::File& file,
                              juce::AudioFormatManager& fmgr) const;
 
-    juce::File scanRoot_;
-    juce::CriticalSection lock_;
+    std::vector<juce::File> scanRoots_;
+    juce::CriticalSection   lock_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryScanner)
 };

@@ -45,6 +45,42 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPreferencesPanel)
 };
 
+// ---- Library panel -----------------------------------------------------------
+// Scrollable list of music-library root folders plus Add/Remove buttons. All
+// changes fire through onFoldersChanged; MainComponent pushes the live folder
+// list back via setFolders (which the panel mirrors in its display).
+class LibraryPreferencesPanel : public juce::Component,
+                                 public juce::ListBoxModel
+{
+public:
+    LibraryPreferencesPanel();
+
+    // Fires after the user adds or removes a folder.
+    std::function<void(std::vector<juce::File>)> onFoldersChanged;
+
+    void setFolders(std::vector<juce::File> folders);
+    const std::vector<juce::File>& folders() const { return folders_; }
+
+    void paint(juce::Graphics& g) override;
+    void resized() override;
+
+    int  getNumRows() override;
+    void paintListBoxItem(int row, juce::Graphics& g, int width, int height, bool selected) override;
+
+private:
+    void addFolder();
+    void removeSelectedFolders();
+
+    juce::Label        heading_;
+    juce::ListBox      list_;
+    juce::TextButton   addButton_    { "Add Folder" };
+    juce::TextButton   removeButton_ { "Remove Folder" };
+
+    std::vector<juce::File> folders_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryPreferencesPanel)
+};
+
 // ---- Sidebar + panel host ----------------------------------------------------
 // Left-hand category list + right-hand content area. Add a new category by
 // extending the Category enum and wiring a new panel in PreferencesComponent.
@@ -74,8 +110,13 @@ private:
     std::vector<SidebarItem>               items_;
     Category                               current_ { Category::Audio };
 
-    std::unique_ptr<AudioPreferencesPanel> audioPanel_;
-    std::unique_ptr<juce::Component>       libraryPanel_;   // placeholder
+    std::unique_ptr<AudioPreferencesPanel>   audioPanel_;
+    std::unique_ptr<LibraryPreferencesPanel> libraryPanel_;
+
+public:
+    LibraryPreferencesPanel& libraryPanel() { return *libraryPanel_; }
+
+private:
 
     static constexpr int sidebarWidth = 160;
     static constexpr int itemHeight   = 34;
@@ -93,7 +134,17 @@ public:
 
     void closeButtonPressed() override;
 
+    // Direct access to the library panel so MainComponent can wire up the
+    // add/remove callback and push the current folder list into the view.
+    LibraryPreferencesPanel* libraryPanel();
+
+    // Fires when the user closes the preferences window (so MainComponent
+    // can refresh menu item state that depends on visibility).
+    std::function<void()> onClosed;
+
 private:
+    PreferencesComponent* prefsComponent_ { nullptr };
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PreferencesWindow)
 };
 

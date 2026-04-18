@@ -80,7 +80,7 @@ MainComponent::MainComponent()
 
     chooseFolderButton_.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
     chooseFolderButton_.setColour(juce::TextButton::textColourOffId, Color::textPrimary);
-    chooseFolderButton_.onClick = [this] { showFolderChooser(); };
+    chooseFolderButton_.onClick = [this] { showAddFolderChooser(); };
     addChildComponent(chooseFolderButton_);
 
     // Library table callbacks
@@ -187,7 +187,7 @@ MainComponent::MainComponent()
     // Transport bar callbacks
     transportBar_.onPrevClicked         = [this] { playPrev(); };
     transportBar_.onNextClicked         = [this] { playNext(); };
-    transportBar_.onChangeFolderClicked = [this] { showFolderChooser(); };
+    transportBar_.onChangeFolderClicked = [this] { showAddFolderChooser(); };
     transportBar_.onPlayingFromClicked  = [this](int sidebarId) {
         sidebar_.setSelectedId(sidebarId);
         showSidebarItem(sidebarId);
@@ -204,7 +204,16 @@ MainComponent::MainComponent()
     };
     transportBar_.onVolumeChanged = [this](double v) {
         if (auto* props = appProperties_.getUserSettings())
+        {
             props->setValue("volume", v);
+            props->saveIfNeeded();
+            DBG("Saved volume " + juce::String(v) + " to "
+                + props->getFile().getFullPathName());
+        }
+        else
+        {
+            DBG("onVolumeChanged: getUserSettings() returned null");
+        }
     };
 
     // Restore persisted volume (defaults to 0.5 on first run).
@@ -213,14 +222,43 @@ MainComponent::MainComponent()
 
     // Scanner callbacks
     scanner_.onBatchReady = [this](std::vector<TrackInfo> batch) {
+        if (scanReplacingCachedLibrary_)
+        {
+            // Cached library is being shown; collect into a buffer instead so
+            // we don't disturb the visible state until the scan finishes.
+            scanBuffer_.insert(scanBuffer_.end(), batch.begin(), batch.end());
+            return;
+        }
+
         fullLibrary_.insert(fullLibrary_.end(), batch.begin(), batch.end());
         if (activeSidebarId_ == 1)
             libraryTable_.appendTracks(batch);
         showEmptyLibraryPrompt(false);
         loadingIndicator_.setVisible(false);
+        // Refresh Artists/Albums on every batch so they fill in incrementally
+        // during the scan instead of staying empty until the end.
+        refreshSidebarArtists();
+        refreshSidebarAlbums();
     };
-    scanner_.onScanComplete = [this](int /*total*/) {
+    scanner_.onScanComplete = [this](int total) {
+        DBG("onScanComplete total=" + juce::String(total)
+            + " sessionRestored=" + juce::String((int) sessionRestored_)
+            + " fullLibrary.size=" + juce::String((int) fullLibrary_.size())
+            + " replacingCache=" + juce::String((int) scanReplacingCachedLibrary_));
+
+        // If this scan was confirming a cached library, swap the fresh
+        // results in now and refresh dependent views.
+        if (scanReplacingCachedLibrary_)
+        {
+            fullLibrary_ = std::move(scanBuffer_);
+            scanBuffer_.clear();
+            scanReplacingCachedLibrary_ = false;
+            libraryTable_.setTracks(fullLibrary_);
+            refreshCurrentView();
+        }
+
         loadingIndicator_.setVisible(false);
+        sidebar_.setLibraryLoading(false);
         refreshSidebarArtists();
         refreshSidebarAlbums();
 
@@ -229,30 +267,46 @@ MainComponent::MainComponent()
         if (!sessionRestored_)
             restoreSessionState();
 
-        // Orphan-cleanup walks the entire music folder deleting any dot-prefixed
-        // .foxp sidecar whose audio file no longer exists. It's pure background
-        // housekeeping, so run it fire-and-forget on its own thread rather than
-        // blocking shutdown or the message thread.
-        const juce::File folder = currentMusicFolder_;
-        juce::Thread::launch([folder]() {
-            if (!folder.isDirectory()) return;
+        // Persist the freshly-scanned library so the next launch can populate
+        // fullLibrary_ instantly from disk before doing its own background scan.
+        // Wrapped in try/catch so a write error never breaks the scan flow.
+        try
+        {
+            const bool ok = LibraryCache::save(fullLibrary_, musicFolders_);
+            DBG("LibraryCache::save -> " + juce::String((int) ok));
+        }
+        catch (...)
+        {
+            DBG("LibraryCache::save threw");
+        }
 
-            juce::Array<juce::File> foxpFiles;
-            folder.findChildFiles(foxpFiles, juce::File::findFiles, true, "*.foxp");
-
-            for (const auto& foxp : foxpFiles)
+        // Orphan-cleanup walks each configured library folder, deleting any
+        // dot-prefixed .foxp sidecar whose audio file no longer exists. Pure
+        // background housekeeping; runs fire-and-forget so it doesn't block
+        // shutdown or the message thread.
+        const std::vector<juce::File> folders = musicFolders_;
+        juce::Thread::launch([folders]() {
+            for (const auto& folder : folders)
             {
-                // Sidecar naming: ".<audiofile>.<ext>.foxp" (dot-prefixed,
-                // .foxp-suffixed). To recover the audio file path, strip both
-                // the leading dot from the filename and the ".foxp" suffix.
-                const juce::String name = foxp.getFileName();
-                if (! name.startsWith(".") || ! name.endsWithIgnoreCase(".foxp"))
-                    continue;
+                if (!folder.isDirectory()) continue;
 
-                const juce::String audioName = name.substring(1, name.length() - 5);
-                const juce::File audioFile   = foxp.getParentDirectory().getChildFile(audioName);
-                if (! audioFile.existsAsFile())
-                    foxp.deleteFile();
+                juce::Array<juce::File> foxpFiles;
+                folder.findChildFiles(foxpFiles, juce::File::findFiles, true, "*.foxp");
+
+                for (const auto& foxp : foxpFiles)
+                {
+                    // Sidecar naming: ".<audiofile>.<ext>.foxp" (dot-prefixed,
+                    // .foxp-suffixed). Strip both the leading dot and the
+                    // ".foxp" suffix to recover the audio file path.
+                    const juce::String name = foxp.getFileName();
+                    if (! name.startsWith(".") || ! name.endsWithIgnoreCase(".foxp"))
+                        continue;
+
+                    const juce::String audioName = name.substring(1, name.length() - 5);
+                    const juce::File audioFile   = foxp.getParentDirectory().getChildFile(audioName);
+                    if (! audioFile.existsAsFile())
+                        foxp.deleteFile();
+                }
             }
         });
     };
@@ -260,6 +314,37 @@ MainComponent::MainComponent()
     // Analysis log window (created hidden; shown via Window menu).
     analysisLogWindow_ = std::make_unique<AnalysisLogWindow>();
     preferencesWindow_ = std::make_unique<PreferencesWindow>(engine_.deviceManager());
+    preferencesWindow_->onClosed = [this] {
+        // Unlock the main window.
+        prefsLockOverlay_.setVisible(false);
+        if (preferencesWindow_) preferencesWindow_->setAlwaysOnTop(false);
+        // Re-enable the Preferences menu item now the window is dismissed.
+        menuItemsChanged();
+    };
+
+    // Overlay buttons shown while Preferences is open.
+    prefsLockOverlay_.onRecenterPrefs = [this] {
+        if (! preferencesWindow_) return;
+        // Recentre the Preferences window on whatever part of the screen the
+        // main window currently occupies, so it's impossible to miss.
+        const auto target = getScreenBounds().getCentre();
+        preferencesWindow_->setCentrePosition(target);
+        preferencesWindow_->toFront(true);
+    };
+    prefsLockOverlay_.onClosePrefs = [this] {
+        if (preferencesWindow_) preferencesWindow_->closeButtonPressed();
+    };
+    addChildComponent(prefsLockOverlay_);
+
+    // Wire the Library panel in Preferences to the live folder list.
+    if (auto* libPanel = preferencesWindow_->libraryPanel())
+    {
+        libPanel->onFoldersChanged = [this](std::vector<juce::File> folders) {
+            setMusicFolders(std::move(folders));
+            if (auto* p = preferencesWindow_->libraryPanel())
+                p->setFolders(musicFolders_);
+        };
+    }
 
     // Analysis callbacks - feed both the library and the log window.
     analysisEngine_.onTrackQueued = [this](TrackInfo t) {
@@ -341,12 +426,51 @@ MainComponent::MainComponent()
 
     setupAudioEngineCallbacks();
 
-    // Restore saved folder or show prompt.
-    const auto savedFolder = loadSavedMusicFolder();
-    if (savedFolder.isDirectory())
-        loadMusicFolder(savedFolder);
+    // Restore saved music folders (or show the empty prompt if none).
+    auto savedFolders = loadSavedMusicFolders();
+    // Prune anything that's no longer a valid directory.
+    savedFolders.erase(std::remove_if(savedFolders.begin(), savedFolders.end(),
+                                       [](const juce::File& f) { return ! f.isDirectory(); }),
+                       savedFolders.end());
+
+    if (! savedFolders.empty())
+    {
+        // Try the on-disk library cache first so the UI populates instantly
+        // (sidebar / library table / queue restore) without waiting for the
+        // background scan to finish. The scan still runs to pick up any
+        // changes since the cache was written.
+        std::vector<TrackInfo>   cachedTracks;
+        std::vector<juce::File>  cachedFolders;
+        bool cacheUsed = false;
+        try
+        {
+            if (LibraryCache::tryLoad(cachedTracks, cachedFolders)
+                && cachedFolders == savedFolders)
+            {
+                DBG("LibraryCache loaded "
+                    + juce::String((int) cachedTracks.size()) + " tracks");
+                fullLibrary_ = std::move(cachedTracks);
+                libraryTable_.setTracks(fullLibrary_);
+                refreshSidebarArtists();
+                refreshSidebarAlbums();
+                if (! sessionRestored_)
+                    restoreSessionState();
+                cacheUsed = true;
+            }
+        }
+        catch (...)
+        {
+            DBG("LibraryCache::tryLoad threw, ignoring cache");
+        }
+        // If the cache was used, keep the cached library visible while a
+        // confirmation scan runs in the background; otherwise do a normal
+        // clear-and-scan.
+        setMusicFolders(std::move(savedFolders), /*keepLibrary*/ cacheUsed);
+    }
     else
+    {
         showEmptyLibraryPrompt(true);
+    }
 
     setWantsKeyboardFocus(true);
     addKeyListener(this);
@@ -356,6 +480,7 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    DBG("MainComponent destructor begin (sessionRestored=" + juce::String((int) sessionRestored_) + ")");
     stopTimer();
     removeKeyListener(this);
 
@@ -364,8 +489,18 @@ MainComponent::~MainComponent()
     {
         saveSessionElapsed();
         saveSessionState();
-        if (auto* props = appProperties_.getUserSettings())
-            props->saveIfNeeded();
+    }
+    // Always flush whatever state we have so changes never get stranded in
+    // memory at quit time.
+    if (auto* props = appProperties_.getUserSettings())
+    {
+        const bool ok = props->save();
+        DBG("Destructor save -> " + props->getFile().getFullPathName()
+            + (ok ? " (save ok)" : " (save FAILED)"));
+    }
+    else
+    {
+        DBG("Destructor: getUserSettings() returned null");
     }
 }
 
@@ -429,6 +564,21 @@ void MainComponent::updateTrackInLibrary(const TrackInfo& updated)
         refreshCurrentView();
         updatePlayingHighlight();
     }
+}
+
+void MainComponent::scrollSelectedSidebarItemIntoView()
+{
+    const auto itemBounds = sidebar_.boundsForSelectedItem();
+    if (itemBounds.isEmpty()) return;
+
+    const int visibleH = sidebarViewport_.getMaximumVisibleHeight();
+    const int totalH   = sidebar_.getHeight();
+    if (visibleH <= 0 || totalH <= visibleH) return;   // nothing to scroll
+
+    const int centreY = itemBounds.getY() + itemBounds.getHeight() / 2;
+    int targetY = centreY - visibleH / 2;
+    targetY = juce::jlimit(0, totalH - visibleH, targetY);
+    sidebarViewport_.setViewPosition(0, targetY);
 }
 
 void MainComponent::updatePlayingHighlight()
@@ -718,6 +868,76 @@ void MainComponent::paint(juce::Graphics& g)
     g.fillAll(Color::background);
 }
 
+MainComponent::PrefsLockOverlay::PrefsLockOverlay()
+{
+    // Capture every click so nothing underneath is reachable.
+    setInterceptsMouseClicks(true, true);
+
+    message_.setFont(juce::Font(juce::FontOptions().withHeight(18.0f)).boldened());
+    message_.setColour(juce::Label::textColourId, Constants::Color::textPrimary);
+    message_.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(message_);
+
+    auto styleButton = [](juce::TextButton& b) {
+        b.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
+        b.setColour(juce::TextButton::textColourOffId, Constants::Color::textPrimary);
+    };
+    styleButton(openBtn_);
+    styleButton(closeBtn_);
+    openBtn_.onClick  = [this] { if (onRecenterPrefs) onRecenterPrefs(); };
+    closeBtn_.onClick = [this] { if (onClosePrefs)    onClosePrefs(); };
+    addAndMakeVisible(openBtn_);
+    addAndMakeVisible(closeBtn_);
+}
+
+void MainComponent::PrefsLockOverlay::paint(juce::Graphics& g)
+{
+    g.fillAll(juce::Colours::black.withAlpha(0.55f));
+
+    // Solid panel behind the text + buttons so they read clearly against any
+    // dimmed library content underneath.
+    constexpr int msgH   = 28;
+    constexpr int gap    = 12;
+    constexpr int btnH   = 32;
+    constexpr int btnW   = 180;
+    constexpr int btnGap = 12;
+    constexpr int padX   = 22;
+    constexpr int padY   = 16;
+
+    const int groupW = btnW * 2 + btnGap;
+    const int groupH = msgH + gap + btnH;
+    const auto panel = getLocalBounds()
+                          .withSizeKeepingCentre(groupW + padX * 2,
+                                                 groupH + padY * 2)
+                          .toFloat();
+
+    g.setColour(Constants::Color::background);
+    g.fillRoundedRectangle(panel, 8.0f);
+
+    g.setColour(Constants::Color::border);
+    g.drawRoundedRectangle(panel.reduced(0.5f), 8.0f, 1.0f);
+}
+
+void MainComponent::PrefsLockOverlay::resized()
+{
+    constexpr int msgH = 28;
+    constexpr int gap  = 12;
+    constexpr int btnH = 32;
+    constexpr int btnW = 180;
+    constexpr int btnGap = 12;
+
+    const int groupW = btnW * 2 + btnGap;
+    const int groupH = msgH + gap + btnH;
+    auto area = getLocalBounds().withSizeKeepingCentre(groupW, groupH);
+
+    message_.setBounds(area.removeFromTop(msgH));
+    area.removeFromTop(gap);
+    auto row = area.removeFromTop(btnH);
+    openBtn_.setBounds(row.removeFromLeft(btnW));
+    row.removeFromLeft(btnGap);
+    closeBtn_.setBounds(row.removeFromLeft(btnW));
+}
+
 void MainComponent::resized()
 {
     auto bounds = getLocalBounds();
@@ -794,6 +1014,12 @@ void MainComponent::resized()
     loadingIndicator_.setBounds(bounds.withSizeKeepingCentre(280, 40));
     chooseFolderButton_.setBounds(bounds.withSizeKeepingCentre(200, 36)
                                         .translated(0, 50));
+
+    // Preferences-lock overlay covers the whole component so it dims both
+    // the library area and transport bar uniformly.
+    prefsLockOverlay_.setBounds(getLocalBounds());
+    if (prefsLockOverlay_.isVisible())
+        prefsLockOverlay_.toFront(false);
 }
 
 bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
@@ -807,10 +1033,10 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
     return false;
 }
 
-void MainComponent::showFolderChooser()
+void MainComponent::showAddFolderChooser()
 {
     auto chooser = std::make_shared<juce::FileChooser>(
-        "Select your music folder",
+        "Select a music folder",
         juce::File::getSpecialLocation(juce::File::userMusicDirectory));
 
     chooser->launchAsync(
@@ -818,24 +1044,67 @@ void MainComponent::showFolderChooser()
         [this, chooser](const juce::FileChooser& fc) {
             const auto results = fc.getResults();
             if (results.isEmpty()) return;
+            auto updated = musicFolders_;
             const auto folder = results[0];
-            saveMusicFolder(folder);
-            loadMusicFolder(folder);
+            // Avoid duplicate entries.
+            bool already = false;
+            for (const auto& f : updated)
+                if (f == folder) { already = true; break; }
+            if (! already)
+                updated.push_back(folder);
+            setMusicFolders(std::move(updated));
         });
 }
 
-void MainComponent::loadMusicFolder(const juce::File& folder)
+void MainComponent::setMusicFolders(std::vector<juce::File> folders)
 {
-    currentMusicFolder_ = folder;
-    fullLibrary_.clear();
-    activeSidebarId_ = 1;
-    sidebar_.setSelectedId(1);
-    deleteOldStyleFoxpFiles(folder);
-    libraryTable_.clearTracks();
+    setMusicFolders(std::move(folders), /*keepLibrary*/ false);
+}
+
+void MainComponent::setMusicFolders(std::vector<juce::File> folders, bool keepLibrary)
+{
+    musicFolders_ = std::move(folders);
+    DBG("setMusicFolders: " + juce::String((int) musicFolders_.size())
+        + " folder(s), keepLibrary=" + juce::String((int) keepLibrary));
+    for (const auto& f : musicFolders_)
+        DBG("  folder: " + f.getFullPathName()
+            + " (isDir=" + juce::String((int) f.isDirectory()) + ")");
+    saveMusicFolders();
+
+    if (! keepLibrary)
+    {
+        fullLibrary_.clear();
+        activeSidebarId_ = 1;
+        sidebar_.setSelectedId(1);
+        libraryTable_.clearTracks();
+        refreshSidebarArtists();
+        refreshSidebarAlbums();
+    }
+
+    for (const auto& f : musicFolders_)
+        deleteOldStyleFoxpFiles(f);
+
+    if (musicFolders_.empty())
+    {
+        loadingIndicator_.setVisible(false);
+        sidebar_.setLibraryLoading(false);
+        showEmptyLibraryPrompt(true);
+        refreshCurrentView();
+        resized();
+        return;
+    }
+
     showEmptyLibraryPrompt(false);
-    loadingIndicator_.setVisible(true);
+    // Only show the centred loading overlay when we have nothing to display
+    // already. With a cached library visible, the spinner next to the LIBRARY
+    // heading is enough to signal background activity.
+    loadingIndicator_.setVisible(! keepLibrary);
+    sidebar_.setLibraryLoading(true);
     resized();
-    scanner_.scanFolder(folder);
+
+    scanReplacingCachedLibrary_ = keepLibrary;
+    scanBuffer_.clear();
+    scanner_.scanFolders(musicFolders_);
 }
 
 void MainComponent::deleteOldStyleFoxpFiles(const juce::File& folder)
@@ -851,21 +1120,41 @@ void MainComponent::deleteOldStyleFoxpFiles(const juce::File& folder)
     }
 }
 
-void MainComponent::saveMusicFolder(const juce::File& folder)
+void MainComponent::saveMusicFolders()
 {
-    if (auto* props = appProperties_.getUserSettings())
-        props->setValue("musicFolder", folder.getFullPathName());
+    auto* props = appProperties_.getUserSettings();
+    if (props == nullptr) return;
+
+    juce::StringArray paths;
+    for (const auto& f : musicFolders_)
+        paths.add(f.getFullPathName());
+    props->setValue("musicFolders", paths.joinIntoString("\n"));
 }
 
-juce::File MainComponent::loadSavedMusicFolder()
+std::vector<juce::File> MainComponent::loadSavedMusicFolders()
 {
-    if (auto* props = appProperties_.getUserSettings())
+    std::vector<juce::File> result;
+    auto* props = appProperties_.getUserSettings();
+    if (props == nullptr) return result;
+
+    const juce::String joined = props->getValue("musicFolders");
+    if (joined.isNotEmpty())
     {
-        const auto path = props->getValue("musicFolder");
-        if (path.isNotEmpty())
-            return juce::File(path);
+        juce::StringArray paths;
+        paths.addTokens(joined, "\n", "");
+        for (const auto& p : paths)
+            if (p.isNotEmpty())
+                result.emplace_back(p);
+        return result;
     }
-    return {};
+
+    // Fall back to the old single-folder key so upgrading users keep their
+    // library without having to re-add it.
+    const juce::String legacy = props->getValue("musicFolder");
+    if (legacy.isNotEmpty())
+        result.emplace_back(legacy);
+
+    return result;
 }
 
 juce::String MainComponent::sourceNameForSidebar(int sidebarId) const
@@ -1003,8 +1292,24 @@ void MainComponent::applyAlwaysOnTop()
 void MainComponent::showPreferences()
 {
     if (!preferencesWindow_) return;
+    // Push the live folder list into the panel each time we open Preferences
+    // so the UI reflects any changes made elsewhere.
+    if (auto* libPanel = preferencesWindow_->libraryPanel())
+        libPanel->setFolders(musicFolders_);
     preferencesWindow_->setVisible(true);
     preferencesWindow_->toFront(true);
+    // Preferences floats above the main window so the user can't hide it.
+    preferencesWindow_->setAlwaysOnTop(true);
+
+    // Show the lock overlay on the main window. It dims the content and
+    // captures clicks so the user can't interact with anything underneath,
+    // but exposes its own "Open Preferences" / "Close Preferences" buttons.
+    prefsLockOverlay_.setVisible(true);
+    prefsLockOverlay_.toFront(false);
+    resized();
+
+    // Refresh the menu so "Preferences..." disables while the window is open.
+    menuItemsChanged();
 }
 
 void MainComponent::showEmptyLibraryPrompt(bool show)
@@ -1024,7 +1329,6 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String& /*
     juce::PopupMenu menu;
     if (index == 0)
     {
-        menu.addCommandItem(&commandManager_, cmdChooseFolder);
         menu.addCommandItem(&commandManager_, cmdShowHidden);
     }
     else if (index == 1)
@@ -1041,7 +1345,6 @@ void MainComponent::menuItemSelected(int /*menuItemID*/, int /*topLevelMenuIndex
 // juce::ApplicationCommandTarget
 void MainComponent::getAllCommands(juce::Array<juce::CommandID>& commands)
 {
-    commands.add(cmdChooseFolder);
     commands.add(cmdShowHidden);
     commands.add(cmdShowAnalysisLog);
     commands.add(cmdPreferences);
@@ -1053,12 +1356,6 @@ void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandI
 {
     switch (id)
     {
-        case cmdChooseFolder:
-            info.setInfo("Choose Music Folder...", "Select the folder containing your music",
-                         "File", 0);
-            info.addDefaultKeypress('o', juce::ModifierKeys::commandModifier);
-            break;
-
         case cmdShowHidden:
             info.setInfo("Show Hidden Songs in Library",
                          "Show hidden songs dimmed in the library",
@@ -1081,6 +1378,9 @@ void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandI
             info.setInfo("Preferences...",
                          "Open the FoxPlayer preferences window",
                          "File", 0);
+            // Disable the menu item + shortcut while the preferences window
+            // is already open, so clicking it again does nothing.
+            info.setActive(! (preferencesWindow_ && preferencesWindow_->isVisible()));
             info.addDefaultKeypress(',', juce::ModifierKeys::commandModifier);
             break;
 
@@ -1108,10 +1408,6 @@ bool MainComponent::perform(const ApplicationCommandTarget::InvocationInfo& info
 {
     switch (info.commandID)
     {
-        case cmdChooseFolder:
-            showFolderChooser();
-            return true;
-
         case cmdShowHidden:
             libraryTable_.setShowHidden(!libraryTable_.showHidden());
             menuItemsChanged();
@@ -1144,10 +1440,22 @@ bool MainComponent::perform(const ApplicationCommandTarget::InvocationInfo& info
 
 void MainComponent::saveSessionState()
 {
-    if (sessionRestoring_ || !sessionRestored_) return;
+    if (sessionRestoring_)
+    {
+        DBG("saveSessionState skipped (sessionRestoring=true)");
+        return;
+    }
+    sessionRestored_ = true;
 
     auto* props = appProperties_.getUserSettings();
-    if (!props) return;
+    if (!props)
+    {
+        DBG("saveSessionState: getUserSettings() returned null");
+        return;
+    }
+    DBG("saveSessionState - sidebar=" + juce::String(activeSidebarId_)
+        + " queue.size=" + juce::String(queue_.size())
+        + " queue.hasCurrent=" + juce::String((int) queue_.hasCurrent()));
 
     props->setValue("sessionSidebarWidth",    sidebarWidth_);
     props->setValue("sessionActiveSidebarId", activeSidebarId_);
@@ -1165,7 +1473,7 @@ void MainComponent::saveSessionState()
     }
     props->setValue("sessionShuffleOn",       shuffleOn_);
     props->setValue("sessionRepeatMode",      repeatMode_);
-    props->setValue("sessionAlwaysOnTop",     alwaysOnTop_);
+    // Always-on-top is deliberately not persisted; each launch starts "off".
 
     // Persist the queue in its original (un-shuffled) order so un-shuffle still
     // works on the restored session, plus the current track's path so we can
@@ -1191,19 +1499,43 @@ void MainComponent::saveSessionState()
         props->removeValue("sessionQueueSourceName");
         props->removeValue("sessionQueueCurrentPath");
     }
+
+    // Flush to disk immediately so the saved state survives crashes / SIGKILL
+    // / debugger stops, not only clean exits.
+    const bool ok = props->saveIfNeeded();
+    DBG("saveSessionState wrote to " + props->getFile().getFullPathName()
+        + (ok ? " (saveIfNeeded ok)" : " (saveIfNeeded FAILED or no-op)"));
 }
 
 void MainComponent::saveSessionElapsed()
 {
     if (sessionRestoring_ || !sessionRestored_) return;
+    // (Unlike saveSessionState we don't auto-flip sessionRestored_ here:
+    //  the timer that calls this fires regardless of user action, so flipping
+    //  on the first tick would always pre-empt the upcoming restore.)
     if (auto* props = appProperties_.getUserSettings())
+    {
         props->setValue("sessionElapsedSeconds", engine_.elapsedSeconds());
+        props->saveIfNeeded();
+    }
 }
 
 void MainComponent::restoreSessionState()
 {
     auto* props = appProperties_.getUserSettings();
-    if (!props) { sessionRestored_ = true; return; }
+    if (!props)
+    {
+        DBG("restoreSessionState: getUserSettings() returned null");
+        sessionRestored_ = true;
+        return;
+    }
+
+    DBG("restoreSessionState reading from " + props->getFile().getFullPathName()
+        + " (file exists=" + juce::String((int) props->getFile().existsAsFile()) + ")");
+    DBG("  sessionQueuePaths length: "
+        + juce::String(props->getValue("sessionQueuePaths").length()));
+    DBG("  sessionQueueCurrentPath: " + props->getValue("sessionQueueCurrentPath"));
+    DBG("  fullLibrary_ size: " + juce::String((int) fullLibrary_.size()));
 
     sessionRestoring_ = true;
 
@@ -1235,9 +1567,10 @@ void MainComponent::restoreSessionState()
     repeatMode_ = juce::jlimit(0, 2, props->getIntValue("sessionRepeatMode", 0));
     transportBar_.setRepeatMode(repeatMode_);
 
-    // Always-on-top pin state.
-    alwaysOnTop_ = props->getBoolValue("sessionAlwaysOnTop", false);
-    pinButton_.toggleState = alwaysOnTop_ ? 1 : 0;
+    // Always-on-top pin: intentionally NOT restored. Every launch starts with
+    // the feature disabled; the user has to opt in again each session.
+    alwaysOnTop_ = false;
+    pinButton_.toggleState = 0;
     pinButton_.repaint();
     applyAlwaysOnTop();
     menuItemsChanged();
@@ -1313,6 +1646,12 @@ void MainComponent::restoreSessionState()
 
     sessionRestoring_ = false;
     sessionRestored_  = true;
+    DBG("restoreSessionState complete");
+
+    // Deferred so it runs after any pending resize/layout messages have
+    // processed, meaning the sidebar's item bounds + viewport height are
+    // final by the time we compute the scroll position.
+    juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
 }
 
 } // namespace FoxPlayer
