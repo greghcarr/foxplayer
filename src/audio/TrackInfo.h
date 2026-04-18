@@ -22,6 +22,10 @@ struct TrackInfo
     juce::String musicalKey;             // e.g. "Am", "C#", "" = not analysed
     float        lufs         { 0.0f };  // integrated loudness, 0 = not analysed
 
+    // --- Podcast ---
+    bool         isPodcast    { false }; // true if this file came from a podcast folder
+    juce::String podcast;               // podcast/show name (replaces artist in podcast views)
+
     // --- User flags ---
     bool         hidden       { false }; // excluded from library view; persisted in .foxp
 

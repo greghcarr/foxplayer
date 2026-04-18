@@ -3,7 +3,7 @@
 namespace FoxPlayer
 {
 
-static constexpr int cacheVersion = 1;
+static constexpr int cacheVersion = 2;
 
 juce::File LibraryCache::cacheFile()
 {
@@ -16,15 +16,21 @@ juce::File LibraryCache::cacheFile()
 }
 
 bool LibraryCache::save(const std::vector<TrackInfo>& tracks,
-                         const std::vector<juce::File>& folders)
+                         const std::vector<juce::File>& musicFolders,
+                         const std::vector<juce::File>& podcastFolders)
 {
     auto* root = new juce::DynamicObject();
     root->setProperty("version", cacheVersion);
 
     juce::Array<juce::var> folderArr;
-    for (const auto& f : folders)
+    for (const auto& f : musicFolders)
         folderArr.add(f.getFullPathName());
     root->setProperty("folders", folderArr);
+
+    juce::Array<juce::var> podcastArr;
+    for (const auto& f : podcastFolders)
+        podcastArr.add(f.getFullPathName());
+    root->setProperty("podcastFolders", podcastArr);
 
     juce::Array<juce::var> trackArr;
     trackArr.ensureStorageAllocated(static_cast<int>(tracks.size()));
@@ -44,6 +50,8 @@ bool LibraryCache::save(const std::vector<TrackInfo>& tracks,
         o->setProperty("lufs",        static_cast<double>(t.lufs));
         o->setProperty("hidden",      t.hidden);
         o->setProperty("playCount",   t.playCount);
+        o->setProperty("isPodcast",   t.isPodcast);
+        o->setProperty("podcast",     t.podcast);
         trackArr.add(juce::var(o));
     }
     root->setProperty("tracks", trackArr);
@@ -57,7 +65,8 @@ bool LibraryCache::save(const std::vector<TrackInfo>& tracks,
 }
 
 bool LibraryCache::tryLoad(std::vector<TrackInfo>& outTracks,
-                            std::vector<juce::File>& outFolders)
+                            std::vector<juce::File>& outMusicFolders,
+                            std::vector<juce::File>& outPodcastFolders)
 {
     const auto file = cacheFile();
     if (! file.existsAsFile()) return false;
@@ -86,13 +95,27 @@ bool LibraryCache::tryLoad(std::vector<TrackInfo>& outTracks,
     auto tracksVar = obj->getProperty("tracks");
     if (! tracksVar.isArray()) return false;
 
-    std::vector<juce::File>  folders;
-    std::vector<TrackInfo>   tracks;
-    folders.reserve(static_cast<size_t>(foldersVar.size()));
-    tracks.reserve (static_cast<size_t>(tracksVar.size()));
+    std::vector<juce::File> musicFolders;
+    std::vector<juce::File> podcastFolders;
+    std::vector<TrackInfo>  tracks;
+    musicFolders.reserve(static_cast<size_t>(foldersVar.size()));
+    tracks.reserve(static_cast<size_t>(tracksVar.size()));
 
     for (const auto& f : *foldersVar.getArray())
-        folders.emplace_back(f.toString());
+        musicFolders.emplace_back(f.toString());
+
+    auto podcastFoldersVar = obj->getProperty("podcastFolders");
+    if (podcastFoldersVar.isArray())
+        for (const auto& f : *podcastFoldersVar.getArray())
+            podcastFolders.emplace_back(f.toString());
+
+    auto belongsToPodcastFolder = [&](const juce::File& f)
+    {
+        for (const auto& pf : podcastFolders)
+            if (f.isAChildOf(pf))
+                return true;
+        return false;
+    };
 
     for (const auto& v : *tracksVar.getArray())
     {
@@ -113,11 +136,14 @@ bool LibraryCache::tryLoad(std::vector<TrackInfo>& outTracks,
         info.lufs         = static_cast<float> (static_cast<double>(t->getProperty("lufs")));
         info.hidden       = static_cast<bool>  (t->getProperty("hidden"));
         info.playCount    = static_cast<int>   (t->getProperty("playCount"));
+        info.isPodcast    = belongsToPodcastFolder(info.file);
+        info.podcast      = t->getProperty("podcast").toString();
         tracks.push_back(std::move(info));
     }
 
-    outTracks  = std::move(tracks);
-    outFolders = std::move(folders);
+    outTracks         = std::move(tracks);
+    outMusicFolders   = std::move(musicFolders);
+    outPodcastFolders = std::move(podcastFolders);
     return true;
 }
 

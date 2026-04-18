@@ -2,6 +2,7 @@
 
 #include "MainComponent.h"
 #include "Constants.h"
+#include "ui/MacWindowHelper.h"
 #include <JuceHeader.h>
 
 namespace FoxPlayer
@@ -41,16 +42,27 @@ public:
         juce::MenuBarModel::setMacMainMenu(mainComponent_.get(),
                                            &appleMenuExtras,
                                            "Hide FoxPlayer");
+
+        // Both the Window-menu command and the Dock icon click call showWindow().
+        mainComponent_->onShowWindowRequested = [this]() { showWindow(); };
+
+        // Clicking the Dock icon while all windows are hidden fires
+        // NSApplicationDidBecomeActiveNotification. Re-show the window.
+        FoxPlayer_setDockReopenCallback([this]() { showWindow(); });
     }
 
     ~MainWindow() override
     {
+        FoxPlayer_setDockReopenCallback(nullptr);
         juce::MenuBarModel::setMacMainMenu(nullptr);
     }
 
     void closeButtonPressed() override
     {
-        juce::JUCEApplication::getInstance()->systemRequestedQuit();
+        // Hide rather than quit. Set firstCommandTarget so the Window menu
+        // stays routable even with no focused component.
+        mainComponent_->commandManager().setFirstCommandTarget(mainComponent_.get());
+        setVisible(false);
     }
 
     // "FoxPlayer" stays in the title bar at every window size for now.
@@ -65,6 +77,31 @@ public:
 
 private:
     std::unique_ptr<MainComponent> mainComponent_;
+
+    void showWindow()
+    {
+        // Restore normal command routing now that the window is visible.
+        mainComponent_->commandManager().setFirstCommandTarget(nullptr);
+        setVisible(true);
+
+        // Centre on whichever display the mouse is currently on.
+        auto& displays = juce::Desktop::getInstance().getDisplays();
+        auto mousePos  = juce::Desktop::getMousePosition();
+        auto* display  = displays.getDisplayForPoint(mousePos, false);
+        if (display == nullptr) display = displays.getPrimaryDisplay();
+        if (display != nullptr)
+        {
+            auto area = display->userArea;
+            setBounds(area.getCentreX() - getWidth()  / 2,
+                      area.getCentreY() - getHeight() / 2,
+                      getWidth(), getHeight());
+        }
+
+        // Use native macOS APIs: JUCE's toFront() uses the deprecated
+        // activateIgnoringOtherApps:YES which is a no-op on macOS 14+.
+        if (auto* peer = getPeer())
+            FoxPlayer_activateAndShowWindow(peer->getNativeHandle());
+    }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainWindow)
 };

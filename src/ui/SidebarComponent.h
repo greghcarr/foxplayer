@@ -23,6 +23,9 @@ public:
     // paths is a newline-separated list of file paths.
     std::function<void(int sidebarId, juce::StringArray paths)> onTracksDropped;
 
+    // Called when tracks are dropped onto the "+ New Playlist" item.
+    std::function<void(juce::StringArray paths)> onNewPlaylistWithTracksRequested;
+
     std::function<void(int sidebarId, juce::String newName)> onRenamePlaylist;
     std::function<void(int sidebarId)>                       onDeletePlaylist;
 
@@ -49,6 +52,10 @@ public:
     // Replaces the items shown under the Albums section.
     // Each pair is { sidebarId, displayName }.
     void setAlbums(const std::vector<std::pair<int, juce::String>>& albums);
+
+    // Replaces the items shown under the Podcasts section.
+    // Each pair is { sidebarId, displayName }.
+    void setPodcasts(const std::vector<std::pair<int, juce::String>>& podcasts);
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -85,6 +92,17 @@ private:
                                 float x, int centreY,
                                 bool collapsed) const;
 
+    // Draws just the heading row for a section at an arbitrary y coordinate.
+    void drawSectionHeader(juce::Graphics& g, const Section& section, int y) const;
+    // Draws a single item row at the given bounds (may differ from item.bounds for sticky).
+    void drawSectionItem(juce::Graphics& g, const Item& item, juce::Rectangle<int> bounds) const;
+    // Computes the current sticky-header layout: scroll offset, library zone height,
+    // and the index of the "active" section whose header should also be pinned (-1 if none).
+    void getStickyZone(int& outScrollY, int& outLibStickyH, int& outActiveSectionIdx) const;
+
+    // Repaints the visible strip when the component is scrolled by the viewport.
+    void moved() override;
+
     // Returns the sidebar ID of the playlist item at pos, or -1 if none.
     int playlistItemIdAt(juce::Point<int> pos) const;
 
@@ -101,6 +119,7 @@ private:
 
     // Pre-loaded SVG drawables for row icons. Tinted lazily per-paint.
     std::unique_ptr<juce::Drawable> musicIconDrawable_;
+    std::unique_ptr<juce::Drawable> podcastIconDrawable_;
     std::unique_ptr<juce::Drawable> playlistIconDrawable_;
     std::unique_ptr<juce::Drawable> artistIconDrawable_;
     std::unique_ptr<juce::Drawable> albumIconDrawable_;
@@ -111,10 +130,11 @@ private:
 
     void timerCallback() override;
 
-    static constexpr int sectionHeaderH = 30;
-    static constexpr int itemH          = 36;
-    static constexpr int indicatorW     = 3;
-    static constexpr int itemPadL       = 16;
+    static constexpr int sectionHeaderH    = 30;
+    static constexpr int itemH             = 36;
+    static constexpr int indicatorW        = 3;
+    static constexpr int itemPadL          = 16;
+    static constexpr int newPlaylistItemId = -2;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SidebarComponent)
 };

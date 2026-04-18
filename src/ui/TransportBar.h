@@ -87,9 +87,15 @@ public:
     // Does NOT fire for internal slider updates (mute/unmute).
     std::function<void(double)> onVolumeChanged;
 
+    // Fired when mute state changes. Args: muted, premuteVolume.
+    std::function<void(bool, double)> onMuteChanged;
+
     // Apply a persisted volume without firing onVolumeChanged. Call once at
     // startup after wiring up the callback.
     void setInitialVolume(double value);
+
+    // Restore muted state without firing callbacks. Call once at startup.
+    void setInitialMute(bool muted, double premuteVolume);
 
     // juce::Component
     void paint(juce::Graphics& g) override;
@@ -148,6 +154,7 @@ private:
     juce::Rectangle<int> compactInfoBounds_;    // mini-mode "Artist - Title" line above the buttons
     juce::Rectangle<int> speakerBounds_;     // clickable speaker icon area
     juce::Image          albumArt_;
+    float                recordRotation_ { 0.0f };
 
     // Speaker/mute state
     bool   muted_         { false };

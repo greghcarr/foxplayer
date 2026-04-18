@@ -6,11 +6,14 @@ namespace FoxPlayer
 
 using namespace Constants;
 
-static constexpr int modBtnD    = 32;   // diameter of shuffle/repeat circles
-static constexpr int skipBtnD   = 38;   // diameter of prev/next circles
-static constexpr int playBtnD   = 46;   // diameter of play/pause circle
-static constexpr int seekH      = 6;
-static constexpr int pad        = 10;
+static constexpr int   modBtnD    = 32;   // diameter of shuffle/repeat circles
+static constexpr int   skipBtnD   = 38;   // diameter of prev/next circles
+static constexpr int   playBtnD   = 46;   // diameter of play/pause circle
+static constexpr int   seekH      = 6;
+static constexpr int   pad        = 10;
+static constexpr int   artMaxFull        = 80;    // record diameter in pixels
+static constexpr float labelRatio        = 0.95f;  // label radius as fraction of record radius
+static constexpr float infoLetterSpacing = 0.8f;   // extra px between glyphs in info text
 
 // ----------------------------------------------------------------------------
 // TransportButton
@@ -134,6 +137,108 @@ void TransportButton::mouseExit(const juce::MouseEvent&)
     hovered_ = false;
     pressed_ = false;
     repaint();
+}
+
+// Draws a single line of text with uniform extra spacing between each glyph,
+// vertically centred within the given (x, y, w, h) bounds, clipped to w.
+static void drawTextSpaced(juce::Graphics& g,
+                            const juce::Font& font,
+                            const juce::String& text,
+                            float letterSpacing,
+                            int x, int y, int w, int h)
+{
+    const float baseline = static_cast<float>(y) + static_cast<float>(h) * 0.5f
+                         + (font.getAscent() - font.getDescent()) * 0.5f;
+
+    juce::GlyphArrangement ga;
+    ga.addLineOfText(font, text, static_cast<float>(x), baseline);
+
+    for (int i = 1; i < ga.getNumGlyphs(); ++i)
+        ga.moveRangeOfGlyphs(i, ga.getNumGlyphs() - i, letterSpacing, 0.0f);
+
+    g.saveState();
+    g.reduceClipRegion(x, y, w, h);
+    ga.draw(g);
+    g.restoreState();
+}
+
+static void drawSpinningRecord(juce::Graphics& g,
+                                juce::Rectangle<int> bounds,
+                                float rotation,
+                                const juce::Image& art)
+{
+    const auto  recordF = bounds.toFloat();
+    const auto  centre  = recordF.getCentre();
+    const float R       = recordF.getWidth() * 0.5f;
+    const float labelR  = R * labelRatio;
+
+    const auto labelBounds = juce::Rectangle<float>(
+        centre.x - labelR, centre.y - labelR, labelR * 2.0f, labelR * 2.0f);
+
+    const bool hasArt = art.isValid();
+
+    // Drop shadow — drawn before rotation (circle is symmetric around centre).
+    juce::Path shadowCircle;
+    shadowCircle.addEllipse(recordF);
+    juce::DropShadow(juce::Colours::black.withAlpha(0.85f), 12, {}).drawForPath(g, shadowCircle);
+
+    g.saveState();
+    g.addTransform(juce::AffineTransform::rotation(rotation, centre.x, centre.y));
+
+    // Vinyl body.
+    g.setColour(juce::Colour(0xff1a1a1a));
+    g.fillEllipse(recordF);
+
+    // Groove rings and sheen only shown on a blank record (no album art).
+    if (!hasArt)
+    {
+        constexpr int numGrooves = 14;
+        for (int i = 0; i < numGrooves; ++i)
+        {
+            const float t = static_cast<float>(i) / static_cast<float>(numGrooves - 1);
+            const float r = labelR + 2.0f + (R - labelR - 5.0f) * t;
+            g.setColour(juce::Colours::white.withAlpha(0.055f - t * 0.025f));
+            g.drawEllipse(centre.x - r, centre.y - r, r * 2.0f, r * 2.0f, 0.8f);
+        }
+
+        constexpr float pi = juce::MathConstants<float>::pi;
+        juce::Path sheen;
+        sheen.addCentredArc(centre.x, centre.y, R * 0.82f, R * 0.82f,
+                            0.0f, -pi * 0.88f, -pi * 0.12f, true);
+        g.setColour(juce::Colours::white.withAlpha(0.045f));
+        g.strokePath(sheen, juce::PathStrokeType(R * 0.26f));
+    }
+
+    // Label / album art — inside the rotation block so it spins with the record.
+    juce::Path labelCircle;
+    labelCircle.addEllipse(labelBounds);
+
+    if (hasArt)
+    {
+        g.saveState();
+        g.reduceClipRegion(labelCircle);
+        g.drawImage(art,
+                    juce::roundToInt(labelBounds.getX()),
+                    juce::roundToInt(labelBounds.getY()),
+                    juce::roundToInt(labelBounds.getWidth()),
+                    juce::roundToInt(labelBounds.getHeight()),
+                    0, 0, art.getWidth(), art.getHeight());
+        g.restoreState();
+    }
+    else
+    {
+        g.setColour(juce::Colour(0xff242424));
+        g.fillPath(labelCircle);
+        g.setColour(juce::Colours::white.withAlpha(0.12f));
+        g.drawEllipse(labelBounds, 1.0f);
+    }
+
+    // Centre spindle hole.
+    constexpr float holeR = 3.0f;
+    g.setColour(juce::Colour(0xff080808));
+    g.fillEllipse(centre.x - holeR, centre.y - holeR, holeR * 2.0f, holeR * 2.0f);
+
+    g.restoreState();
 }
 
 // Parses an SVG binary resource and returns a tinted Drawable.
@@ -284,6 +389,7 @@ void TransportBar::setCurrentTrack(const TrackInfo& track)
     currentTrack_ = track;
     hasTrack_ = true;
     albumArt_ = AlbumArtExtractor::extractFromFile(track.file);
+
     compactScrollStartMs_ = juce::Time::getMillisecondCounter();
     resized();
     updateDisplay();
@@ -295,6 +401,19 @@ void TransportBar::setInitialVolume(double value)
     volumeSlider_.setValue(value, juce::dontSendNotification);
     engine_.setVolume(static_cast<float>(value));
     muted_ = false;
+    refreshVolumeAlpha();
+    repaint();
+}
+
+void TransportBar::setInitialMute(bool muted, double premuteVolume)
+{
+    muted_         = muted;
+    premuteVolume_ = juce::jlimit(0.0, 1.0, premuteVolume);
+    if (muted_)
+    {
+        volumeSlider_.setValue(0.0, juce::dontSendNotification);
+        engine_.setVolume(0.0f);
+    }
     refreshVolumeAlpha();
     repaint();
 }
@@ -326,8 +445,8 @@ void TransportBar::setPlayingFrom(const juce::String& sourceName, int sourceSide
 
 void TransportBar::clearTrack()
 {
-    hasTrack_        = false;
-    albumArt_        = {};
+    hasTrack_  = false;
+    albumArt_  = {};
     playingFromName_ = {};
     sourceLinkBounds_ = {};
     elapsedLabel_.setText("", juce::dontSendNotification);
@@ -449,23 +568,10 @@ void TransportBar::paint(juce::Graphics& g)
         gradValid = leftFadeWidth > 0.0f;
     }
 
-    // Album art (or placeholder when track loaded but no art). Stays fully
-    // opaque - resized() shrinks it to fit rather than fading it out. A soft
-    // black drop shadow sits behind it to lift it off the transport bar.
+    // Spinning vinyl record (with album art on the label). Drawn in place of
+    // the flat album-art thumbnail; always shown whenever a track is loaded.
     if (!albumArtBounds_.isEmpty() && hasTrack_)
-    {
-        juce::Path artPath;
-        artPath.addRectangle(albumArtBounds_.toFloat());
-        juce::DropShadow(juce::Colours::black.withAlpha(0.85f), 12, {}).drawForPath(g, artPath);
-    }
-    if (!albumArtBounds_.isEmpty() && albumArt_.isValid())
-    {
-        g.drawImageWithin(albumArt_,
-                          albumArtBounds_.getX(), albumArtBounds_.getY(),
-                          albumArtBounds_.getWidth(), albumArtBounds_.getHeight(),
-                          juce::RectanglePlacement::centred |
-                          juce::RectanglePlacement::onlyReduceInSize);
-    }
+        drawSpinningRecord(g, albumArtBounds_, recordRotation_, albumArt_);
 
     // Three-line track info - faded by infoAlpha so it dissolves smoothly into
     // the background as the window approaches mini mode.
@@ -484,13 +590,15 @@ void TransportBar::paint(juce::Graphics& g)
         // Line 1: song title. Nudged up 2px so there's a touch more breathing
         // room above the artist line.
         g.setColour(Color::textPrimary.withMultipliedAlpha(infoAlpha));
-        g.setFont(titleFont);
-        g.drawText(titleText, infoX, infoY - 2, infoW, line1H,
-                   juce::Justification::centredLeft, true);
+        drawTextSpaced(g, titleFont, titleText, infoLetterSpacing,
+                       infoX, infoY - 2, infoW, line1H);
 
-        // Line 2: artist, or "(no artist)" in italics
+        // Line 2: podcast name (for podcasts), artist, or "(no artist)" in italics
         const int artist2Y = infoY + line1H + lineGap;
-        const bool noArtist = currentTrack_.artist.isEmpty();
+        const juce::String line2Text = currentTrack_.isPodcast
+                                           ? currentTrack_.podcast
+                                           : currentTrack_.artist;
+        const bool noArtist = line2Text.isEmpty();
         g.setColour(Color::textSecondary.withMultipliedAlpha(infoAlpha));
         if (noArtist)
         {
@@ -500,9 +608,8 @@ void TransportBar::paint(juce::Graphics& g)
         }
         else
         {
-            g.setFont(artistFont);
-            g.drawText(currentTrack_.artist, infoX, artist2Y, infoW, line2H,
-                       juce::Justification::centredLeft, true);
+            drawTextSpaced(g, artistFont, line2Text, infoLetterSpacing,
+                           infoX, artist2Y, infoW, line2H);
         }
 
         // Line 3: "Playing from: [source]" where source is accent-colored and
@@ -615,18 +722,29 @@ void TransportBar::paint(juce::Graphics& g)
         // "Artist - Title" where the title portion follows the same rule as
         // the full-mode title line: italic when it's a real tag, plain with
         // extension when we're falling back to the filename.
-        const juce::String artistPrefix = currentTrack_.artist.isNotEmpty()
-                                              ? currentTrack_.artist + " - "
+        const juce::String line2Name = currentTrack_.isPodcast
+                                          ? currentTrack_.podcast
+                                          : currentTrack_.artist;
+        const juce::String artistPrefix = line2Name.isNotEmpty()
+                                              ? line2Name + " - "
                                               : juce::String();
 
         const juce::Font compactRegular(juce::FontOptions().withHeight(15.0f));
-        const juce::Font compactTitleFont = hasRealTitle
-                                                ? compactRegular.italicised()
-                                                : compactRegular;
+        const juce::Font compactTitleFont = compactRegular;
+
+        // Use spaced widths for positioning so the " - " dash is never clipped
+        // and the title starts immediately after the artist prefix.
+        auto spacedTextWidth = [](const juce::Font& f, const juce::String& text, float sp) -> int {
+            juce::GlyphArrangement ga;
+            ga.addLineOfText(f, text, 0.0f, 0.0f);
+            for (int i = 1; i < ga.getNumGlyphs(); ++i)
+                ga.moveRangeOfGlyphs(i, ga.getNumGlyphs() - i, sp, 0.0f);
+            return static_cast<int>(std::ceil(ga.getBoundingBox(0, -1, true).getWidth()));
+        };
 
         const int prefixW = artistPrefix.isNotEmpty()
-                                ? textWidth(compactRegular, artistPrefix) : 0;
-        const int titleW  = textWidth(compactTitleFont, titleText);
+                                ? spacedTextWidth(compactRegular, artistPrefix, infoLetterSpacing) : 0;
+        const int titleW  = spacedTextWidth(compactTitleFont, titleText, infoLetterSpacing);
         const int totalW  = prefixW + titleW;
 
         const juce::Colour compactColor = Color::textPrimary.withMultipliedAlpha(compactAlpha);
@@ -636,14 +754,10 @@ void TransportBar::paint(juce::Graphics& g)
             const int h = compactInfoBounds_.getHeight();
             g.setColour(compactColor);
             if (prefixW > 0)
-            {
-                g.setFont(compactRegular);
-                g.drawText(artistPrefix, startX, y, prefixW + 4, h,
-                           juce::Justification::centredLeft, false);
-            }
-            g.setFont(compactTitleFont);
-            g.drawText(titleText, startX + prefixW, y, titleW + 4, h,
-                       juce::Justification::centredLeft, false);
+                drawTextSpaced(g, compactRegular, artistPrefix, infoLetterSpacing,
+                               startX, y, prefixW + 4, h);
+            drawTextSpaced(g, compactTitleFont, titleText, infoLetterSpacing,
+                           startX + prefixW, y, titleW + 4, h);
         };
 
         if (totalW <= compactInfoBounds_.getWidth())
@@ -776,22 +890,14 @@ void TransportBar::resized()
     // mode it sits flush-left at `pad`. As the window narrows, instead of
     // shrinking it slides leftward, ending partially off-screen at minimum
     // width so its right portion can tuck behind the shuffle button.
-    constexpr int   artMaxFull = 80;
-    constexpr float fadeFromW  = 490.0f;
-    const float fadeToW = static_cast<float>(Constants::minWindowWidth);
-    const float artT = juce::jlimit(0.0f, 1.0f,
-        (static_cast<float>(getWidth()) - fadeToW) / (fadeFromW - fadeToW));
 
     const int artDim = artMaxFull;
 
-    // Only reserve space for the album art when we actually have artwork to
-    // draw. Tracks without embedded art (and the no-track state) collapse the
-    // art column entirely so the info text can sit near the left edge.
-    if (hasTrack_ && albumArt_.isValid())
+    // Show the record whenever a track is loaded, regardless of whether it has
+    // embedded album art (the label falls back to a dark placeholder).
+    if (hasTrack_)
     {
-        const int leftX        = pad;
-        constexpr int slidLeftX = -20; // left edge at min window width (partially off-screen)
-        const int artX = leftX + static_cast<int>((1.0f - artT) * (slidLeftX - leftX));
+        const int artX = 13; // matches infoTextLeftGap — fixed position regardless of window width
         albumArtBounds_ = { artX, (getHeight() - artDim) / 2, artDim, artDim };
     }
     else
@@ -876,6 +982,14 @@ void TransportBar::updateDisplay()
                                                 : TransportButton::Icon::Play;
     playPauseButton_.repaint();
 
+    // Spin at 33⅓ RPM while playing.
+    if (engine_.isPlaying())
+    {
+        constexpr float radsPerFrame = juce::MathConstants<float>::twoPi * (33.333f / 60.0f) / 30.0f;
+        recordRotation_ = std::fmod(recordRotation_ + radsPerFrame,
+                                    juce::MathConstants<float>::twoPi);
+    }
+
     const double elapsed = engine_.elapsedSeconds();
     const double total   = engine_.durationSeconds();
     elapsedLabel_.setText(formatSeconds(elapsed), juce::dontSendNotification);
@@ -905,6 +1019,7 @@ void TransportBar::mouseDown(const juce::MouseEvent& e)
             engine_.setVolume(static_cast<float>(premuteVolume_));
             refreshVolumeAlpha();
             repaint();
+            if (onMuteChanged) onMuteChanged(false, premuteVolume_);
         }
         else if (volumeSlider_.getValue() > 0.0)
         {
@@ -915,6 +1030,7 @@ void TransportBar::mouseDown(const juce::MouseEvent& e)
             engine_.setVolume(0.0f);
             refreshVolumeAlpha();
             repaint();
+            if (onMuteChanged) onMuteChanged(true, premuteVolume_);
         }
         // else: slider is already at 0 manually - clicking speaker is a no-op.
         return;

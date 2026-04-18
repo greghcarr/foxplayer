@@ -16,9 +16,12 @@ public:
     LibraryScanner();
     ~LibraryScanner() override;
 
-    // Scans one or more root folders. Calling this with a new set cancels
-    // any scan already in progress.
-    void scanFolders(std::vector<juce::File> folders);
+    // Scans music and podcast folders. Music files found under a podcast
+    // folder are excluded from the music scan. Podcast files get isPodcast=true
+    // and their podcast field set from the album tag or parent folder name.
+    // Calling this with a new set cancels any scan already in progress.
+    void scanFolders(std::vector<juce::File> musicFolders,
+                     std::vector<juce::File> podcastFolders = {});
     void cancelScan();
     bool isScanning() const;
 
@@ -32,9 +35,11 @@ private:
     void run() override;
 
     TrackInfo buildTrackInfo(const juce::File& file,
-                             juce::AudioFormatManager& fmgr) const;
+                             juce::AudioFormatManager& fmgr,
+                             bool isPodcast) const;
 
-    std::vector<juce::File> scanRoots_;
+    std::vector<juce::File> musicRoots_;
+    std::vector<juce::File> podcastRoots_;
     juce::CriticalSection   lock_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryScanner)

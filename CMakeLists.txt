@@ -32,6 +32,9 @@ target_sources(FoxPlayer PRIVATE
     src/audio/FoxpFile.cpp
     src/audio/AlbumArtExtractor.mm
     src/audio/AlbumArtExtractor.cpp
+    src/ui/StatusBarItem.mm
+    src/ui/MacWindowHelper.mm
+    src/ui/NowPlayingBridge.mm
     src/analysis/BpmDetector.cpp
     src/analysis/KeyDetector.cpp
     src/analysis/AnalysisEngine.cpp
@@ -105,6 +108,7 @@ juce_add_binary_data(FoxPlayerIcons
         resources/icons/user-fill.svg
         resources/icons/vinyl-record-fill.svg
         resources/icons/caret-double-right-fill.svg
+        resources/icons/microphone-fill.svg
         resources/fonts/Foxwhelp-Regular.ttf
         resources/app-icon.png
 )
@@ -113,6 +117,8 @@ target_link_libraries(FoxPlayer
     PRIVATE
         FoxPlayerIcons
         "-framework AVFoundation"
+        "-framework MediaPlayer"
+        "-framework IOKit"
         juce::juce_audio_basics
         juce::juce_audio_devices
         juce::juce_audio_formats

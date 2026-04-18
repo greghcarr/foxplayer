@@ -28,7 +28,7 @@ public:
     // at all (added/removed from the header so it doesn't even appear in the
     // column chooser menu), what value that column shows, and whether the
     // user can drag rows to reorder.
-    enum class ViewMode { Library, Artist, Album, Playlist };
+    enum class ViewMode { Library, Artist, Album, Playlist, Podcast };
     void setViewMode(ViewMode mode);
 
     // Forces the table header to sort by the "#" column (ascending). Called
@@ -56,6 +56,10 @@ public:
     int numTracks()  const { return static_cast<int>(tracks_.size()); }
     int numVisible() const { return static_cast<int>(filteredTracks_.size()); }
 
+    // When true, suppresses the "Empty" centred label so a higher-level prompt
+    // (e.g. "No music folder selected") can be shown instead.
+    void setSuppressEmptyLabel(bool suppress) { suppressEmptyLabel_ = suppress; repaint(); }
+
     // Snapshot of currently visible (filtered) tracks in display order.
     std::vector<TrackInfo> visibleTracks() const;
 
@@ -80,8 +84,17 @@ public:
     // Called when the user chooses "Add to Queue" from the context menu.
     std::function<void(std::vector<TrackInfo>)> onAddToQueueRequested;
 
+    // Navigation callbacks: go to the artist/album/podcast sidebar item for a track.
+    std::function<void(TrackInfo)> onGoToArtistRequested;
+    std::function<void(TrackInfo)> onGoToAlbumRequested;
+    std::function<void(TrackInfo)> onGoToPodcastRequested;
+
     // Called when the user chooses "Look up on Apple Music" from the context menu.
     std::function<void(std::vector<TrackInfo>)> onAppleMusicLookupRequested;
+
+    // Called when the user presses Delete in a playlist view. Tracks should be
+    // removed from the playlist only, not hidden from the library.
+    std::function<void(std::vector<TrackInfo>)> onRemoveFromPlaylistRequested;
 
     // Called when the user drags rows within the table to reorder them. Only
     // fires in playlist mode when the table is sorted by the "#" column
@@ -120,6 +133,7 @@ private:
     void applyFilter();
     void applySort();
     void refreshPlayingIndex();
+    void updateArtistColumnHeader();
     juce::String cellText(int row, int colId) const;
 
     // Hides (or unhides) all currently selected rows.
@@ -135,8 +149,9 @@ private:
     std::vector<TrackInfo*>  filteredTracks_;  // pointers into tracks_ for current view
     juce::File               playingFile_;     // currently playing file (ground truth for highlight)
     int                      playingIndex_ { -1 };
-    bool                     showHidden_   { false };
-    int                      sortColumnId_ { 0 };     // 0 = unsorted
+    bool                     showHidden_         { false };
+    bool                     suppressEmptyLabel_ { false };
+    int                      sortColumnId_       { 0 };     // 0 = unsorted
     bool                     sortForwards_ { true };
     ViewMode                 viewMode_     { ViewMode::Library };
     // Y position (in this component's coords) of the drop-indicator line

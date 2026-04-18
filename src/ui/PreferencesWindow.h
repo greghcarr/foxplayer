@@ -46,39 +46,78 @@ private:
 };
 
 // ---- Library panel -----------------------------------------------------------
-// Scrollable list of music-library root folders plus Add/Remove buttons. All
-// changes fire through onFoldersChanged; MainComponent pushes the live folder
-// list back via setFolders (which the panel mirrors in its display).
+// Shows music-library folders and podcast folders in two stacked sections.
+// Changes fire through onFoldersChanged / onPodcastFoldersChanged.
 class LibraryPreferencesPanel : public juce::Component,
                                  public juce::ListBoxModel
 {
 public:
     LibraryPreferencesPanel();
 
-    // Fires after the user adds or removes a folder.
     std::function<void(std::vector<juce::File>)> onFoldersChanged;
+    std::function<void(std::vector<juce::File>)> onPodcastFoldersChanged;
 
     void setFolders(std::vector<juce::File> folders);
     const std::vector<juce::File>& folders() const { return folders_; }
 
+    void setPodcastFolders(std::vector<juce::File> folders);
+    const std::vector<juce::File>& podcastFolders() const { return podcastFolders_; }
+
     void paint(juce::Graphics& g) override;
     void resized() override;
+    void mouseDown(const juce::MouseEvent& e) override;
 
+    // ListBoxModel for music list
     int  getNumRows() override;
     void paintListBoxItem(int row, juce::Graphics& g, int width, int height, bool selected) override;
 
 private:
     void addFolder();
     void removeSelectedFolders();
+    void addPodcastFolder();
+    void removeSelectedPodcastFolders();
+
+    // Nested model so podcastList_ has its own ListBoxModel.
+    struct PodcastListModel : public juce::ListBoxModel
+    {
+        LibraryPreferencesPanel* owner { nullptr };
+        int  getNumRows() override;
+        void paintListBoxItem(int row, juce::Graphics& g,
+                              int width, int height, bool selected) override;
+    } podcastListModel_;
 
     juce::Label        heading_;
     juce::ListBox      list_;
     juce::TextButton   addButton_    { "Add Folder" };
     juce::TextButton   removeButton_ { "Remove Folder" };
 
+    juce::Label        podcastHeading_;
+    juce::ListBox      podcastList_;
+    juce::TextButton   podcastAddButton_    { "Add Folder" };
+    juce::TextButton   podcastRemoveButton_ { "Remove Folder" };
+
     std::vector<juce::File> folders_;
+    std::vector<juce::File> podcastFolders_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryPreferencesPanel)
+};
+
+// ---- Debug panel -------------------------------------------------------------
+// Developer toggles that persist to ApplicationProperties.
+class DebugPreferencesPanel : public juce::Component
+{
+public:
+    explicit DebugPreferencesPanel(juce::ApplicationProperties& props);
+
+    void paint(juce::Graphics& g) override;
+    void resized() override;
+
+private:
+    juce::ApplicationProperties& props_;
+
+    juce::ToggleButton deleteFoxpToggle_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DebugPreferencesPanel)
 };
 
 // ---- Sidebar + panel host ----------------------------------------------------
@@ -87,14 +126,15 @@ private:
 class PreferencesComponent : public juce::Component
 {
 public:
-    explicit PreferencesComponent(juce::AudioDeviceManager& deviceManager);
+    PreferencesComponent(juce::AudioDeviceManager& deviceManager,
+                         juce::ApplicationProperties& appProperties);
 
     void paint(juce::Graphics& g) override;
     void resized() override;
     void mouseDown(const juce::MouseEvent& e) override;
 
 private:
-    enum class Category { Audio, Library };
+    enum class Category { Audio, Library, Debug };
 
     struct SidebarItem
     {
@@ -106,12 +146,18 @@ private:
     void showPanel(Category c);
     void layoutSidebar();
 
-    juce::AudioDeviceManager&              deviceManager_;
-    std::vector<SidebarItem>               items_;
-    Category                               current_ { Category::Audio };
+public:
+    void showLibraryCategory() { showPanel(Category::Library); }
+
+private:
+
+    juce::AudioDeviceManager&               deviceManager_;
+    std::vector<SidebarItem>                items_;
+    Category                                current_ { Category::Audio };
 
     std::unique_ptr<AudioPreferencesPanel>   audioPanel_;
     std::unique_ptr<LibraryPreferencesPanel> libraryPanel_;
+    std::unique_ptr<DebugPreferencesPanel>   debugPanel_;
 
 public:
     LibraryPreferencesPanel& libraryPanel() { return *libraryPanel_; }
@@ -130,13 +176,17 @@ private:
 class PreferencesWindow : public juce::DocumentWindow
 {
 public:
-    explicit PreferencesWindow(juce::AudioDeviceManager& deviceManager);
+    PreferencesWindow(juce::AudioDeviceManager& deviceManager,
+                      juce::ApplicationProperties& appProperties);
 
     void closeButtonPressed() override;
 
-    // Direct access to the library panel so MainComponent can wire up the
-    // add/remove callback and push the current folder list into the view.
+    // Direct access to the library panel so MainComponent can wire up callbacks
+    // and push the current folder lists into the view.
     LibraryPreferencesPanel* libraryPanel();
+
+    // Opens Preferences and navigates straight to the Library tab.
+    void showLibraryCategory();
 
     // Fires when the user closes the preferences window (so MainComponent
     // can refresh menu item state that depends on visibility).

@@ -15,19 +15,21 @@ LibraryScanner::~LibraryScanner()
     cancelScan();
 }
 
-void LibraryScanner::scanFolders(std::vector<juce::File> folders)
+void LibraryScanner::scanFolders(std::vector<juce::File> musicFolders,
+                                  std::vector<juce::File> podcastFolders)
 {
     cancelScan();
     {
         juce::ScopedLock sl(lock_);
-        scanRoots_ = std::move(folders);
+        musicRoots_   = std::move(musicFolders);
+        podcastRoots_ = std::move(podcastFolders);
     }
     DBG("LibraryScanner::scanFolders called with "
-        + juce::String((int) scanRoots_.size()) + " root(s)");
-    if (! scanRoots_.empty())
+        + juce::String((int) musicRoots_.size()) + " music root(s), "
+        + juce::String((int) podcastRoots_.size()) + " podcast root(s)");
+    if (! musicRoots_.empty() || ! podcastRoots_.empty())
         startThread(juce::Thread::Priority::low);
     else if (onScanComplete)
-        // No folders: still fire completion so the UI can finalise its state.
         juce::MessageManager::callAsync([this] { if (onScanComplete) onScanComplete(0); });
 }
 
@@ -44,97 +46,113 @@ bool LibraryScanner::isScanning() const
 
 void LibraryScanner::run()
 {
-    std::vector<juce::File> roots;
+    std::vector<juce::File> musicRoots, podcastRoots;
     {
         juce::ScopedLock sl(lock_);
-        roots = scanRoots_;
+        musicRoots   = musicRoots_;
+        podcastRoots = podcastRoots_;
     }
 
-    // Collect audio files across every root, skipping hidden files/folders
-    // (any path component starting with '.').
-    juce::Array<juce::File> audioFiles;
-    for (const auto& root : roots)
+    // Helper: collect non-hidden audio files under a root folder.
+    auto collectFiles = [&](const juce::File& root, juce::Array<juce::File>& out)
     {
-        if (threadShouldExit()) return;
-        if (! root.isDirectory()) continue;
-
-        juce::Array<juce::File> allFiles;
-        root.findChildFiles(allFiles,
-                            juce::File::findFiles,
-                            true /* recursive */);
-
-        auto hasHiddenComponent = [&root](const juce::File& f) -> bool {
-            juce::File current = f;
-            while (current != root)
-            {
-                if (current.getFileName().startsWith("."))
-                    return true;
-                current = current.getParentDirectory();
-            }
-            return false;
-        };
-
-        for (const auto& f : allFiles)
+        if (! root.isDirectory()) return;
+        juce::Array<juce::File> all;
+        root.findChildFiles(all, juce::File::findFiles, true);
+        for (const auto& f : all)
         {
             if (threadShouldExit()) return;
-            if (Constants::supportedExtensions.contains(
-                    f.getFileExtension().trimCharactersAtStart(".").toLowerCase())
-                && !hasHiddenComponent(f))
+            juce::File cur = f;
+            bool hidden = false;
+            while (cur != root)
             {
-                audioFiles.add(f);
+                if (cur.getFileName().startsWith(".")) { hidden = true; break; }
+                cur = cur.getParentDirectory();
             }
+            if (!hidden && Constants::supportedExtensions.contains(
+                    f.getFileExtension().trimCharactersAtStart(".").toLowerCase()))
+                out.add(f);
+        }
+    };
+
+    // Collect podcast files first so we can exclude them from the music scan.
+    juce::Array<juce::File> podcastFiles;
+    for (const auto& root : podcastRoots)
+    {
+        if (threadShouldExit()) return;
+        collectFiles(root, podcastFiles);
+    }
+    podcastFiles.sort();
+
+    // Build a set of podcast paths for fast lookup during music scan.
+    juce::StringArray podcastPaths;
+    for (const auto& f : podcastFiles)
+        podcastPaths.add(f.getFullPathName());
+
+    // Also need to know which paths fall UNDER a podcast root, so music folders
+    // that contain a podcast sub-folder don't re-import those files as songs.
+    auto isUnderPodcastRoot = [&podcastRoots](const juce::File& f) -> bool {
+        for (const auto& pr : podcastRoots)
+            if (f.isAChildOf(pr) || f == pr)
+                return true;
+        return false;
+    };
+
+    juce::Array<juce::File> musicFiles;
+    for (const auto& root : musicRoots)
+    {
+        if (threadShouldExit()) return;
+        juce::Array<juce::File> candidates;
+        collectFiles(root, candidates);
+        for (const auto& f : candidates)
+        {
+            if (! isUnderPodcastRoot(f))
+                musicFiles.add(f);
         }
     }
-
-    // Sort alphabetically across all roots so the library view is stable.
-    audioFiles.sort();
+    musicFiles.sort();
 
     juce::AudioFormatManager fmgr;
-    fmgr.registerBasicFormats(); // includes CoreAudioFormat on macOS
+    fmgr.registerBasicFormats();
 
     std::vector<TrackInfo> batch;
     batch.reserve(static_cast<size_t>(Constants::scannerBatchSize));
     int total = 0;
 
-    for (const auto& file : audioFiles)
-    {
-        if (threadShouldExit()) return;
-
-        TrackInfo info = buildTrackInfo(file, fmgr);
-        batch.push_back(std::move(info));
-        ++total;
-
-        if (static_cast<int>(batch.size()) >= Constants::scannerBatchSize)
-        {
-            auto batchCopy = batch;
-            juce::MessageManager::callAsync([this, b = std::move(batchCopy)]() mutable {
-                if (onBatchReady) onBatchReady(std::move(b));
-            });
-            batch.clear();
-        }
-    }
-
-    // Flush remaining tracks.
-    if (!batch.empty())
-    {
+    auto flush = [&]() {
+        if (batch.empty()) return;
         juce::MessageManager::callAsync([this, b = std::move(batch)]() mutable {
             if (onBatchReady) onBatchReady(std::move(b));
         });
-    }
+        batch.clear();
+    };
+
+    auto emit = [&](const juce::File& file, bool asPodcast) {
+        if (threadShouldExit()) return;
+        batch.push_back(buildTrackInfo(file, fmgr, asPodcast));
+        ++total;
+        if (static_cast<int>(batch.size()) >= Constants::scannerBatchSize)
+            flush();
+    };
+
+    for (const auto& f : musicFiles)   emit(f, false);
+    for (const auto& f : podcastFiles) emit(f, true);
+    flush();
 
     const int finalTotal = total;
-    DBG("LibraryScanner: scan thread finished, total=" + juce::String(finalTotal)
-        + ", queueing onScanComplete on message thread");
+    DBG("LibraryScanner: scan finished, total=" + juce::String(finalTotal));
     juce::MessageManager::callAsync([this, finalTotal]() {
         if (onScanComplete) onScanComplete(finalTotal);
     });
 }
 
 TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
-                                          juce::AudioFormatManager& fmgr) const
+                                          juce::AudioFormatManager& fmgr,
+                                          bool isPodcast) const
 {
     TrackInfo info;
     info.file = file;
+    info.isPodcast = isPodcast;
 
     std::unique_ptr<juce::AudioFormatReader> reader(fmgr.createReaderFor(file));
     if (reader != nullptr)
@@ -155,58 +173,80 @@ TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
         if (info.album.isEmpty())  info.album  = meta.getValue("album",  "");
     }
 
-    // If no artist was found in the tags, try parsing the filename.
-    // Handles patterns like:
-    //   "Artist - Title"
-    //   "01 Artist - Title"
-    //   "01. Artist - Title"
-    //   "01 - Artist - Title"
-    if (info.artist.isEmpty())
+    if (!isPodcast)
     {
-        juce::String stem = file.getFileNameWithoutExtension();
-
-        // Strip a leading track number: 1-3 digits, optional period, then spaces.
-        // Capture it as the track number if none was found in tags.
+        // If no artist was found in the tags, try parsing the filename.
+        // Handles patterns like:
+        //   "Artist - Title"
+        //   "01 Artist - Title"
+        //   "01. Artist - Title"
+        //   "01 - Artist - Title"
+        if (info.artist.isEmpty())
         {
-            int i = 0;
-            while (i < stem.length() && juce::CharacterFunctions::isDigit(stem[i]))
-                ++i;
+            juce::String stem = file.getFileNameWithoutExtension();
 
-            if (i > 0 && i <= 3)
+            // Strip a leading track number: 1-3 digits, optional period, then spaces.
             {
-                int j = i;
-                if (j < stem.length() && stem[j] == '.') ++j;  // optional period
-                // consume spaces
-                const int spacesStart = j;
-                while (j < stem.length() && stem[j] == ' ') ++j;
+                int i = 0;
+                while (i < stem.length() && juce::CharacterFunctions::isDigit(stem[i]))
+                    ++i;
 
-                if (j > spacesStart)  // at least one space after the digits
+                if (i > 0 && i <= 3)
                 {
-                    // If the next token is also a separator (" - "), consume it too.
-                    // e.g. "01 - Artist - Title"
-                    if (stem.substring(j).startsWith("- "))
-                        j += 2;
+                    int j = i;
+                    if (j < stem.length() && stem[j] == '.') ++j;
+                    const int spacesStart = j;
+                    while (j < stem.length() && stem[j] == ' ') ++j;
 
-                    if (info.trackNumber == 0)
-                        info.trackNumber = stem.substring(0, i).getIntValue();
+                    if (j > spacesStart)
+                    {
+                        if (stem.substring(j).startsWith("- "))
+                            j += 2;
 
-                    stem = stem.substring(j);
+                        if (info.trackNumber == 0)
+                            info.trackNumber = stem.substring(0, i).getIntValue();
+
+                        stem = stem.substring(j);
+                    }
                 }
             }
-        }
 
-        // Now try "Artist - Title" on the cleaned stem.
-        const int sep = stem.indexOf(" - ");
-        if (sep > 0)
-        {
-            info.artist = stem.substring(0, sep).trim();
-            if (info.title.isEmpty())
-                info.title = stem.substring(sep + 3).trim();
+            const int sep = stem.indexOf(" - ");
+            if (sep > 0)
+            {
+                info.artist = stem.substring(0, sep).trim();
+                if (info.title.isEmpty())
+                    info.title = stem.substring(sep + 3).trim();
+            }
         }
     }
 
-    // Load any previously saved data from the sidecar (overrides all of the above).
+    // Load any previously saved user data from the sidecar. Applied before the
+    // podcast-specific block so that the canonical podcast field clearing below
+    // always wins over stale music metadata in the foxp.
     FoxpFile::load(info);
+
+    if (isPodcast)
+    {
+        // Derive show name from foxp-stored podcast field, then album tag, then
+        // parent folder name. The foxp may have a user-edited show name we want
+        // to preserve; otherwise fall back to audio-tag album or the folder.
+        if (info.podcast.isEmpty())
+        {
+            if (info.album.isNotEmpty())
+                info.podcast = info.album;
+            else
+                info.podcast = file.getParentDirectory().getFileName();
+        }
+        // Always clear album and stale music-only fields for podcast tracks.
+        info.album  = {};
+        info.artist = {};
+    }
+    else
+    {
+        // Clear any stale podcast fields left over from a previous scan as podcast.
+        info.podcast = {};
+    }
 
     return info;
 }

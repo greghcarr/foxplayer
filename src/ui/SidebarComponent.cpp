@@ -20,6 +20,7 @@ namespace
 SidebarComponent::SidebarComponent()
 {
     musicIconDrawable_    = loadSvg(BinaryData::musicnotesfill_svg,  BinaryData::musicnotesfill_svgSize);
+    podcastIconDrawable_  = loadSvg(BinaryData::microphonefill_svg,  BinaryData::microphonefill_svgSize);
     playlistIconDrawable_ = loadSvg(BinaryData::listbulletsfill_svg, BinaryData::listbulletsfill_svgSize);
     artistIconDrawable_   = loadSvg(BinaryData::userfill_svg,        BinaryData::userfill_svgSize);
     albumIconDrawable_    = loadSvg(BinaryData::vinylrecordfill_svg, BinaryData::vinylrecordfill_svgSize);
@@ -29,7 +30,8 @@ SidebarComponent::SidebarComponent()
     library.heading       = "LIBRARY";
     library.collapsible   = false;
     library.rightClickable = false;
-    library.items.push_back({ "All Music", 1, {} });
+    library.items.push_back({ "All Music",     1, {} });
+    library.items.push_back({ "All Podcasts",  2, {} });
     sections_.push_back(std::move(library));
 
     // ARTISTS section: collapsible, populated from the library's unique artists.
@@ -48,6 +50,14 @@ SidebarComponent::SidebarComponent()
     albums.rightClickable = false;
     sections_.push_back(std::move(albums));
 
+    // PODCASTS section: collapsible, shows one entry per podcast show.
+    Section podcasts;
+    podcasts.heading        = "PODCASTS";
+    podcasts.collapsible    = true;
+    podcasts.collapsed      = true;
+    podcasts.rightClickable = false;
+    sections_.push_back(std::move(podcasts));
+
     // PLAYLISTS section: collapsible, right-clickable for "Create New Playlist"
     Section playlists;
     playlists.heading        = "PLAYLISTS";
@@ -57,12 +67,23 @@ SidebarComponent::SidebarComponent()
     sections_.push_back(std::move(playlists));
 }
 
+void SidebarComponent::setPodcasts(const std::vector<std::pair<int, juce::String>>& podcasts)
+{
+    auto& section = sections_[3]; // PODCASTS is always index 3
+    section.items.clear();
+    for (const auto& [id, name] : podcasts)
+        section.items.push_back({ name, id, {} });
+    layoutItems();
+    repaint();
+}
+
 void SidebarComponent::setPlaylists(const std::vector<std::pair<int, juce::String>>& playlists)
 {
-    auto& section = sections_[3]; // PLAYLISTS is always index 3
+    auto& section = sections_[4]; // PLAYLISTS is always index 4
     section.items.clear();
     for (const auto& [id, name] : playlists)
         section.items.push_back({ name, id, {} });
+    section.items.push_back({ "+ New Playlist", newPlaylistItemId, {} });
     layoutItems();
     repaint();
 }
@@ -142,9 +163,11 @@ void SidebarComponent::setSelectedId(int id)
 
 void SidebarComponent::layoutItems()
 {
-    int y = 8;
-    for (auto& section : sections_)
+    int y = 0;
+    for (int si = 0; si < (int)sections_.size(); ++si)
     {
+        if (si > 0) y += 6; // gap before each section except the first
+        auto& section = sections_[(size_t)si];
         section.headerBounds = juce::Rectangle<int>(0, y, getWidth(), sectionHeaderH);
         y += sectionHeaderH;
 
@@ -156,8 +179,6 @@ void SidebarComponent::layoutItems()
                 y += itemH;
             }
         }
-
-        y += 6; // gap between sections
     }
 
     // Size the component to fit its content, but never smaller than the viewport,
@@ -178,14 +199,12 @@ void SidebarComponent::drawDisclosureTriangle(juce::Graphics& g,
     juce::Path tri;
     if (isCollapsed)
     {
-        // Right-pointing triangle
         tri.addTriangle(x, cy - size * 0.5f,
                         x, cy + size * 0.5f,
                         x + size, cy);
     }
     else
     {
-        // Down-pointing triangle
         tri.addTriangle(x, cy - size * 0.4f,
                         x + size, cy - size * 0.4f,
                         x + size * 0.5f, cy + size * 0.5f);
@@ -194,133 +213,242 @@ void SidebarComponent::drawDisclosureTriangle(juce::Graphics& g,
     g.fillPath(tri);
 }
 
+void SidebarComponent::drawSectionHeader(juce::Graphics& g, const Section& section, int y) const
+{
+    const juce::Font headingFont(juce::FontOptions().withHeight(12.0f));
+    g.setColour(Color::textDim);
+    g.setFont(headingFont);
+    g.drawText(section.heading,
+               itemPadL, y,
+               getWidth() - itemPadL - 20,
+               sectionHeaderH,
+               juce::Justification::centredLeft, false);
+
+    if (section.collapsible)
+    {
+        juce::GlyphArrangement ga;
+        ga.addLineOfText(headingFont, section.heading, 0.0f, 0.0f);
+        const float textW = ga.getBoundingBox(0, -1, true).getWidth();
+        const float triX  = static_cast<float>(itemPadL) + textW + 6.0f;
+        drawDisclosureTriangle(g, triX, y + sectionHeaderH / 2, section.collapsed);
+    }
+
+    if (libraryLoading_ && section.heading == "LIBRARY")
+    {
+        const juce::Font f2(juce::FontOptions().withHeight(12.0f));
+        juce::GlyphArrangement ga;
+        ga.addLineOfText(f2, section.heading, 0.0f, 0.0f);
+        const float textW = ga.getBoundingBox(0, -1, true).getWidth();
+
+        const float r  = 5.5f;
+        const float cx = static_cast<float>(itemPadL) + textW + 12.0f + r;
+        const float cy = static_cast<float>(y + sectionHeaderH / 2);
+
+        g.setColour(Color::textDim);
+        g.drawEllipse(cx - r, cy - r, r * 2.0f, r * 2.0f, 1.5f);
+
+        juce::Path arc;
+        const float sweep = juce::MathConstants<float>::pi * 1.55f;
+        arc.addCentredArc(cx, cy, r, r, 0.0f,
+                          loadingRotation_, loadingRotation_ + sweep, true);
+        g.setColour(Color::accent);
+        g.strokePath(arc, juce::PathStrokeType(1.5f,
+                                               juce::PathStrokeType::curved,
+                                               juce::PathStrokeType::rounded));
+    }
+}
+
+void SidebarComponent::drawSectionItem(juce::Graphics& g,
+                                        const Item& item,
+                                        juce::Rectangle<int> rowBounds) const
+{
+    if (item.id == newPlaylistItemId)
+    {
+        if (item.id == dragOverItemId_)
+        {
+            g.setColour(Color::accent.withAlpha(0.25f));
+            g.fillRect(rowBounds);
+        }
+        g.setColour(item.id == dragOverItemId_ ? Color::accent : Color::textDim);
+        g.setFont(juce::Font(juce::FontOptions().withHeight(14.0f)));
+        g.drawText(item.label,
+                   itemPadL + indicatorW, rowBounds.getY(),
+                   rowBounds.getWidth() - itemPadL - indicatorW - 8,
+                   rowBounds.getHeight(),
+                   juce::Justification::centredLeft, true);
+        return;
+    }
+
+    const bool selected = (item.id == selectedId_);
+
+    if (item.id == dragOverItemId_)
+    {
+        g.setColour(Color::accent.withAlpha(0.25f));
+        g.fillRect(rowBounds);
+    }
+    if (selected)
+    {
+        g.setColour(Color::background);
+        g.fillRect(rowBounds);
+    }
+    if (selected)
+    {
+        g.setColour(Color::accent);
+        g.fillRect(rowBounds.withWidth(indicatorW));
+    }
+
+    constexpr int iconDim = 16;
+    constexpr int iconGap = 8;
+    juce::Drawable* iconDrawable =
+        (item.id == 1)                      ? musicIconDrawable_.get()
+      : (item.id == 2)                      ? podcastIconDrawable_.get()
+      : (item.id >= 2000 && item.id < 3000) ? artistIconDrawable_.get()
+      : (item.id >= 3000 && item.id < 4000) ? albumIconDrawable_.get()
+      : (item.id >= 4000 && item.id < 5000) ? podcastIconDrawable_.get()
+      :                                       playlistIconDrawable_.get();
+    const int iconX = rowBounds.getX() + itemPadL + indicatorW;
+    const int iconY = rowBounds.getY() + (rowBounds.getHeight() - iconDim) / 2;
+    if (iconDrawable)
+    {
+        auto tinted = iconDrawable->createCopy();
+        tinted->replaceColour(juce::Colours::black,
+                              selected ? Color::textPrimary : Color::textSecondary);
+        tinted->drawWithin(g,
+                           juce::Rectangle<float>((float)iconX, (float)iconY,
+                                                  (float)iconDim, (float)iconDim),
+                           juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize,
+                           1.0f);
+    }
+
+    const int labelX = iconX + iconDim + iconGap;
+    g.setColour(selected ? Color::textPrimary : Color::textSecondary);
+    g.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)));
+    g.drawText(item.label,
+               labelX, rowBounds.getY(),
+               rowBounds.getRight() - labelX - 8,
+               rowBounds.getHeight(),
+               juce::Justification::centredLeft, true);
+}
+
+void SidebarComponent::getStickyZone(int& outScrollY,
+                                      int& outLibStickyH,
+                                      int& outActiveSectionIdx) const
+{
+    outScrollY = juce::jmax(0, -getY());
+
+    // Use the actual layout position of the first non-Library section as the
+    // Library sticky height. This naturally includes any inter-section gap so
+    // activeTop aligns exactly with where that section starts -- eliminating
+    // the small dead zone that would otherwise appear when scrolling begins.
+    if (sections_.size() >= 2)
+        outLibStickyH = sections_[1].headerBounds.getY();
+    else
+    {
+        const auto& libSec = sections_[0];
+        outLibStickyH = sectionHeaderH;
+        if (!libSec.collapsed)
+            outLibStickyH += (int)libSec.items.size() * itemH;
+    }
+
+    outActiveSectionIdx = -1;
+    const int activeTop = outScrollY + outLibStickyH;
+
+    for (int i = 1; i < (int)sections_.size(); ++i)
+    {
+        const auto& sec = sections_[i];
+        if (sec.collapsed || sec.items.empty()) continue;
+        const int secHeaderTop     = sec.headerBounds.getY();
+        const int secContentBottom = sec.items.back().bounds.getBottom();
+        if (secHeaderTop <= activeTop && secContentBottom > activeTop)
+        {
+            outActiveSectionIdx = i;
+            break;
+        }
+    }
+}
+
+void SidebarComponent::moved()
+{
+    repaint();
+}
+
 void SidebarComponent::paint(juce::Graphics& g)
 {
     g.fillAll(Color::headerBackground);
-
-    // Right border
     g.setColour(Color::border);
-    g.drawVerticalLine(getWidth() - 1, 0.0f, static_cast<float>(getHeight()));
+    g.drawVerticalLine(getWidth() - 1, 0.0f, (float)getHeight());
 
+    // Normal (non-sticky) content pass
     for (const auto& section : sections_)
     {
-        // Section heading
-        const juce::Font headingFont(juce::FontOptions().withHeight(12.0f));
-        g.setColour(Color::textDim);
-        g.setFont(headingFont);
-        g.drawText(section.heading,
-                   itemPadL, section.headerBounds.getY(),
-                   section.headerBounds.getWidth() - itemPadL - 20,
-                   section.headerBounds.getHeight(),
-                   juce::Justification::centredLeft, false);
-
-        if (section.collapsible)
-        {
-            // Measure the heading so the triangle sits just to the right of it.
-            juce::GlyphArrangement ga;
-            ga.addLineOfText(headingFont, section.heading, 0.0f, 0.0f);
-            const float textW = ga.getBoundingBox(0, -1, true).getWidth();
-            const float triX  = static_cast<float>(itemPadL) + textW + 6.0f;
-            drawDisclosureTriangle(g, triX, section.headerBounds.getCentreY(), section.collapsed);
-        }
-
-        // Spinning loading indicator beside the LIBRARY heading while the
-        // music-folder scan is running.
-        if (libraryLoading_ && section.heading == "LIBRARY")
-        {
-            juce::GlyphArrangement ga;
-            ga.addLineOfText(headingFont, section.heading, 0.0f, 0.0f);
-            const float textW = ga.getBoundingBox(0, -1, true).getWidth();
-
-            const float r  = 5.5f;
-            const float cx = static_cast<float>(itemPadL) + textW + 12.0f + r;
-            const float cy = static_cast<float>(section.headerBounds.getCentreY());
-
-            // Faint full ring
-            g.setColour(Color::textDim);
-            g.drawEllipse(cx - r, cy - r, r * 2.0f, r * 2.0f, 1.5f);
-
-            // Rotating accent arc
-            juce::Path arc;
-            const float sweep = juce::MathConstants<float>::pi * 1.55f;
-            arc.addCentredArc(cx, cy, r, r,
-                              0.0f,
-                              loadingRotation_,
-                              loadingRotation_ + sweep,
-                              true);
-            g.setColour(Color::accent);
-            g.strokePath(arc, juce::PathStrokeType(1.5f,
-                                                   juce::PathStrokeType::curved,
-                                                   juce::PathStrokeType::rounded));
-        }
-
+        drawSectionHeader(g, section, section.headerBounds.getY());
         if (!section.collapsed)
-        {
             for (const auto& item : section.items)
-            {
-                const bool selected = (item.id == selectedId_);
-                auto rowBounds = item.bounds;
+                drawSectionItem(g, item, item.bounds);
+    }
 
-                // Drop target highlight
-                if (item.id == dragOverItemId_)
-                {
-                    g.setColour(Color::accent.withAlpha(0.25f));
-                    g.fillRect(rowBounds);
-                }
+    // Sticky overlay — only needed once we've scrolled past the LIBRARY header
+    int scrollY, libStickyH, activeSectionIdx;
+    getStickyZone(scrollY, libStickyH, activeSectionIdx);
 
-                // Row background
-                if (selected)
-                {
-                    g.setColour(Color::background);
-                    g.fillRect(rowBounds);
-                }
+    if (scrollY <= sections_[0].headerBounds.getY())
+        return;
 
-                // Left accent bar for selected
-                if (selected)
-                {
-                    g.setColour(Color::accent);
-                    g.fillRect(rowBounds.withWidth(indicatorW));
-                }
+    // Draw sticky LIBRARY zone (background + content)
+    g.setColour(Color::headerBackground);
+    g.fillRect(0, scrollY, getWidth(), libStickyH);
+    g.setColour(Color::border);
+    g.drawVerticalLine(getWidth() - 1, (float)scrollY, (float)(scrollY + libStickyH));
 
-                // Icon: music notes for All Music, list-bullets for playlists.
-                constexpr int iconDim = 16;
-                constexpr int iconGap = 8;
-                // 1 = All Music, 2000..2999 = individual artists, 3000..3999
-                // = individual albums, else = playlists.
-                juce::Drawable* iconDrawable =
-                    (item.id == 1)                      ? musicIconDrawable_.get()
-                  : (item.id >= 2000 && item.id < 3000) ? artistIconDrawable_.get()
-                  : (item.id >= 3000 && item.id < 4000) ? albumIconDrawable_.get()
-                  :                                       playlistIconDrawable_.get();
-                const int iconX = rowBounds.getX() + itemPadL + indicatorW;
-                const int iconY = rowBounds.getY() + (rowBounds.getHeight() - iconDim) / 2;
-                if (iconDrawable)
-                {
-                    auto tinted = iconDrawable->createCopy();
-                    tinted->replaceColour(juce::Colours::black,
-                                          selected ? Color::textPrimary : Color::textSecondary);
-                    tinted->drawWithin(g,
-                                       juce::Rectangle<float>(static_cast<float>(iconX),
-                                                              static_cast<float>(iconY),
-                                                              static_cast<float>(iconDim),
-                                                              static_cast<float>(iconDim)),
-                                       juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize,
-                                       1.0f);
-                }
-
-                // Label
-                const int labelX = iconX + iconDim + iconGap;
-                g.setColour(selected ? Color::textPrimary : Color::textSecondary);
-                g.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)));
-                g.drawText(item.label,
-                           labelX,
-                           rowBounds.getY(),
-                           rowBounds.getRight() - labelX - 8,
-                           rowBounds.getHeight(),
-                           juce::Justification::centredLeft, true);
-            }
+    drawSectionHeader(g, sections_[0], scrollY);
+    if (!sections_[0].collapsed)
+    {
+        int y = scrollY + sectionHeaderH;
+        for (const auto& item : sections_[0].items)
+        {
+            drawSectionItem(g, item, { 0, y, getWidth(), itemH });
+            y += itemH;
         }
     }
+
+    // Draw sticky active-section header (the section currently being scrolled through)
+    int totalStickyH = libStickyH;
+    if (activeSectionIdx >= 0)
+    {
+        const auto& activeSec = sections_[(size_t)activeSectionIdx];
+        const int activeY = scrollY + libStickyH;
+        g.setColour(Color::headerBackground);
+        g.fillRect(0, activeY, getWidth(), sectionHeaderH);
+        g.setColour(Color::border);
+        g.drawVerticalLine(getWidth() - 1, (float)activeY, (float)(activeY + sectionHeaderH));
+        drawSectionHeader(g, activeSec, activeY);
+        totalStickyH += sectionHeaderH;
+    }
+
+    // Re-draw section headers entering from below the ACTIVE-SECTION part of the sticky
+    // zone (i.e. approaching from below activeTop), so they slide OVER the active header
+    // rather than under it. Headers passing through the Library zone are excluded — they
+    // should disappear behind it, not float above it.
+    int visualStickyBottom = scrollY + totalStickyH;
+    for (int i = 1; i < (int)sections_.size(); ++i)
+    {
+        if (i == activeSectionIdx) continue;
+        const auto& sec = sections_[(size_t)i];
+        const int secTop = sec.headerBounds.getY();
+        // Only the transition zone just below activeTop (scrollY + libStickyH).
+        if (secTop < scrollY + libStickyH) continue;
+        if (secTop >= scrollY + libStickyH + sectionHeaderH) break;
+        g.setColour(Color::headerBackground);
+        g.fillRect(0, secTop, getWidth(), sectionHeaderH);
+        g.setColour(Color::border);
+        g.drawVerticalLine(getWidth() - 1, (float)secTop, (float)(secTop + sectionHeaderH));
+        drawSectionHeader(g, sec, secTop);
+        visualStickyBottom = juce::jmax(visualStickyBottom, secTop + sectionHeaderH);
+    }
+
+    // Subtle shadow below the entire visible sticky zone
+    g.setColour(juce::Colours::black.withAlpha(0.18f));
+    g.fillRect(0, visualStickyBottom, getWidth(), 2);
 }
 
 void SidebarComponent::resized()
@@ -330,6 +458,57 @@ void SidebarComponent::resized()
 
 void SidebarComponent::mouseDown(const juce::MouseEvent& e)
 {
+    // Check sticky zones before the normal layout-based hit test.
+    int scrollY, libStickyH, activeSectionIdx;
+    getStickyZone(scrollY, libStickyH, activeSectionIdx);
+
+    if (scrollY > sections_[0].headerBounds.getY())
+    {
+        // Click inside the sticky LIBRARY zone?
+        if (e.y >= scrollY && e.y < scrollY + libStickyH)
+        {
+            if (e.y >= scrollY + sectionHeaderH && !sections_[0].collapsed)
+            {
+                const int idx = (e.y - (scrollY + sectionHeaderH)) / itemH;
+                if (idx >= 0 && idx < (int)sections_[0].items.size())
+                    if (!e.mods.isPopupMenu())
+                        selectId(sections_[0].items[(size_t)idx].id);
+            }
+            // LIBRARY header itself: non-collapsible, no action.
+            return;
+        }
+
+        // Click inside the sticky active-section header?
+        if (activeSectionIdx >= 0)
+        {
+            const int activeY = scrollY + libStickyH;
+            if (e.y >= activeY && e.y < activeY + sectionHeaderH)
+            {
+                auto& sec = sections_[(size_t)activeSectionIdx];
+                if (e.mods.isPopupMenu() && sec.rightClickable)
+                {
+                    juce::PopupMenu menu;
+                    menu.addItem(1, "Create New Playlist");
+                    menu.showMenuAsync(
+                        juce::PopupMenu::Options{}.withTargetScreenArea(
+                            juce::Rectangle<int>().withPosition(e.getScreenPosition())),
+                        [this](int result) {
+                            if (result == 1 && onCreatePlaylistRequested)
+                                onCreatePlaylistRequested();
+                        });
+                }
+                else if (!e.mods.isPopupMenu() && sec.collapsible)
+                {
+                    sec.collapsed = !sec.collapsed;
+                    layoutItems();
+                    repaint();
+                }
+                return;
+            }
+        }
+    }
+
+    // Normal layout-based hit test
     for (auto& section : sections_)
     {
         if (section.headerBounds.contains(e.x, e.y))
@@ -361,7 +540,12 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
             {
                 if (item.bounds.contains(e.x, e.y))
                 {
-                    if (e.mods.isPopupMenu() && item.id >= 1000)
+                    if (item.id == newPlaylistItemId)
+                    {
+                        if (!e.mods.isPopupMenu() && onCreatePlaylistRequested)
+                            onCreatePlaylistRequested();
+                    }
+                    else if (e.mods.isPopupMenu() && item.id >= 1000 && item.id < 2000)
                     {
                         juce::PopupMenu menu;
                         menu.addItem(1, "Rename Playlist");
@@ -479,7 +663,8 @@ int SidebarComponent::playlistItemIdAt(juce::Point<int> pos) const
     {
         if (section.collapsed) continue;
         for (const auto& item : section.items)
-            if (item.id >= 1000 && item.bounds.contains(pos))
+            if (((item.id >= 1000 && item.id < 2000) || item.id == newPlaylistItemId)
+                && item.bounds.contains(pos))
                 return item.id;
     }
     return -1;
@@ -520,11 +705,18 @@ void SidebarComponent::itemDropped(const SourceDetails& details)
     dragOverItemId_ = -1;
     repaint();
 
-    if (targetId < 1000) return;
-
     juce::StringArray paths;
     paths.addTokens(details.description.toString(), "\n", "");
     paths.removeEmptyStrings();
+
+    if (targetId == newPlaylistItemId)
+    {
+        if (!paths.isEmpty() && onNewPlaylistWithTracksRequested)
+            onNewPlaylistWithTracksRequested(paths);
+        return;
+    }
+
+    if (targetId < 1000) return;
 
     if (!paths.isEmpty() && onTracksDropped)
         onTracksDropped(targetId, paths);

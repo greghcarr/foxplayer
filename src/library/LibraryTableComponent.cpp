@@ -77,7 +77,7 @@ void LibraryTableComponent::setViewMode(ViewMode mode)
     viewMode_ = mode;
 
     auto& hdr = table_.getHeader();
-    const bool wantIndexColumn = (mode == ViewMode::Album || mode == ViewMode::Playlist);
+    const bool wantIndexColumn = (mode == ViewMode::Album || mode == ViewMode::Playlist || mode == ViewMode::Podcast);
     const bool haveIndexColumn = (hdr.getIndexOfColumnId(colIdRow, false) >= 0);
 
     if (wantIndexColumn && ! haveIndexColumn)
@@ -206,6 +206,22 @@ void LibraryTableComponent::itemDropped(const SourceDetails& details)
     onReorderRequested(paths, targetIndex);
 }
 
+void LibraryTableComponent::updateArtistColumnHeader()
+{
+    bool hasMusic   = false;
+    bool hasPodcast = false;
+    for (const auto* t : filteredTracks_)
+    {
+        if (t->isPodcast) hasPodcast = true;
+        else              hasMusic   = true;
+        if (hasMusic && hasPodcast) break;
+    }
+    juce::String label = "Artist";
+    if (hasMusic && hasPodcast) label = "Artist/Podcast";
+    else if (hasPodcast)        label = "Podcast";
+    table_.getHeader().setColumnName(colIdArtist, label);
+}
+
 void LibraryTableComponent::applyFilter()
 {
     const juce::String query = searchBox_.getText().trim().toLowerCase();
@@ -222,12 +238,14 @@ void LibraryTableComponent::applyFilter()
         if (query.isEmpty()
             || t.displayTitle().toLowerCase().contains(query)
             || t.artist.toLowerCase().contains(query)
-            || t.album.toLowerCase().contains(query))
+            || t.album.toLowerCase().contains(query)
+            || t.podcast.toLowerCase().contains(query))
         {
             filteredTracks_.push_back(&t);
         }
     }
 
+    updateArtistColumnHeader();
     applySort();
     refreshPlayingIndex();
     table_.updateContent();
@@ -251,7 +269,33 @@ void LibraryTableComponent::refreshPlayingIndex()
 
 void LibraryTableComponent::applySort()
 {
-    if (sortColumnId_ == 0 || filteredTracks_.size() < 2) return;
+    if (filteredTracks_.size() < 2) return;
+
+    // Default sort (no column selected): for music views, order by artist →
+    // album → track number → title so albums always appear in track order.
+    // Playlists and podcasts keep their natural insertion order.
+    if (sortColumnId_ == 0)
+    {
+        if (viewMode_ == ViewMode::Library ||
+            viewMode_ == ViewMode::Artist  ||
+            viewMode_ == ViewMode::Album)
+        {
+            std::stable_sort(filteredTracks_.begin(), filteredTracks_.end(),
+                [](const TrackInfo* a, const TrackInfo* b) {
+                    if (int c = a->artist.compareIgnoreCase(b->artist)) return c < 0;
+                    if (int c = a->album.compareIgnoreCase(b->album))   return c < 0;
+                    if (a->trackNumber != b->trackNumber)
+                    {
+                        // Tracks with no number (0) sort after numbered ones.
+                        if (a->trackNumber == 0) return false;
+                        if (b->trackNumber == 0) return true;
+                        return a->trackNumber < b->trackNumber;
+                    }
+                    return a->displayTitle().compareIgnoreCase(b->displayTitle()) < 0;
+                });
+        }
+        return;
+    }
 
     const int  col = sortColumnId_;
     const bool fwd = sortForwards_;
@@ -275,7 +319,12 @@ void LibraryTableComponent::applySort()
                 return (ai < bi) ? -1 : (ai > bi) ? 1 : 0;
             }
             case colIdTitle:  return a->displayTitle().compareIgnoreCase(b->displayTitle());
-            case colIdArtist: return a->artist.compareIgnoreCase(b->artist);
+            case colIdArtist:
+            {
+                const juce::String& av = a->isPodcast ? a->podcast : a->artist;
+                const juce::String& bv = b->isPodcast ? b->podcast : b->artist;
+                return av.compareIgnoreCase(bv);
+            }
             case colIdAlbum:  return a->album.compareIgnoreCase(b->album);
             case colIdGenre:  return a->genre.compareIgnoreCase(b->genre);
             case colIdTime:   return (a->durationSecs < b->durationSecs) ? -1
@@ -444,6 +493,14 @@ void LibraryTableComponent::paint(juce::Graphics& g)
         g.setColour(Color::headerBackground);
         g.fillRect(stripeRight, stripeTop, sbW, getHeight() - stripeTop);
     }
+
+    if (filteredTracks_.empty() && !suppressEmptyLabel_)
+    {
+        g.setColour(Color::textDim);
+        g.setFont(juce::Font(juce::FontOptions().withHeight(16.0f)));
+        g.drawText("Empty", table_.getX(), stripeTop, stripeW, getHeight() - stripeTop,
+                   juce::Justification::centred, false);
+    }
 }
 
 int LibraryTableComponent::getNumRows()
@@ -497,10 +554,10 @@ juce::String LibraryTableComponent::cellText(int row, int colId) const
     {
         case colIdRow:
         {
-            // Album view: show the static track number tag. Playlist view:
+            // Album/Podcast view: show the static track number tag. Playlist view:
             // show the 1-based index in the backing tracks_ vector (set by
             // setTracks in playlist order).
-            if (viewMode_ == ViewMode::Album)
+            if (viewMode_ == ViewMode::Album || viewMode_ == ViewMode::Podcast)
                 return t.trackNumber > 0 ? juce::String(t.trackNumber) : juce::String();
 
             const auto* base = tracks_.data();
@@ -508,7 +565,7 @@ juce::String LibraryTableComponent::cellText(int row, int colId) const
             return juce::String(idx);
         }
         case colIdTitle:  return t.displayTitle();
-        case colIdArtist: return t.artist;
+        case colIdArtist: return t.isPodcast ? t.podcast : t.artist;
         case colIdAlbum:  return t.album;
         case colIdGenre:  return t.genre;
         case colIdTime:   return t.formattedDuration();
@@ -596,6 +653,10 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
 
     const TrackInfo clickedTrack = *filteredTracks_[static_cast<size_t>(row)];
 
+    const bool canGoToArtist  = !clickedTrack.isPodcast && clickedTrack.artist.isNotEmpty();
+    const bool canGoToAlbum   = !clickedTrack.isPodcast && clickedTrack.album.isNotEmpty();
+    const bool canGoToPodcast =  clickedTrack.isPodcast && clickedTrack.podcast.isNotEmpty();
+
     juce::PopupMenu menu;
     menu.addItem(6, "Add to Queue");
     menu.addSeparator();
@@ -604,6 +665,9 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
     menu.addItem(4, "Analyze for Key and BPM");
     menu.addItem(7, "Look up on Apple Music");
     menu.addSeparator();
+    if (canGoToArtist)  menu.addItem(9,  "Go to Artist");
+    if (canGoToAlbum)   menu.addItem(10, "Go to Album");
+    if (canGoToPodcast) menu.addItem(11, "Go to Podcast");
     menu.addItem(1, "Show in Finder");
     menu.addSeparator();
     if (anyVisible)  menu.addItem(2, "Hide from Library");
@@ -628,6 +692,12 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
                 { if (onAppleMusicLookupRequested) onAppleMusicLookupRequested(selectedTracks); }
             else if (result == 8)
                 { if (onClearInfoRequested) onClearInfoRequested(selectedTracks); }
+            else if (result == 9)
+                { if (onGoToArtistRequested) onGoToArtistRequested(clickedTrack); }
+            else if (result == 10)
+                { if (onGoToAlbumRequested) onGoToAlbumRequested(clickedTrack); }
+            else if (result == 11)
+                { if (onGoToPodcastRequested) onGoToPodcastRequested(clickedTrack); }
         });
 }
 
@@ -639,7 +709,51 @@ void LibraryTableComponent::cellDoubleClicked(int row, int /*col*/, const juce::
 
 void LibraryTableComponent::deleteKeyPressed(int /*lastRowSelected*/)
 {
-    setHiddenForSelection(true);
+    const auto rows = selectedRows();
+    if (rows.empty()) return;
+
+    std::vector<TrackInfo> selected;
+    for (int r : rows)
+        if (r >= 0 && r < static_cast<int>(filteredTracks_.size()))
+            selected.push_back(*filteredTracks_[static_cast<size_t>(r)]);
+    if (selected.empty()) return;
+
+    if (viewMode_ == ViewMode::Playlist)
+    {
+        if (onRemoveFromPlaylistRequested)
+            onRemoveFromPlaylistRequested(selected);
+        return;
+    }
+
+    // Library / Artist / Album / Podcast views: confirm before hiding.
+    juce::String message;
+    if (selected.size() == 1)
+    {
+        const auto& t = selected.front();
+        const juce::String label = (t.artist.isNotEmpty() && t.title.isNotEmpty())
+            ? t.artist + " - " + t.title
+            : (t.title.isNotEmpty() ? t.title : t.file.getFileNameWithoutExtension());
+        message = "Are you sure you want to delete \"" + label + "\" from your Library?";
+    }
+    else
+    {
+        message = "Are you sure you want to delete "
+                  + juce::String(static_cast<int>(selected.size()))
+                  + " tracks from your Library?";
+    }
+
+    juce::AlertWindow::showAsync(
+        juce::MessageBoxOptions()
+            .withIconType(juce::MessageBoxIconType::QuestionIcon)
+            .withTitle("Delete from Library")
+            .withMessage(message)
+            .withButton("Delete")
+            .withButton("Cancel")
+            .withAssociatedComponent(this),
+        [this](int result) {
+            if (result == 1)
+                setHiddenForSelection(true);
+        });
 }
 
 void LibraryTableComponent::returnKeyPressed(int lastRowSelected)

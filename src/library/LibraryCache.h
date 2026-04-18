@@ -18,13 +18,14 @@ public:
     static juce::File cacheFile();
 
     static bool save(const std::vector<TrackInfo>& tracks,
-                     const std::vector<juce::File>& folders);
+                     const std::vector<juce::File>& musicFolders,
+                     const std::vector<juce::File>& podcastFolders);
 
-    // Loads the cache. Returns true and fills outTracks/outFolders if the
-    // file exists and parses cleanly. Returns false (and leaves outputs
-    // untouched) on missing file or any kind of read error.
+    // Loads the cache. Returns true and fills output parameters if the file
+    // exists and parses cleanly. Returns false on missing file or any error.
     static bool tryLoad(std::vector<TrackInfo>& outTracks,
-                        std::vector<juce::File>& outFolders);
+                        std::vector<juce::File>& outMusicFolders,
+                        std::vector<juce::File>& outPodcastFolders);
 };
 
 } // namespace FoxPlayer

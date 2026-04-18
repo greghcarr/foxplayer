@@ -51,6 +51,9 @@ bool FoxpFile::load(TrackInfo& track)
     if (obj->hasProperty("playCount"))
         track.playCount = static_cast<int>(obj->getProperty("playCount"));
 
+    if (obj->hasProperty("podcast"))
+        track.podcast = obj->getProperty("podcast").toString();
+
     return true;
 }
 
@@ -82,6 +85,13 @@ bool FoxpFile::save(const TrackInfo& track)
 
     if (track.playCount > 0)
         obj->setProperty("playCount", track.playCount);
+
+    if (track.isPodcast)
+    {
+        obj->setProperty("isPodcast", true);
+        if (track.podcast.isNotEmpty())
+            obj->setProperty("podcast", track.podcast);
+    }
 
     const juce::var root(obj);
     const juce::String text = juce::JSON::toString(root, false);

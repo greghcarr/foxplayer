@@ -10,8 +10,6 @@ namespace FoxPlayer
 
 using namespace Constants;
 
-static constexpr juce::CommandID cmdQuit = juce::StandardApplicationCommandIDs::quit;
-
 static constexpr int orphanCheckIntervalMs = 30'000;
 
 MainComponent::MainComponent()
@@ -67,21 +65,33 @@ MainComponent::MainComponent()
     addAndMakeVisible(sidebarDivider_);
 
 
-    // Empty-state prompt
+    // Empty-state prompt for music (shown when no music folders are configured).
     emptyPromptLabel_.setText("No music folder selected", juce::dontSendNotification);
     emptyPromptLabel_.setFont(juce::Font(18.0f));
     emptyPromptLabel_.setColour(juce::Label::textColourId, Color::textSecondary);
     emptyPromptLabel_.setJustificationType(juce::Justification::centred);
     addChildComponent(emptyPromptLabel_);
 
+    chooseFolderButton_.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
+    chooseFolderButton_.setColour(juce::TextButton::textColourOffId, Color::textPrimary);
+    chooseFolderButton_.onClick = [this] { showPreferencesLibrary(); };
+    addChildComponent(chooseFolderButton_);
+
+    // Empty-state prompt for podcasts (shown when no podcast folders are configured).
+    podcastPromptLabel_.setText("No podcasts folder selected", juce::dontSendNotification);
+    podcastPromptLabel_.setFont(juce::Font(18.0f));
+    podcastPromptLabel_.setColour(juce::Label::textColourId, Color::textSecondary);
+    podcastPromptLabel_.setJustificationType(juce::Justification::centred);
+    addChildComponent(podcastPromptLabel_);
+
+    podcastFolderButton_.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
+    podcastFolderButton_.setColour(juce::TextButton::textColourOffId, Color::textPrimary);
+    podcastFolderButton_.onClick = [this] { showPreferencesLibrary(); };
+    addChildComponent(podcastFolderButton_);
+
     // Shown while the library scanner is running and the library view is still
     // empty. Hidden as soon as the first batch of tracks arrives.
     addChildComponent(loadingIndicator_);
-
-    chooseFolderButton_.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
-    chooseFolderButton_.setColour(juce::TextButton::textColourOffId, Color::textPrimary);
-    chooseFolderButton_.onClick = [this] { showAddFolderChooser(); };
-    addChildComponent(chooseFolderButton_);
 
     // Library table callbacks
     libraryTable_.onRowActivated = [this](int rowIndex) {
@@ -117,11 +127,43 @@ MainComponent::MainComponent()
         }
     };
 
+    libraryTable_.onGoToArtistRequested = [this](TrackInfo t) {
+        for (const auto& [id, name] : artistIdToName_)
+            if (name == t.artist) { sidebar_.setSelectedId(id); showSidebarItem(id); return; }
+    };
+    libraryTable_.onGoToAlbumRequested = [this](TrackInfo t) {
+        for (const auto& [id, info] : albumIdToInfo_)
+            if (info.artist == t.artist && info.album == t.album)
+                { sidebar_.setSelectedId(id); showSidebarItem(id); return; }
+    };
+    libraryTable_.onGoToPodcastRequested = [this](TrackInfo t) {
+        for (const auto& [id, name] : podcastIdToName_)
+            if (name == t.podcast) { sidebar_.setSelectedId(id); showSidebarItem(id); return; }
+    };
+
     libraryTable_.onAddToQueueRequested = [this](std::vector<TrackInfo> tracks) {
         PlayQueue::QueueSource source;
         source.sidebarId = activeSidebarId_;
         source.name      = sourceNameForSidebar(activeSidebarId_);
         queue_.appendTracks(std::move(tracks), source);
+    };
+
+    libraryTable_.onRemoveFromPlaylistRequested = [this](std::vector<TrackInfo> tracks) {
+        if (activeSidebarId_ < 1000 || activeSidebarId_ >= 2000) return;
+        const int storeId = activeSidebarId_ - 1000;
+        const auto* pl = playlistStore_->findById(storeId);
+        if (pl == nullptr) return;
+
+        std::set<juce::String> toRemove;
+        for (const auto& t : tracks)
+            toRemove.insert(t.file.getFullPathName());
+
+        std::vector<juce::String> remaining = pl->trackPaths;
+        remaining.erase(std::remove_if(remaining.begin(), remaining.end(),
+                                       [&](const juce::String& p) { return toRemove.count(p) > 0; }),
+                        remaining.end());
+        playlistStore_->setPlaylistTracks(storeId, std::move(remaining));
+        refreshCurrentView();
     };
 
     libraryTable_.onReorderRequested = [this](juce::StringArray dragged, int targetIndex) {
@@ -196,6 +238,7 @@ MainComponent::MainComponent()
         shuffleOn_ = on;
         if (on) queue_.shuffleRemaining();
         else    queue_.unshuffleRemaining();
+
         saveSessionState();
     };
     transportBar_.onRepeatToggled = [this](int mode) {
@@ -215,10 +258,22 @@ MainComponent::MainComponent()
             DBG("onVolumeChanged: getUserSettings() returned null");
         }
     };
+    transportBar_.onMuteChanged = [this](bool muted, double premuteVol) {
+        if (auto* props = appProperties_.getUserSettings())
+        {
+            props->setValue("muted", muted);
+            props->setValue("premuteVolume", premuteVol);
+            props->saveIfNeeded();
+        }
+    };
 
-    // Restore persisted volume (defaults to 0.5 on first run).
+    // Restore persisted volume and mute state (defaults to 0.5 unmuted on first run).
     if (auto* props = appProperties_.getUserSettings())
+    {
         transportBar_.setInitialVolume(props->getDoubleValue("volume", 0.5));
+        if (props->getBoolValue("muted", false))
+            transportBar_.setInitialMute(true, props->getDoubleValue("premuteVolume", 0.5));
+    }
 
     // Scanner callbacks
     scanner_.onBatchReady = [this](std::vector<TrackInfo> batch) {
@@ -231,14 +286,33 @@ MainComponent::MainComponent()
         }
 
         fullLibrary_.insert(fullLibrary_.end(), batch.begin(), batch.end());
+
+        // Only append tracks that belong in the current view. Podcast tracks
+        // must not appear in All Music and vice versa.
         if (activeSidebarId_ == 1)
-            libraryTable_.appendTracks(batch);
+        {
+            std::vector<TrackInfo> musicOnly;
+            for (const auto& t : batch)
+                if (!t.isPodcast) musicOnly.push_back(t);
+            if (!musicOnly.empty())
+                libraryTable_.appendTracks(musicOnly);
+        }
+        else if (activeSidebarId_ == 2)
+        {
+            std::vector<TrackInfo> podcastOnly;
+            for (const auto& t : batch)
+                if (t.isPodcast) podcastOnly.push_back(t);
+            if (!podcastOnly.empty())
+                libraryTable_.appendTracks(podcastOnly);
+        }
+
         showEmptyLibraryPrompt(false);
         loadingIndicator_.setVisible(false);
-        // Refresh Artists/Albums on every batch so they fill in incrementally
-        // during the scan instead of staying empty until the end.
+        // Refresh Artists/Albums/Podcasts on every batch so they fill in
+        // incrementally during the scan instead of staying empty until the end.
         refreshSidebarArtists();
         refreshSidebarAlbums();
+        refreshSidebarPodcasts();
     };
     scanner_.onScanComplete = [this](int total) {
         DBG("onScanComplete total=" + juce::String(total)
@@ -253,14 +327,16 @@ MainComponent::MainComponent()
             fullLibrary_ = std::move(scanBuffer_);
             scanBuffer_.clear();
             scanReplacingCachedLibrary_ = false;
-            libraryTable_.setTracks(fullLibrary_);
-            refreshCurrentView();
         }
 
         loadingIndicator_.setVisible(false);
         sidebar_.setLibraryLoading(false);
         refreshSidebarArtists();
         refreshSidebarAlbums();
+        refreshSidebarPodcasts();
+        // Always refresh the visible table after a complete scan so the
+        // isPodcast split is applied regardless of which scan path was used.
+        refreshCurrentView();
 
         // Restore the persisted session (queue, sidebar view, shuffle/repeat,
         // currently-loaded track) now that fullLibrary_ is populated.
@@ -272,7 +348,7 @@ MainComponent::MainComponent()
         // Wrapped in try/catch so a write error never breaks the scan flow.
         try
         {
-            const bool ok = LibraryCache::save(fullLibrary_, musicFolders_);
+            const bool ok = LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
             DBG("LibraryCache::save -> " + juce::String((int) ok));
         }
         catch (...)
@@ -280,12 +356,22 @@ MainComponent::MainComponent()
             DBG("LibraryCache::save threw");
         }
 
-        // Orphan-cleanup walks each configured library folder, deleting any
-        // dot-prefixed .foxp sidecar whose audio file no longer exists. Pure
-        // background housekeeping; runs fire-and-forget so it doesn't block
-        // shutdown or the message thread.
-        const std::vector<juce::File> folders = musicFolders_;
-        juce::Thread::launch([folders]() {
+        // Background housekeeping: rewrite foxp sidecars for any track whose
+        // isPodcast classification changed (clears stale music metadata from
+        // podcast sidecars, and stale podcast fields from music sidecars), then
+        // delete orphaned sidecars for audio files that no longer exist.
+        std::vector<juce::File> allFolders = musicFolders_;
+        allFolders.insert(allFolders.end(), podcastFolders_.begin(), podcastFolders_.end());
+        std::vector<TrackInfo> librarySnapshot = fullLibrary_;
+        juce::Thread::launch([folders    = std::move(allFolders),
+                              snapshot   = std::move(librarySnapshot)]() {
+            // Rewrite foxp for each track that has an existing sidecar, so
+            // stale fields from a prior classification are removed.
+            for (const auto& track : snapshot)
+                if (FoxpFile::exists(track))
+                    FoxpFile::save(track);
+
+            // Delete sidecars whose audio file no longer exists.
             for (const auto& folder : folders)
             {
                 if (!folder.isDirectory()) continue;
@@ -295,9 +381,6 @@ MainComponent::MainComponent()
 
                 for (const auto& foxp : foxpFiles)
                 {
-                    // Sidecar naming: ".<audiofile>.<ext>.foxp" (dot-prefixed,
-                    // .foxp-suffixed). Strip both the leading dot and the
-                    // ".foxp" suffix to recover the audio file path.
                     const juce::String name = foxp.getFileName();
                     if (! name.startsWith(".") || ! name.endsWithIgnoreCase(".foxp"))
                         continue;
@@ -313,7 +396,7 @@ MainComponent::MainComponent()
 
     // Analysis log window (created hidden; shown via Window menu).
     analysisLogWindow_ = std::make_unique<AnalysisLogWindow>();
-    preferencesWindow_ = std::make_unique<PreferencesWindow>(engine_.deviceManager());
+    preferencesWindow_ = std::make_unique<PreferencesWindow>(engine_.deviceManager(), appProperties_);
     preferencesWindow_->onClosed = [this] {
         // Unlock the main window.
         prefsLockOverlay_.setVisible(false);
@@ -346,6 +429,16 @@ MainComponent::MainComponent()
         };
     }
 
+    // Wire the podcast folder section inside the Library panel.
+    if (auto* libPanel = preferencesWindow_->libraryPanel())
+    {
+        libPanel->onPodcastFoldersChanged = [this](std::vector<juce::File> folders) {
+            setPodcastFolders(std::move(folders));
+            if (auto* p = preferencesWindow_->libraryPanel())
+                p->setPodcastFolders(podcastFolders_);
+        };
+    }
+
     // Analysis callbacks - feed both the library and the log window.
     analysisEngine_.onTrackQueued = [this](TrackInfo t) {
         if (analysisLogWindow_) analysisLogWindow_->log().trackQueued(t);
@@ -364,9 +457,69 @@ MainComponent::MainComponent()
     appleMusicLookup_.onLookupStarted = [this](TrackInfo t) {
         if (analysisLogWindow_) analysisLogWindow_->log().lookupStarted(t);
     };
-    appleMusicLookup_.onLookupCompleted = [this](TrackInfo t, juce::String summary) {
+    appleMusicLookup_.onLookupCompleted = [this](TrackInfo t, juce::String summary, bool isBatch) {
         updateTrackInLibrary(t);
         if (analysisLogWindow_) analysisLogWindow_->log().lookupCompleted(t, summary);
+
+        if (summary == "Network error" && ! appleMusicLookup_.isSuspended())
+        {
+            // Collect the failed track for a retry after a short delay.
+            // The overwrite flag isn't available here, so default to false
+            // (don't clobber existing data on retry).
+            pendingRetryLookups_.push_back({ t, false });
+
+            if (! retryScheduled_)
+            {
+                retryScheduled_ = true;
+                juce::Timer::callAfterDelay(30000, [this] {
+                    retryScheduled_ = false;
+                    if (pendingRetryLookups_.empty() || appleMusicLookup_.isSuspended())
+                    {
+                        pendingRetryLookups_.clear();
+                        return;
+                    }
+                    std::vector<TrackInfo> tracks;
+                    for (const auto& j : pendingRetryLookups_)
+                        tracks.push_back(j.track);
+                    pendingRetryLookups_.clear();
+                    appleMusicLookup_.enqueueAll(tracks, false);
+                });
+            }
+
+            if (! isBatch)
+            {
+                const juce::String trackName = t.title.isNotEmpty() ? t.title
+                                             : t.file.getFileNameWithoutExtension();
+                juce::AlertWindow::showAsync(
+                    juce::MessageBoxOptions()
+                        .withIconType(juce::MessageBoxIconType::WarningIcon)
+                        .withTitle("Apple Music Lookup Failed")
+                        .withMessage("Could not reach the Apple Music server for \""
+                                     + trackName + "\".\n\n"
+                                     "The lookup has been rescheduled and will retry automatically.")
+                        .withButton("OK")
+                        .withAssociatedComponent(this),
+                    nullptr);
+            }
+        }
+    };
+
+    appleMusicLookup_.onLookupSuspended = [this] {
+        pendingRetryLookups_.clear();
+        retryScheduled_ = false;
+        juce::AlertWindow::showAsync(
+            juce::MessageBoxOptions()
+                .withIconType(juce::MessageBoxIconType::WarningIcon)
+                .withTitle("Apple Music Lookup Paused")
+                .withMessage(juce::String("Apple Music lookups have failed ")
+                             + juce::String(AppleMusicLookup::maxConsecutiveFailures)
+                             + " times in a row, likely due to rate limiting.\n\n"
+                             "FoxPlayer has stopped retrying to avoid further errors. "
+                             "Try again later by right-clicking a track and choosing "
+                             "\"Look up on Apple Music\".")
+                .withButton("OK")
+                .withAssociatedComponent(this),
+            nullptr);
     };
 
     // Queue callbacks
@@ -407,6 +560,11 @@ MainComponent::MainComponent()
     sidebar_.onCreatePlaylistRequested = [this] {
         playlistStore_->createPlaylist("New Playlist");
     };
+    sidebar_.onNewPlaylistWithTracksRequested = [this](juce::StringArray paths) {
+        const int newId = playlistStore_->createPlaylist("New Playlist");
+        std::vector<juce::String> pathVec(paths.begin(), paths.end());
+        playlistStore_->addTracksToPlaylist(newId, pathVec);
+    };
     sidebar_.onTracksDropped = [this](int sidebarId, juce::StringArray paths) {
         handleTracksDroppedOnPlaylist(sidebarId, paths);
     };
@@ -426,6 +584,14 @@ MainComponent::MainComponent()
 
     setupAudioEngineCallbacks();
 
+    // Restore saved podcast folders.
+    podcastFolders_ = loadSavedPodcastFolders();
+    podcastFolders_.erase(std::remove_if(podcastFolders_.begin(), podcastFolders_.end(),
+                                          [](const juce::File& f) { return ! f.isDirectory(); }),
+                          podcastFolders_.end());
+    if (auto* libPanel = preferencesWindow_->libraryPanel())
+        libPanel->setPodcastFolders(podcastFolders_);
+
     // Restore saved music folders (or show the empty prompt if none).
     auto savedFolders = loadSavedMusicFolders();
     // Prune anything that's no longer a valid directory.
@@ -441,10 +607,11 @@ MainComponent::MainComponent()
         // changes since the cache was written.
         std::vector<TrackInfo>   cachedTracks;
         std::vector<juce::File>  cachedFolders;
+        std::vector<juce::File>  cachedPodcastFolders;
         bool cacheUsed = false;
         try
         {
-            if (LibraryCache::tryLoad(cachedTracks, cachedFolders)
+            if (LibraryCache::tryLoad(cachedTracks, cachedFolders, cachedPodcastFolders)
                 && cachedFolders == savedFolders)
             {
                 DBG("LibraryCache loaded "
@@ -453,6 +620,7 @@ MainComponent::MainComponent()
                 libraryTable_.setTracks(fullLibrary_);
                 refreshSidebarArtists();
                 refreshSidebarAlbums();
+                refreshSidebarPodcasts();
                 if (! sessionRestored_)
                     restoreSessionState();
                 cacheUsed = true;
@@ -494,6 +662,9 @@ MainComponent::~MainComponent()
     // memory at quit time.
     if (auto* props = appProperties_.getUserSettings())
     {
+        if (props->getBoolValue("debug.deleteFoxpOnShutdown", false))
+            deleteFoxpFilesInLibrary();
+
         const bool ok = props->save();
         DBG("Destructor save -> " + props->getFile().getFullPathName()
             + (ok ? " (save ok)" : " (save FAILED)"));
@@ -509,6 +680,10 @@ void MainComponent::timerCallback()
     // Persist playback position periodically so a crash doesn't lose the spot.
     saveSessionElapsed();
 
+    // Keep Now Playing metadata in sync.
+    const double pos = engine_.elapsedSeconds();
+    nowPlaying_.setPlaybackState(engine_.isPlaying(), pos);
+
     const size_t before = fullLibrary_.size();
     fullLibrary_.erase(
         std::remove_if(fullLibrary_.begin(), fullLibrary_.end(),
@@ -519,6 +694,7 @@ void MainComponent::timerCallback()
     {
         refreshSidebarArtists();
         refreshSidebarAlbums();
+        refreshSidebarPodcasts();
         refreshCurrentView();
     }
 }
@@ -535,7 +711,8 @@ void MainComponent::updateTrackInLibrary(const TrackInfo& updated)
     }
     libraryTable_.updateTrack(updated);
     refreshSidebarArtists();
-        refreshSidebarAlbums();
+    refreshSidebarAlbums();
+    refreshSidebarPodcasts();
 
     // On an artist view the edit may have removed the selected artist (e.g.
     // the only track by that artist was renamed). Re-resolve the sidebar
@@ -601,20 +778,63 @@ void MainComponent::updatePlayingHighlight()
 
 void MainComponent::refreshCurrentView()
 {
+    // Show the podcast-no-folder prompt when viewing any podcast view with no
+    // podcast folders configured. Hide both prompts for all other views.
+    const bool isPodcastView = (activeSidebarId_ == 2)
+                            || (activeSidebarId_ >= 4000 && activeSidebarId_ < 5000);
+    if (isPodcastView && podcastFolders_.empty())
+    {
+        showPodcastPrompt(true);
+    }
+    else
+    {
+        showPodcastPrompt(false);
+        // Only hide the music prompt here if there are music folders. If there
+        // are none, setMusicFolders() already controls its visibility.
+        if (!musicFolders_.empty())
+            showEmptyLibraryPrompt(false);
+    }
+
     libraryTable_.setSearchPlaceholder(sourceNameForSidebar(activeSidebarId_));
     // Pick the view mode for the current sidebar selection. The mode controls
     // whether the "#" column exists, what it shows, and whether drag-reorder
     // is allowed.
     using VM = LibraryTableComponent::ViewMode;
     VM mode = VM::Library;
-    if      (activeSidebarId_ >= 2000 && activeSidebarId_ < 3000) mode = VM::Artist;
-    else if (activeSidebarId_ >= 3000 && activeSidebarId_ < 4000) mode = VM::Album;
-    else if (activeSidebarId_ >= 1000 && activeSidebarId_ < 2000) mode = VM::Playlist;
+    if      (activeSidebarId_ == 2)                                 mode = VM::Podcast;
+    else if (activeSidebarId_ >= 2000 && activeSidebarId_ < 3000)  mode = VM::Artist;
+    else if (activeSidebarId_ >= 3000 && activeSidebarId_ < 4000)  mode = VM::Album;
+    else if (activeSidebarId_ >= 4000 && activeSidebarId_ < 5000)  mode = VM::Podcast;
+    else if (activeSidebarId_ >= 1000 && activeSidebarId_ < 2000)  mode = VM::Playlist;
     libraryTable_.setViewMode(mode);
 
     if (activeSidebarId_ == 1)
     {
-        libraryTable_.setTracks(fullLibrary_);
+        std::vector<TrackInfo> tracks;
+        for (const auto& t : fullLibrary_)
+            if (!t.isPodcast) tracks.push_back(t);
+        libraryTable_.setTracks(tracks);
+    }
+    else if (activeSidebarId_ == 2)
+    {
+        std::vector<TrackInfo> tracks;
+        for (const auto& t : fullLibrary_)
+            if (t.isPodcast) tracks.push_back(t);
+        libraryTable_.setTracks(tracks);
+    }
+    else if (activeSidebarId_ >= 4000 && activeSidebarId_ < 5000)
+    {
+        const auto it = podcastIdToName_.find(activeSidebarId_);
+        if (it == podcastIdToName_.end())
+        {
+            libraryTable_.clearTracks();
+            return;
+        }
+        const juce::String& showName = it->second;
+        std::vector<TrackInfo> tracks;
+        for (const auto& t : fullLibrary_)
+            if (t.isPodcast && t.podcast == showName) tracks.push_back(t);
+        libraryTable_.setTracks(tracks);
     }
     else if (activeSidebarId_ >= 2000 && activeSidebarId_ < 3000)
     {
@@ -697,7 +917,7 @@ void MainComponent::refreshSidebarAlbums()
     std::set<juce::String> seen;
     for (const auto& t : fullLibrary_)
     {
-        if (t.album.isEmpty()) continue;
+        if (t.isPodcast || t.album.isEmpty()) continue;
         const juce::String label = (t.artist.isNotEmpty() ? t.artist : juce::String("Unknown Artist"))
                                  + " - " + t.album;
         if (seen.insert(label).second)
@@ -721,12 +941,77 @@ void MainComponent::refreshSidebarAlbums()
     sidebar_.setAlbums(sidebarItems);
 }
 
-void MainComponent::refreshSidebarArtists()
+void MainComponent::refreshSidebarPodcasts()
 {
-    // Collect unique non-empty artist names, sorted case-insensitively.
     std::set<juce::String> unique;
     for (const auto& t : fullLibrary_)
-        if (t.artist.isNotEmpty())
+        if (t.isPodcast && t.podcast.isNotEmpty())
+            unique.insert(t.podcast);
+
+    std::vector<juce::String> sorted(unique.begin(), unique.end());
+    std::sort(sorted.begin(), sorted.end(), [](const juce::String& a, const juce::String& b) {
+        return a.compareNatural(b, false) < 0;
+    });
+
+    podcastIdToName_.clear();
+    std::vector<std::pair<int, juce::String>> items;
+    int id = 4000;
+    for (const auto& name : sorted)
+    {
+        if (id >= 5000) break;
+        podcastIdToName_[id] = name;
+        items.push_back({ id, name });
+        ++id;
+    }
+    sidebar_.setPodcasts(items);
+}
+
+void MainComponent::savePodcastFolders()
+{
+    auto* props = appProperties_.getUserSettings();
+    if (props == nullptr) return;
+
+    juce::StringArray paths;
+    for (const auto& f : podcastFolders_)
+        paths.add(f.getFullPathName());
+    props->setValue("podcastFolders", paths.joinIntoString("\n"));
+}
+
+std::vector<juce::File> MainComponent::loadSavedPodcastFolders()
+{
+    std::vector<juce::File> result;
+    auto* props = appProperties_.getUserSettings();
+    if (props == nullptr) return result;
+
+    const juce::String joined = props->getValue("podcastFolders");
+    if (joined.isNotEmpty())
+    {
+        juce::StringArray paths;
+        paths.addTokens(joined, "\n", "");
+        for (const auto& p : paths)
+            if (p.isNotEmpty())
+                result.emplace_back(p);
+    }
+    return result;
+}
+
+void MainComponent::setPodcastFolders(std::vector<juce::File> folders)
+{
+    podcastFolders_ = std::move(folders);
+    savePodcastFolders();
+    // Rescan everything through the normal music-folder path (keepLibrary=true
+    // so the current library stays visible while the background scan runs, and
+    // scanReplacingCachedLibrary_ is set so batches go to scanBuffer_ instead
+    // of appending duplicates directly to fullLibrary_).
+    setMusicFolders(musicFolders_, /*keepLibrary*/ true);
+}
+
+void MainComponent::refreshSidebarArtists()
+{
+    // Collect unique non-empty artist names (non-podcast tracks only), sorted case-insensitively.
+    std::set<juce::String> unique;
+    for (const auto& t : fullLibrary_)
+        if (!t.isPodcast && t.artist.isNotEmpty())
             unique.insert(t.artist);
 
     std::vector<juce::String> sorted(unique.begin(), unique.end());
@@ -791,6 +1076,19 @@ void MainComponent::handleTracksDroppedOnPlaylist(int sidebarId,
     playlistStore_->addTracksToPlaylist(storeId, pathVec);
 }
 
+void MainComponent::deleteFoxpFilesInLibrary()
+{
+    std::vector<juce::File> allFolders = musicFolders_;
+    allFolders.insert(allFolders.end(), podcastFolders_.begin(), podcastFolders_.end());
+
+    for (const auto& folder : allFolders)
+    {
+        if (!folder.isDirectory()) continue;
+        for (const auto& f : folder.findChildFiles(juce::File::findFiles, true, ".*.foxp"))
+            f.deleteFile();
+    }
+}
+
 void MainComponent::incrementPlayCount(const juce::File& file)
 {
     for (auto& t : fullLibrary_)
@@ -828,6 +1126,10 @@ void MainComponent::setupAudioEngineCallbacks()
     engine_.onTrackStarted = [this](const TrackInfo& track) {
         transportBar_.setCurrentTrack(track);
         queueView_.refresh(queue_);
+        const auto& t = track;
+        const std::string artist = t.isPodcast ? t.podcast.toStdString() : t.artist.toStdString();
+        const std::string title  = t.displayTitle().toStdString();
+        nowPlaying_.setTrackInfo(title, artist, t.durationSecs);
     };
 
     engine_.onTrackFinished = [this] {
@@ -855,12 +1157,28 @@ void MainComponent::setupAudioEngineCallbacks()
         {
             transportBar_.clearTrack();
             libraryTable_.setPlayingFile({});
+            nowPlaying_.clearNowPlaying();
         }
     };
 
     engine_.onStateChanged = [this] {
         transportBar_.repaint();
+        StatusBarItem::State sbState;
+        if (engine_.isPlaying())       sbState = StatusBarItem::State::Playing;
+        else if (engine_.isPaused())   sbState = StatusBarItem::State::Paused;
+        else                           sbState = StatusBarItem::State::Stopped;
+        statusBarItem_.setState(sbState);
     };
+
+    auto togglePlayPause = [this] {
+        if (engine_.isPlaying())     engine_.pause();
+        else if (engine_.isPaused()) engine_.resume();
+    };
+    nowPlaying_.onPlayPause  = togglePlayPause;
+    nowPlaying_.onPrevious   = [this] { playPrev(); };
+    nowPlaying_.onNext       = [this] { playNext(); };
+    statusBarItem_.onShowApp = [this] { if (onShowWindowRequested) onShowWindowRequested(); };
+    statusBarItem_.onQuit    = [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); };
 }
 
 void MainComponent::paint(juce::Graphics& g)
@@ -1009,11 +1327,12 @@ void MainComponent::resized()
     pinButton_.setBounds(pinX, pinY, pinSize, pinSize);
     pinButton_.toFront(false);
 
-    // Empty state centered in library area
+    // Empty-state prompts centered in the library area.
     emptyPromptLabel_.setBounds(bounds.withSizeKeepingCentre(400, 40));
+    chooseFolderButton_.setBounds(bounds.withSizeKeepingCentre(200, 36).translated(0, 50));
+    podcastPromptLabel_.setBounds(bounds.withSizeKeepingCentre(400, 40));
+    podcastFolderButton_.setBounds(bounds.withSizeKeepingCentre(200, 36).translated(0, 50));
     loadingIndicator_.setBounds(bounds.withSizeKeepingCentre(280, 40));
-    chooseFolderButton_.setBounds(bounds.withSizeKeepingCentre(200, 36)
-                                        .translated(0, 50));
 
     // Preferences-lock overlay covers the whole component so it dims both
     // the library area and transport bar uniformly.
@@ -1104,7 +1423,7 @@ void MainComponent::setMusicFolders(std::vector<juce::File> folders, bool keepLi
 
     scanReplacingCachedLibrary_ = keepLibrary;
     scanBuffer_.clear();
-    scanner_.scanFolders(musicFolders_);
+    scanner_.scanFolders(musicFolders_, podcastFolders_);
 }
 
 void MainComponent::deleteOldStyleFoxpFiles(const juce::File& folder)
@@ -1129,6 +1448,7 @@ void MainComponent::saveMusicFolders()
     for (const auto& f : musicFolders_)
         paths.add(f.getFullPathName());
     props->setValue("musicFolders", paths.joinIntoString("\n"));
+    props->removeValue("musicFolder");   // remove legacy single-folder key
 }
 
 std::vector<juce::File> MainComponent::loadSavedMusicFolders()
@@ -1161,6 +1481,13 @@ juce::String MainComponent::sourceNameForSidebar(int sidebarId) const
 {
     if (sidebarId == 1)
         return "All Music";
+    if (sidebarId == 2)
+        return "All Podcasts";
+    if (sidebarId >= 4000 && sidebarId < 5000)
+    {
+        const auto it = podcastIdToName_.find(sidebarId);
+        return it != podcastIdToName_.end() ? it->second : juce::String("Podcast");
+    }
     if (sidebarId >= 2000 && sidebarId < 3000)
     {
         const auto it = artistIdToName_.find(sidebarId);
@@ -1292,10 +1619,13 @@ void MainComponent::applyAlwaysOnTop()
 void MainComponent::showPreferences()
 {
     if (!preferencesWindow_) return;
-    // Push the live folder list into the panel each time we open Preferences
+    // Push the live folder lists into the panels each time we open Preferences
     // so the UI reflects any changes made elsewhere.
     if (auto* libPanel = preferencesWindow_->libraryPanel())
+    {
         libPanel->setFolders(musicFolders_);
+        libPanel->setPodcastFolders(podcastFolders_);
+    }
     preferencesWindow_->setVisible(true);
     preferencesWindow_->toFront(true);
     // Preferences floats above the main window so the user can't hide it.
@@ -1316,6 +1646,23 @@ void MainComponent::showEmptyLibraryPrompt(bool show)
 {
     emptyPromptLabel_.setVisible(show);
     chooseFolderButton_.setVisible(show);
+    if (show) showPodcastPrompt(false);
+    libraryTable_.setSuppressEmptyLabel(show || podcastPromptLabel_.isVisible());
+}
+
+void MainComponent::showPodcastPrompt(bool show)
+{
+    podcastPromptLabel_.setVisible(show);
+    podcastFolderButton_.setVisible(show);
+    if (show) showEmptyLibraryPrompt(false);
+    libraryTable_.setSuppressEmptyLabel(show || emptyPromptLabel_.isVisible());
+}
+
+void MainComponent::showPreferencesLibrary()
+{
+    showPreferences();
+    if (preferencesWindow_)
+        preferencesWindow_->showLibraryCategory();
 }
 
 // juce::MenuBarModel
@@ -1333,6 +1680,8 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String& /*
     }
     else if (index == 1)
     {
+        menu.addCommandItem(&commandManager_, cmdShowPlayerWindow);
+        menu.addSeparator();
         menu.addCommandItem(&commandManager_, cmdAlwaysOnTop);
         menu.addSeparator();
         menu.addCommandItem(&commandManager_, cmdShowAnalysisLog);
@@ -1350,6 +1699,7 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& commands)
     commands.add(cmdPreferences);
     commands.add(cmdAlwaysOnTop);
     commands.add(cmdFocusSearch);
+    commands.add(cmdShowPlayerWindow);
 }
 
 void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandInfo& info)
@@ -1393,6 +1743,12 @@ void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandI
                                        | juce::ModifierKeys::shiftModifier);
             break;
 
+        case cmdShowPlayerWindow:
+            info.setInfo("Show Player Window",
+                         "Bring the FoxPlayer window to the front",
+                         "Window", 0);
+            break;
+
         case cmdFocusSearch:
             info.setInfo("Find",
                          "Focus the library search box",
@@ -1427,6 +1783,10 @@ bool MainComponent::perform(const ApplicationCommandTarget::InvocationInfo& info
 
         case cmdFocusSearch:
             libraryTable_.focusSearchBox();
+            return true;
+
+        case cmdShowPlayerWindow:
+            if (onShowWindowRequested) onShowWindowRequested();
             return true;
 
         default:

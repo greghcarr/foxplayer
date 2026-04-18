@@ -25,12 +25,12 @@ void AppleMusicLookup::enqueue(const TrackInfo& track, bool overwrite)
 {
     {
         juce::ScopedLock sl(queueLock_);
-        queue_.push_back(Job{ track, overwrite });
+        queue_.push_back(Job{ track, overwrite, /*isBatch=*/false });
     }
 
     if (onLookupQueued) onLookupQueued(track);
 
-    if (! isThreadRunning())
+    if (! suspended_.load() && ! isThreadRunning())
         startThread(juce::Thread::Priority::low);
 }
 
@@ -39,14 +39,14 @@ void AppleMusicLookup::enqueueAll(const std::vector<TrackInfo>& tracks, bool ove
     {
         juce::ScopedLock sl(queueLock_);
         for (const auto& t : tracks)
-            queue_.push_back(Job{ t, overwrite });
+            queue_.push_back(Job{ t, overwrite, /*isBatch=*/true });
     }
 
     if (onLookupQueued)
         for (const auto& t : tracks)
             onLookupQueued(t);
 
-    if (! isThreadRunning())
+    if (! suspended_.load() && ! isThreadRunning())
         startThread(juce::Thread::Priority::low);
 }
 
@@ -62,6 +62,8 @@ void AppleMusicLookup::cancelAll()
 
 void AppleMusicLookup::run()
 {
+    if (suspended_.load()) return;
+
     while (! threadShouldExit())
     {
         Job job;
@@ -73,6 +75,8 @@ void AppleMusicLookup::run()
         }
 
         processOne(std::move(job));
+
+        if (suspended_.load()) break;
     }
 }
 
@@ -104,35 +108,71 @@ namespace
         return url100;
     }
 
-    // Picks the most likely match. Prefers a result whose artist case-
-    // insensitively matches the track's artist when we have one; otherwise
-    // takes the first result.
-    juce::var pickBestMatch(const juce::Array<juce::var>& results,
-                            const TrackInfo& track)
+    // Scores a single iTunes result for how well it matches the track.
+    // Higher is better. Criteria (additive):
+    //   +4  artist matches exactly (case-insensitive)
+    //   +2  collectionType is "Album" (not a single/EP release)
+    //   +1  trackCount > 1 (belt-and-suspenders album check)
+    //   +3  collectionName matches the dominant album already resolved for
+    //       this track's directory (cross-track consistency)
+    int scoreResult(const juce::var& result,
+                    const TrackInfo& track,
+                    const juce::String& hintAlbum)
     {
-        if (results.isEmpty()) return {};
+        auto* obj = result.getDynamicObject();
+        if (obj == nullptr) return -1;
+
+        int score = 0;
 
         if (track.artist.isNotEmpty())
         {
-            const juce::String wanted = track.artist.toLowerCase();
-            for (const auto& r : results)
-            {
-                if (auto* obj = r.getDynamicObject())
-                {
-                    const juce::String got = obj->getProperty("artistName").toString().toLowerCase();
-                    if (got == wanted)
-                        return r;
-                }
-            }
+            const juce::String got = obj->getProperty("artistName").toString().toLowerCase();
+            if (got == track.artist.toLowerCase())
+                score += 4;
         }
-        return results.getReference(0);
+
+        const juce::String colType = obj->getProperty("collectionType").toString();
+        if (colType.equalsIgnoreCase("Album"))
+            score += 2;
+
+        const int trackCount = static_cast<int>(obj->getProperty("trackCount"));
+        if (trackCount > 1)
+            score += 1;
+
+        if (hintAlbum.isNotEmpty())
+        {
+            const juce::String colName = obj->getProperty("collectionName").toString();
+            if (colName.equalsIgnoreCase(hintAlbum))
+                score += 3;
+        }
+
+        return score;
+    }
+
+    juce::var pickBestMatch(const juce::Array<juce::var>& results,
+                            const TrackInfo& track,
+                            const juce::String& hintAlbum)
+    {
+        if (results.isEmpty()) return {};
+
+        int      bestScore = -1;
+        juce::var best;
+
+        for (const auto& r : results)
+        {
+            const int s = scoreResult(r, track, hintAlbum);
+            if (s > bestScore) { bestScore = s; best = r; }
+        }
+
+        return best;
     }
 }
 
 void AppleMusicLookup::processOne(Job job)
 {
-    TrackInfo  track     = job.track;
-    const bool overwrite = job.overwrite;
+    TrackInfo       track   = job.track;
+    const bool      overwrite = job.overwrite;
+    const bool      isBatch   = job.isBatch;
 
     juce::MessageManager::callAsync([this, t = track]() mutable {
         if (onLookupStarted) onLookupStarted(std::move(t));
@@ -156,8 +196,13 @@ void AppleMusicLookup::processOne(Job job)
 
     if (response.isEmpty() || threadShouldExit())
     {
-        juce::MessageManager::callAsync([this, t = track]() mutable {
-            if (onLookupCompleted) onLookupCompleted(std::move(t), "Network error");
+        ++consecutiveNetworkFailures_;
+        const bool shouldSuspend = (consecutiveNetworkFailures_ >= maxConsecutiveFailures);
+        if (shouldSuspend) suspended_.store(true);
+
+        juce::MessageManager::callAsync([this, t = track, isBatch, shouldSuspend]() mutable {
+            if (onLookupCompleted) onLookupCompleted(std::move(t), "Network error", isBatch);
+            if (shouldSuspend && onLookupSuspended) onLookupSuspended();
         });
         return;
     }
@@ -166,8 +211,8 @@ void AppleMusicLookup::processOne(Job job)
     auto* root = json.getDynamicObject();
     if (root == nullptr || ! root->hasProperty("results"))
     {
-        juce::MessageManager::callAsync([this, t = track]() mutable {
-            if (onLookupCompleted) onLookupCompleted(std::move(t), "No match");
+        juce::MessageManager::callAsync([this, t = track, isBatch]() mutable {
+            if (onLookupCompleted) onLookupCompleted(std::move(t), "No match", isBatch);
         });
         return;
     }
@@ -175,19 +220,35 @@ void AppleMusicLookup::processOne(Job job)
     auto resultsVar = root->getProperty("results");
     if (! resultsVar.isArray())
     {
-        juce::MessageManager::callAsync([this, t = track]() mutable {
-            if (onLookupCompleted) onLookupCompleted(std::move(t), "No match");
+        juce::MessageManager::callAsync([this, t = track, isBatch]() mutable {
+            if (onLookupCompleted) onLookupCompleted(std::move(t), "No match", isBatch);
         });
         return;
     }
 
     const auto& results = *resultsVar.getArray();
-    const juce::var match = pickBestMatch(results, track);
+
+    // Look up the dominant album already resolved for this directory so the
+    // scorer can prefer results that are consistent with sibling tracks.
+    const juce::String dirKey  = track.file.getParentDirectory().getFullPathName();
+    juce::String       hintAlbum;
+    {
+        auto it = resolvedAlbums_.find(dirKey);
+        if (it != resolvedAlbums_.end() && !it->second.empty())
+        {
+            // Pick the album name with the highest count.
+            int best = 0;
+            for (const auto& kv : it->second)
+                if (kv.second > best) { best = kv.second; hintAlbum = kv.first; }
+        }
+    }
+
+    const juce::var match = pickBestMatch(results, track, hintAlbum);
     auto* matchObj = match.getDynamicObject();
     if (matchObj == nullptr)
     {
-        juce::MessageManager::callAsync([this, t = track]() mutable {
-            if (onLookupCompleted) onLookupCompleted(std::move(t), "No match");
+        juce::MessageManager::callAsync([this, t = track, isBatch]() mutable {
+            if (onLookupCompleted) onLookupCompleted(std::move(t), "No match", isBatch);
         });
         return;
     }
@@ -261,8 +322,17 @@ void AppleMusicLookup::processOne(Job job)
     if (changed)
         FoxpFile::save(track);
 
+    // A successful match resets the consecutive-failure counter.
+    consecutiveNetworkFailures_ = 0;
+
+    // Record the resolved album for this directory so future tracks in the
+    // same folder can bias toward the same collection.
+    const juce::String resolvedAlbum = matchObj->getProperty("collectionName").toString();
+    if (resolvedAlbum.isNotEmpty())
+        resolvedAlbums_[dirKey][resolvedAlbum]++;
+
     juce::String summary;
-    const juce::String foundAlbum  = matchObj->getProperty("collectionName").toString();
+    const juce::String foundAlbum  = resolvedAlbum;
     const juce::String foundArtist = matchObj->getProperty("artistName").toString();
     if (foundAlbum.isNotEmpty())
         summary = "Found: " + foundAlbum;
@@ -271,8 +341,8 @@ void AppleMusicLookup::processOne(Job job)
     else
         summary = "Found";
 
-    juce::MessageManager::callAsync([this, t = track, summary]() mutable {
-        if (onLookupCompleted) onLookupCompleted(std::move(t), summary);
+    juce::MessageManager::callAsync([this, t = track, summary, isBatch]() mutable {
+        if (onLookupCompleted) onLookupCompleted(std::move(t), summary, isBatch);
     });
 }
 

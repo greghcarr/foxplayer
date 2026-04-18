@@ -17,6 +17,8 @@
 #include "ui/AutoHideViewport.h"
 #include "ui/PreferencesWindow.h"
 #include "ui/LoadingIndicator.h"
+#include "ui/StatusBarItem.h"
+#include "ui/NowPlayingBridge.h"
 #include <JuceHeader.h>
 #include <map>
 
@@ -57,12 +59,17 @@ public:
 
     enum CommandIDs
     {
-        cmdShowHidden      = 0x1002,
-        cmdShowAnalysisLog = 0x1003,
-        cmdPreferences     = 0x1004,
-        cmdAlwaysOnTop     = 0x1005,
-        cmdFocusSearch     = 0x1006,
+        cmdShowHidden        = 0x1002,
+        cmdShowAnalysisLog   = 0x1003,
+        cmdPreferences       = 0x1004,
+        cmdAlwaysOnTop       = 0x1005,
+        cmdFocusSearch       = 0x1006,
+        cmdShowPlayerWindow  = 0x1007,
     };
+
+    // Called when the user chooses Window -> Show Player Window. MainWindow
+    // wires this to bring itself to front.
+    std::function<void()> onShowWindowRequested;
 
 private:
     // Prompts the user for a folder and appends it to the library list.
@@ -85,6 +92,8 @@ private:
     void toggleQueue();
     void updateQueueButtonIcon();
     void showEmptyLibraryPrompt(bool show);
+    void showPodcastPrompt(bool show);
+    void showPreferencesLibrary();
     void deleteOldStyleFoxpFiles(const juce::File& folder);
     void showSongInfoEditor(const TrackInfo& track);
     void toggleAnalysisLog();
@@ -111,7 +120,16 @@ private:
     // {artist, album} pair gets an id in the [3000, 3999] range, assigned
     // by sorted "[ARTIST] - [ALBUM]" order.
     void refreshSidebarAlbums();
+    // Recomputes the PODCASTS sidebar section from fullLibrary_. Each unique
+    // podcast show gets an id in the [4000, 4999] range.
+    void refreshSidebarPodcasts();
+    // Saves/loads podcast folder list to/from ApplicationProperties.
+    void savePodcastFolders();
+    std::vector<juce::File> loadSavedPodcastFolders();
+    // Applies a new podcast folder list (analogous to setMusicFolders).
+    void setPodcastFolders(std::vector<juce::File> folders);
     void incrementPlayCount(const juce::File& file);
+    void deleteFoxpFilesInLibrary();
 
     // Drag-and-drop: add tracks to a playlist, with duplicate warning for single tracks.
     void handleTracksDroppedOnPlaylist(int sidebarId, const juce::StringArray& paths);
@@ -143,7 +161,9 @@ private:
     QueueView              queueView_;
 
     juce::Label            emptyPromptLabel_;
-    juce::TextButton       chooseFolderButton_ { "Choose Music Folder" };
+    juce::TextButton       chooseFolderButton_ { "Add Music Folder" };
+    juce::Label            podcastPromptLabel_;
+    juce::TextButton       podcastFolderButton_ { "Add Podcasts Folder" };
     LoadingIndicator       loadingIndicator_;
     juce::DrawableButton   queueButton_ { "queueToggle", juce::DrawableButton::ImageFitted };
     TransportButton        pinButton_;
@@ -217,7 +237,18 @@ private:
     struct AlbumKey { juce::String artist; juce::String album; };
     // sidebarId (3000..3999) -> {artist, album}, rebuilt by refreshSidebarAlbums().
     std::map<int, AlbumKey> albumIdToInfo_;
+    // sidebarId (4000..4999) -> podcast show name, rebuilt by refreshSidebarPodcasts().
+    std::map<int, juce::String> podcastIdToName_;
     std::vector<juce::File> musicFolders_;
+    std::vector<juce::File> podcastFolders_;
+
+    // Apple Music lookup retry state. Failed jobs (network errors) are
+    // collected here and re-enqueued after a delay. Retries are always
+    // treated as batch (silent on per-track failure).
+    struct AppleMusicRetryJob { TrackInfo track; bool overwrite; };
+    std::vector<AppleMusicRetryJob> pendingRetryLookups_;
+    bool                            retryScheduled_     { false };
+
     juce::ApplicationProperties   appProperties_;
     // Set while restoreSessionState is running so change callbacks don't try
     // to re-save the half-applied state.
@@ -231,6 +262,8 @@ private:
     std::unique_ptr<AnalysisLogWindow>  analysisLogWindow_;
     std::unique_ptr<PreferencesWindow>  preferencesWindow_;
     juce::ApplicationCommandManager     commandManager_;
+    StatusBarItem                       statusBarItem_;
+    NowPlayingBridge                    nowPlaying_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
