@@ -30,7 +30,7 @@ LibraryTableComponent::LibraryTableComponent()
     table_.setColour(juce::TableListBox::backgroundColourId, juce::Colours::transparentBlack);
     table_.setRowHeight(rowHeight);
     table_.setMultipleSelectionEnabled(true);
-    table_.getViewport()->setScrollBarsShown(true, false);
+    table_.getViewport()->setScrollBarsShown(true, true);
 
     // Give the vertical scrollbar a solid backdrop that matches the sidebar
     // scrollbar's look. Without this the scrollbar's transparent track lets
@@ -41,6 +41,10 @@ LibraryTableComponent::LibraryTableComponent()
     auto& tableVsb = table_.getVerticalScrollBar();
     tableVsb.setColour(juce::ScrollBar::backgroundColourId, Color::headerBackground);
     tableVsb.setColour(juce::ScrollBar::trackColourId,      Color::headerBackground);
+
+    auto& tableHsb = table_.getHorizontalScrollBar();
+    tableHsb.setColour(juce::ScrollBar::backgroundColourId, Color::headerBackground);
+    tableHsb.setColour(juce::ScrollBar::trackColourId,      Color::headerBackground);
 
     buildTable();
     applyFilter();
@@ -429,6 +433,13 @@ void LibraryTableComponent::setPlayingFile(const juce::File& file)
     table_.repaint();
 }
 
+void LibraryTableComponent::selectAndScrollToPlayingRow()
+{
+    if (playingIndex_ < 0) return;
+    table_.selectRow(playingIndex_, false, true);
+    table_.scrollToEnsureRowIsOnscreen(playingIndex_);
+}
+
 void LibraryTableComponent::setShowHidden(bool show)
 {
     showHidden_ = show;
@@ -627,55 +638,65 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
     if (!table_.isRowSelected(row))
         table_.selectRow(row);
 
-    const bool anyHidden   = [&] {
-        for (int r : selectedRows())
-            if (r >= 0 && r < static_cast<int>(filteredTracks_.size())
-                && filteredTracks_[static_cast<size_t>(r)]->hidden)
-                return true;
-        return false;
-    }();
+    const auto selRows = selectedRows();
+    const bool singleSelect = (selRows.size() == 1);
 
-    const bool anyVisible  = [&] {
-        for (int r : selectedRows())
-            if (r >= 0 && r < static_cast<int>(filteredTracks_.size())
-                && !filteredTracks_[static_cast<size_t>(r)]->hidden)
-                return true;
-        return false;
-    }();
-
-    const juce::File file = filteredTracks_[static_cast<size_t>(row)]->file;
-
-    // Snapshot selected tracks for analysis before the menu closes.
     std::vector<TrackInfo> selectedTracks;
-    for (int r : selectedRows())
+    selectedTracks.reserve(selRows.size());
+    for (int r : selRows)
         if (r >= 0 && r < static_cast<int>(filteredTracks_.size()))
             selectedTracks.push_back(*filteredTracks_[static_cast<size_t>(r)]);
+    if (selectedTracks.empty()) return;
 
+    bool hasMusic = false, hasPodcast = false;
+    for (const auto& t : selectedTracks) {
+        if (t.isPodcast) hasPodcast = true;
+        else             hasMusic   = true;
+    }
+    const bool mixedType  = hasMusic && hasPodcast;
+    const bool allPodcast = hasPodcast && !hasMusic;
+    const bool allMusic   = hasMusic   && !hasPodcast;
+
+    bool anyHidden  = false, anyVisible = false;
+    for (const auto& t : selectedTracks) {
+        if (t.hidden)  anyHidden  = true;
+        else           anyVisible = true;
+    }
+
+    const juce::File file        = filteredTracks_[static_cast<size_t>(row)]->file;
     const TrackInfo clickedTrack = *filteredTracks_[static_cast<size_t>(row)];
 
-    const bool canGoToArtist  = !clickedTrack.isPodcast && clickedTrack.artist.isNotEmpty();
-    const bool canGoToAlbum   = !clickedTrack.isPodcast && clickedTrack.album.isNotEmpty();
-    const bool canGoToPodcast =  clickedTrack.isPodcast && clickedTrack.podcast.isNotEmpty();
+    const bool canGoToArtist  = singleSelect && !clickedTrack.isPodcast && clickedTrack.artist.isNotEmpty();
+    const bool canGoToAlbum   = singleSelect && !clickedTrack.isPodcast && clickedTrack.album.isNotEmpty();
+    const bool canGoToPodcast = singleSelect &&  clickedTrack.isPodcast && clickedTrack.podcast.isNotEmpty();
 
     juce::PopupMenu menu;
     menu.addItem(6, "Add to Queue");
     menu.addSeparator();
-    menu.addItem(5, "Edit Song Info");
-    menu.addItem(8, "Clear Song Info");
-    menu.addItem(4, "Analyze for Key and BPM");
-    menu.addItem(7, "Look up on Apple Music");
+    menu.addItem(5, "Edit Info",  !mixedType);
+    menu.addItem(8, "Clear Info", !mixedType);
+    if (allMusic) {
+        menu.addItem(4, "Analyze for Key and BPM");
+        menu.addItem(7, "Look up on Apple Music");
+    }
+    if (allPodcast)
+        menu.addItem(12, "Look up on Podcast Index");
+
     menu.addSeparator();
     if (canGoToArtist)  menu.addItem(9,  "Go to Artist");
     if (canGoToAlbum)   menu.addItem(10, "Go to Album");
     if (canGoToPodcast) menu.addItem(11, "Go to Podcast");
-    menu.addItem(1, "Show in Finder");
-    menu.addSeparator();
-    if (anyVisible)  menu.addItem(2, "Hide from Library");
-    if (anyHidden)   menu.addItem(3, "Unhide from Library");
+    if (anyVisible) menu.addItem(2, "Hide from Library");
+    if (anyHidden)  menu.addItem(3, "Unhide from Library");
+    if (singleSelect)
+    {
+        menu.addSeparator();
+        menu.addItem(1, "Show in Finder");
+    }
 
     menu.showMenuAsync(juce::PopupMenu::Options{}.withTargetScreenArea(
         juce::Rectangle<int>().withPosition(e.getScreenPosition())),
-        [this, file, selectedTracks, clickedTrack](int result) {
+        [this, file, selectedTracks, clickedTrack, singleSelect](int result) {
             if (result == 1)
                 file.revealToUser();
             else if (result == 2)
@@ -684,8 +705,10 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
                 setHiddenForSelection(false);
             else if (result == 4)
                 { if (onAnalyzeRequested) onAnalyzeRequested(selectedTracks); }
-            else if (result == 5)
-                { if (onEditRequested) onEditRequested(clickedTrack); }
+            else if (result == 5) {
+                if (singleSelect) { if (onEditRequested)      onEditRequested(clickedTrack); }
+                else              { if (onMultiEditRequested) onMultiEditRequested(selectedTracks); }
+            }
             else if (result == 6)
                 { if (onAddToQueueRequested) onAddToQueueRequested(selectedTracks); }
             else if (result == 7)
@@ -698,6 +721,8 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
                 { if (onGoToAlbumRequested) onGoToAlbumRequested(clickedTrack); }
             else if (result == 11)
                 { if (onGoToPodcastRequested) onGoToPodcastRequested(clickedTrack); }
+            else if (result == 12)
+                { if (onPodcastLookupRequested) onPodcastLookupRequested(selectedTracks); }
         });
 }
 
@@ -764,6 +789,12 @@ void LibraryTableComponent::returnKeyPressed(int lastRowSelected)
 
 void LibraryTableComponent::mouseDrag(const juce::MouseEvent& e)
 {
+    // Don't intercept drags that started on the column header (resize handles, etc.).
+    auto& hdr = table_.getHeader();
+    if (e.originalComponent != nullptr
+        && (e.originalComponent == &hdr || hdr.isParentOf(e.originalComponent)))
+        return;
+
     if (e.getDistanceFromDragStart() < 8) return;
 
     const auto rows = selectedRows();

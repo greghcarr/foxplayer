@@ -22,6 +22,30 @@ public:
     {
         if (icon_.isNull()) return;
 
+        // The squircle occupies roughly the inner 80 % of the PNG canvas.
+        // Draw the black radiance only in the ring OUTSIDE the squircle so the
+        // shadow does not darken the icon through its semi-transparent edges.
+        const auto  bounds   = getLocalBounds().toFloat();
+        const float pad      = bounds.getWidth() * 0.10f;
+        const float cr       = (bounds.getWidth() - pad * 2.0f) * 0.22f;
+        const auto  squircle = bounds.reduced(pad);
+
+        {
+            juce::Path clipRing;
+            clipRing.addRectangle(bounds);
+            clipRing.addRoundedRectangle(squircle, cr);
+            clipRing.setUsingNonZeroWinding(false); // even-odd: squircle becomes a hole
+
+            g.saveState();
+            g.reduceClipRegion(clipRing);
+
+            juce::Path glowShape;
+            glowShape.addRoundedRectangle(squircle, cr);
+            juce::DropShadow(juce::Colours::black.withAlpha(0.80f), 22, {}).drawForPath(g, glowShape);
+
+            g.restoreState();
+        }
+
         g.drawImageWithin(icon_,
                           0, 0, getWidth(), getHeight(),
                           juce::RectanglePlacement::centred

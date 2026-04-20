@@ -1,5 +1,6 @@
 #include "TransportBar.h"
 #include "Constants.h"
+#include "Fonts.h"
 
 namespace FoxPlayer
 {
@@ -12,8 +13,9 @@ static constexpr int   playBtnD   = 46;   // diameter of play/pause circle
 static constexpr int   seekH      = 6;
 static constexpr int   pad        = 10;
 static constexpr int   artMaxFull        = 80;    // record diameter in pixels
-static constexpr float labelRatio        = 0.95f;  // label radius as fraction of record radius
-static constexpr float infoLetterSpacing = 0.8f;   // extra px between glyphs in info text
+static constexpr float cdDataInnerRatio  = 0.43f;  // CD hub ring outer radius as fraction of disc radius
+static constexpr float cdHoleRatio       = 0.12f;  // CD spindle hole radius as fraction of disc radius
+static constexpr float infoLetterSpacing = 0.4f;   // extra px between glyphs in info text
 
 // ----------------------------------------------------------------------------
 // TransportButton
@@ -44,7 +46,7 @@ void TransportButton::paint(juce::Graphics& g)
         fill      = pressed_ ? juce::Colour(0xff989898)
                   : hovered_ ? juce::Colour(0xffe2e2e2)
                   :             juce::Colour(0xffc4c4c4);
-        iconColor = juce::Colour(0xffdd3333);
+        iconColor = Color::accent;
     }
     else
     {
@@ -103,7 +105,8 @@ void TransportButton::paint(juce::Graphics& g)
 
     if (svgCache_.drawable)
     {
-        const float iconSize = d * 0.52f;
+        const float sizeRatio = (icon == Icon::Shuffle || icon == Icon::Repeat) ? 0.66f : 0.52f;
+        const float iconSize  = d * sizeRatio;
         svgCache_.drawable->drawWithin(
             g,
             juce::Rectangle<float>(cx - iconSize * 0.5f, cy - iconSize * 0.5f, iconSize, iconSize),
@@ -162,80 +165,151 @@ static void drawTextSpaced(juce::Graphics& g,
     g.restoreState();
 }
 
+// Draws `text` in a circle centred at `centre`, at `radius` from it.
+// Characters are individually positioned and rotated so they face outward;
+// the whole string is centred at the 12 o'clock position.
+// Text that would consume more than 85 % of the circumference is truncated with "...".
+static void drawArcText(juce::Graphics& g,
+                         const juce::String& text,
+                         juce::Point<float> centre,
+                         float radius,
+                         const juce::Font& font)
+{
+    if (text.isEmpty()) return;
+
+    const float maxWidth = juce::MathConstants<float>::twoPi * radius * 0.85f;
+
+    auto glyphsWidth = [&](const juce::String& s) -> float
+    {
+        juce::GlyphArrangement tmp;
+        tmp.addLineOfText(font, s, 0.0f, 0.0f);
+        float w = 0.0f;
+        for (int i = 0; i < tmp.getNumGlyphs(); ++i)
+            w += tmp.getGlyph(i).getRight() - tmp.getGlyph(i).getLeft();
+        return w;
+    };
+
+    juce::String displayText = text;
+    if (glyphsWidth(text) > maxWidth)
+    {
+        const float ellipsisW = glyphsWidth("...");
+        const float budget    = maxWidth - ellipsisW;
+
+        juce::GlyphArrangement tmp;
+        tmp.addLineOfText(font, text, 0.0f, 0.0f);
+        float accumulated = 0.0f;
+        int cutAt = 0;
+        for (int i = 0; i < tmp.getNumGlyphs(); ++i)
+        {
+            const float gw = tmp.getGlyph(i).getRight() - tmp.getGlyph(i).getLeft();
+            if (accumulated + gw > budget) break;
+            accumulated += gw;
+            ++cutAt;
+        }
+        displayText = text.substring(0, cutAt).trimEnd() + "...";
+    }
+
+    juce::GlyphArrangement ga;
+    ga.addLineOfText(font, displayText, 0.0f, 0.0f);
+    const int n = ga.getNumGlyphs();
+    if (n == 0) return;
+
+    float totalWidth = 0.0f;
+    for (int i = 0; i < n; ++i)
+        totalWidth += ga.getGlyph(i).getRight() - ga.getGlyph(i).getLeft();
+
+    const float totalAngle = totalWidth / radius;
+    float angle = -juce::MathConstants<float>::halfPi - totalAngle * 0.5f;
+    const float halfH = (font.getAscent() - font.getDescent()) * 0.5f;
+
+    for (int i = 0; i < n; ++i)
+    {
+        const auto& glyph    = ga.getGlyph(i);
+        const float w        = glyph.getRight() - glyph.getLeft();
+        const float midAngle = angle + (w * 0.5f) / radius;
+
+        const float px = centre.x + radius * std::cos(midAngle);
+        const float py = centre.y + radius * std::sin(midAngle);
+
+        g.saveState();
+        g.addTransform(
+            juce::AffineTransform::translation(-(glyph.getLeft() + w * 0.5f), halfH)
+            .followedBy(juce::AffineTransform::rotation(midAngle + juce::MathConstants<float>::halfPi))
+            .followedBy(juce::AffineTransform::translation(px, py)));
+        glyph.draw(g);
+        g.restoreState();
+
+        angle += w / radius;
+    }
+}
+
 static void drawSpinningRecord(juce::Graphics& g,
                                 juce::Rectangle<int> bounds,
                                 float rotation,
-                                const juce::Image& art)
+                                const juce::Image& art,
+                                const juce::String& labelText)
 {
-    const auto  recordF = bounds.toFloat();
-    const auto  centre  = recordF.getCentre();
-    const float R       = recordF.getWidth() * 0.5f;
-    const float labelR  = R * labelRatio;
+    const auto  discF  = bounds.toFloat();
+    const auto  centre = discF.getCentre();
+    const float R      = discF.getWidth() * 0.5f;
 
-    const auto labelBounds = juce::Rectangle<float>(
-        centre.x - labelR, centre.y - labelR, labelR * 2.0f, labelR * 2.0f);
+    const float dataInnerR = R * cdDataInnerRatio;
+    const float holeR      = R * cdHoleRatio;
 
     const bool hasArt = art.isValid();
 
-    // Drop shadow — drawn before rotation (circle is symmetric around centre).
+    // Drop shadow (disc is circular — rotation makes no difference here).
     juce::Path shadowCircle;
-    shadowCircle.addEllipse(recordF);
+    shadowCircle.addEllipse(discF);
     juce::DropShadow(juce::Colours::black.withAlpha(0.85f), 12, {}).drawForPath(g, shadowCircle);
 
     g.saveState();
     g.addTransform(juce::AffineTransform::rotation(rotation, centre.x, centre.y));
 
-    // Vinyl body.
-    g.setColour(juce::Colour(0xff1a1a1a));
-    g.fillEllipse(recordF);
-
-    // Groove rings and sheen only shown on a blank record (no album art).
-    if (!hasArt)
-    {
-        constexpr int numGrooves = 14;
-        for (int i = 0; i < numGrooves; ++i)
-        {
-            const float t = static_cast<float>(i) / static_cast<float>(numGrooves - 1);
-            const float r = labelR + 2.0f + (R - labelR - 5.0f) * t;
-            g.setColour(juce::Colours::white.withAlpha(0.055f - t * 0.025f));
-            g.drawEllipse(centre.x - r, centre.y - r, r * 2.0f, r * 2.0f, 0.8f);
-        }
-
-        constexpr float pi = juce::MathConstants<float>::pi;
-        juce::Path sheen;
-        sheen.addCentredArc(centre.x, centre.y, R * 0.82f, R * 0.82f,
-                            0.0f, -pi * 0.88f, -pi * 0.12f, true);
-        g.setColour(juce::Colours::white.withAlpha(0.045f));
-        g.strokePath(sheen, juce::PathStrokeType(R * 0.26f));
-    }
-
-    // Label / album art — inside the rotation block so it spins with the record.
-    juce::Path labelCircle;
-    labelCircle.addEllipse(labelBounds);
-
     if (hasArt)
     {
+        // Album art fills the full disc.
+        juce::Path discClip;
+        discClip.addEllipse(discF);
         g.saveState();
-        g.reduceClipRegion(labelCircle);
+        g.reduceClipRegion(discClip);
         g.drawImage(art,
-                    juce::roundToInt(labelBounds.getX()),
-                    juce::roundToInt(labelBounds.getY()),
-                    juce::roundToInt(labelBounds.getWidth()),
-                    juce::roundToInt(labelBounds.getHeight()),
+                    juce::roundToInt(discF.getX()),
+                    juce::roundToInt(discF.getY()),
+                    juce::roundToInt(discF.getWidth()),
+                    juce::roundToInt(discF.getHeight()),
                     0, 0, art.getWidth(), art.getHeight());
         g.restoreState();
     }
     else
     {
-        g.setColour(juce::Colour(0xff242424));
-        g.fillPath(labelCircle);
-        g.setColour(juce::Colours::white.withAlpha(0.12f));
-        g.drawEllipse(labelBounds, 1.0f);
+        // Thin silver outer rim.
+        g.setColour(juce::Colour(0xffaaaaaa));
+        g.fillEllipse(discF);
+
+        // White label surface (inset 2.5 px to show the rim).
+        const float labelR = R - 2.5f;
+        g.setColour(juce::Colour(0xfff6f6f6));
+        g.fillEllipse(centre.x - labelR, centre.y - labelR, labelR * 2.0f, labelR * 2.0f);
+
+        // Text along the outer portion of the label.
+        const float textRadius = R * 0.62f;
+        const auto  tf         = getFoxwhelpTypeface();
+        const juce::Font labelFont(tf);
+        g.setColour(juce::Colour(0xff2c2c2c));
+        drawArcText(g, labelText, centre, textRadius, labelFont.withHeight(R * 0.33f));
+
+        // Hub ring (slightly grey to distinguish from the white label).
+        g.setColour(juce::Colour(0xffd8d8d8));
+        g.fillEllipse(centre.x - dataInnerR, centre.y - dataInnerR,
+                      dataInnerR * 2.0f, dataInnerR * 2.0f);
+        g.setColour(juce::Colour(0xffbbbbbb));
+        g.drawEllipse(centre.x - dataInnerR, centre.y - dataInnerR,
+                      dataInnerR * 2.0f, dataInnerR * 2.0f, 0.5f);
     }
 
-    // Centre spindle hole.
-    constexpr float holeR = 3.0f;
-    g.setColour(juce::Colour(0xff080808));
+    // Spindle hole.
+    g.setColour(juce::Colour(0xff141414));
     g.fillEllipse(centre.x - holeR, centre.y - holeR, holeR * 2.0f, holeR * 2.0f);
 
     g.restoreState();
@@ -568,10 +642,26 @@ void TransportBar::paint(juce::Graphics& g)
         gradValid = leftFadeWidth > 0.0f;
     }
 
-    // Spinning vinyl record (with album art on the label). Drawn in place of
-    // the flat album-art thumbnail; always shown whenever a track is loaded.
+    // Spinning CD (with album art, or a white label with track info).
     if (!albumArtBounds_.isEmpty() && hasTrack_)
-        drawSpinningRecord(g, albumArtBounds_, recordRotation_, albumArt_);
+    {
+        juce::String labelText;
+        if (currentTrack_.artist.isNotEmpty() || currentTrack_.displayTitle().isNotEmpty())
+        {
+            if (currentTrack_.artist.isNotEmpty() && currentTrack_.displayTitle().isNotEmpty())
+                labelText = currentTrack_.artist
+                            + juce::String(juce::CharPointer_UTF8(" \xc2\xb7 "))
+                            + currentTrack_.displayTitle();
+            else
+                labelText = currentTrack_.artist.isNotEmpty() ? currentTrack_.artist
+                                                               : currentTrack_.displayTitle();
+        }
+        else
+        {
+            labelText = currentTrack_.file.getFileNameWithoutExtension();
+        }
+        drawSpinningRecord(g, albumArtBounds_, recordRotation_, albumArt_, labelText);
+    }
 
     // Three-line track info - faded by infoAlpha so it dissolves smoothly into
     // the background as the window approaches mini mode.

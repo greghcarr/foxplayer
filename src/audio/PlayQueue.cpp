@@ -128,24 +128,33 @@ void PlayQueue::unshuffleRemaining()
                                        ? tracks_[static_cast<size_t>(index_)].file
                                        : juce::File{};
 
-    tracks_  = originalTracks_;
-    sources_ = originalSources_;
     isShuffled_ = false;
-    originalTracks_.clear();
-    originalSources_.clear();
 
-    // Find the current track's new position in the restored original order.
+    // Find where the current track sits in the original order, then keep only
+    // that track and the ones that follow it — tracks that came before it in
+    // the original order are already "in the past" and shouldn't reappear.
+    int originalIdx = -1;
     if (currentFile.getFullPathName().isNotEmpty())
     {
-        for (int i = 0; i < static_cast<int>(tracks_.size()); ++i)
+        for (int i = 0; i < static_cast<int>(originalTracks_.size()); ++i)
         {
-            if (tracks_[static_cast<size_t>(i)].file == currentFile)
+            if (originalTracks_[static_cast<size_t>(i)].file == currentFile)
             {
-                index_ = i;
+                originalIdx = i;
                 break;
             }
         }
     }
+
+    if (originalIdx >= 0)
+    {
+        tracks_.assign (originalTracks_.begin()  + originalIdx, originalTracks_.end());
+        sources_.assign(originalSources_.begin() + originalIdx, originalSources_.end());
+        index_ = 0;
+    }
+
+    originalTracks_.clear();
+    originalSources_.clear();
 
     if (onQueueChanged) onQueueChanged();
     if (onIndexChanged) onIndexChanged(index_);

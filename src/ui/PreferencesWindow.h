@@ -36,7 +36,7 @@ private:
     void timerCallback() override;
 
     juce::AudioDeviceManager& deviceManager_;
-    bool                      usingDefault_     { false };
+    bool                      usingDefault_     { true };
     juce::String              lastDefaultName_;
 
     juce::Label    deviceLabel_;

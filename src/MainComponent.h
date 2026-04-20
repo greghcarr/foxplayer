@@ -96,6 +96,7 @@ private:
     void showPreferencesLibrary();
     void deleteOldStyleFoxpFiles(const juce::File& folder);
     void showSongInfoEditor(const TrackInfo& track);
+    void showMultiInfoEditor(const std::vector<TrackInfo>& tracks);
     void toggleAnalysisLog();
     void showPreferences();
     void toggleAlwaysOnTop();
@@ -113,6 +114,7 @@ private:
     // when the item is too close to the top to actually centre.
     void scrollSelectedSidebarItemIntoView();
     void refreshSidebarPlaylists();
+    std::vector<TrackInfo> getTracksForSidebar(int sidebarId) const;
     // Recomputes the ARTISTS sidebar section from fullLibrary_. Each unique
     // artist gets an id in the [2000, 2999] range, assigned by sorted order.
     void refreshSidebarArtists();

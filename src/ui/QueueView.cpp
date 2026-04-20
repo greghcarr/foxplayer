@@ -44,16 +44,30 @@ void QueueView::resized()
     auto bounds = getLocalBounds();
     header_.setBounds(bounds.removeFromTop(30).reduced(8, 0));
     list_.setBounds(bounds);
+    list_.updateContent(); // ghost row count depends on list height
 }
 
 int QueueView::getNumRows()
 {
-    return static_cast<int>(items_.size());
+    const int numItems = static_cast<int>(items_.size());
+    const int listH    = list_.getHeight();
+    if (listH <= 0) return numItems;
+    // Return enough rows to fill the visible area so the stripe pattern extends
+    // into the empty space below the last real item.
+    return juce::jmax(numItems, listH / rowHeight + 1);
 }
 
 void QueueView::paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool selected)
 {
-    if (row < 0 || row >= static_cast<int>(items_.size())) return;
+    if (row < 0) return;
+
+    // Ghost rows below the last item — stripe pattern only, no content.
+    if (row >= static_cast<int>(items_.size()))
+    {
+        if (row % 2 != 0)
+            g.fillAll(Color::tableRowAlt);
+        return;
+    }
 
     const bool isPlaying = (row == playingIndex_);
 

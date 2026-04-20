@@ -105,6 +105,20 @@ MainComponent::MainComponent()
         showSongInfoEditor(track);
     };
 
+    libraryTable_.onMultiEditRequested = [this](std::vector<TrackInfo> tracks) {
+        showMultiInfoEditor(tracks);
+    };
+
+    libraryTable_.onPodcastLookupRequested = [](std::vector<TrackInfo> tracks) {
+        if (tracks.empty()) return;
+        const juce::String query = tracks.front().podcast.isNotEmpty()
+            ? tracks.front().podcast
+            : tracks.front().displayTitle();
+        juce::URL("https://podcastindex.org/search?q="
+                  + juce::URL::addEscapeChars(query, true))
+            .launchInDefaultBrowser();
+    };
+
     libraryTable_.onClearInfoRequested = [this](std::vector<TrackInfo> tracks) {
         // Reset every editable/analysis field back to blank. The file itself
         // stays put; only the sidecar .foxp + in-memory metadata change, and
@@ -125,20 +139,35 @@ MainComponent::MainComponent()
             AppleMusicLookup::artworkSidecarFor(t.file).deleteFile();
             updateTrackInLibrary(t);
         }
+        LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
     };
 
     libraryTable_.onGoToArtistRequested = [this](TrackInfo t) {
         for (const auto& [id, name] : artistIdToName_)
-            if (name == t.artist) { sidebar_.setSelectedId(id); showSidebarItem(id); return; }
+            if (name == t.artist)
+            {
+                sidebar_.setSelectedId(id); showSidebarItem(id);
+                juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
+                return;
+            }
     };
     libraryTable_.onGoToAlbumRequested = [this](TrackInfo t) {
         for (const auto& [id, info] : albumIdToInfo_)
             if (info.artist == t.artist && info.album == t.album)
-                { sidebar_.setSelectedId(id); showSidebarItem(id); return; }
+            {
+                sidebar_.setSelectedId(id); showSidebarItem(id);
+                juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
+                return;
+            }
     };
     libraryTable_.onGoToPodcastRequested = [this](TrackInfo t) {
         for (const auto& [id, name] : podcastIdToName_)
-            if (name == t.podcast) { sidebar_.setSelectedId(id); showSidebarItem(id); return; }
+            if (name == t.podcast)
+            {
+                sidebar_.setSelectedId(id); showSidebarItem(id);
+                juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
+                return;
+            }
     };
 
     libraryTable_.onAddToQueueRequested = [this](std::vector<TrackInfo> tracks) {
@@ -233,11 +262,46 @@ MainComponent::MainComponent()
     transportBar_.onPlayingFromClicked  = [this](int sidebarId) {
         sidebar_.setSelectedId(sidebarId);
         showSidebarItem(sidebarId);
+        juce::MessageManager::callAsync([this] {
+            scrollSelectedSidebarItemIntoView();
+            libraryTable_.selectAndScrollToPlayingRow();
+        });
     };
     transportBar_.onShuffleToggled = [this](bool on) {
         shuffleOn_ = on;
-        if (on) queue_.shuffleRemaining();
-        else    queue_.unshuffleRemaining();
+        if (on)
+        {
+            if (queue_.hasCurrent())
+            {
+                // Rebuild the queue from the full source view so toggling
+                // shuffle on always gives the entire source library, not just
+                // the tracks that happened to be queued from the double-click.
+                const TrackInfo current = queue_.current();
+                const auto source       = queue_.currentSource();
+                std::vector<TrackInfo> sourceTracks = getTracksForSidebar(source.sidebarId);
+
+                std::vector<TrackInfo> queueTracks;
+                queueTracks.reserve(sourceTracks.size());
+                queueTracks.push_back(current);
+                for (const auto& t : sourceTracks)
+                    if (t.file != current.file)
+                        queueTracks.push_back(t);
+
+                // setTracks fires onShuffleStateChanged(false); restore state after.
+                queue_.setTracks(std::move(queueTracks), 0, source);
+                shuffleOn_ = true;
+                transportBar_.setShuffleOn(true);
+                queue_.shuffleRemaining();
+            }
+            else
+            {
+                queue_.shuffleRemaining();
+            }
+        }
+        else
+        {
+            queue_.unshuffleRemaining();
+        }
 
         saveSessionState();
     };
@@ -322,11 +386,16 @@ MainComponent::MainComponent()
 
         // If this scan was confirming a cached library, swap the fresh
         // results in now and refresh dependent views.
+        // Re-read every .foxp sidecar after the swap: the scan batch was built
+        // before any Apple Music lookups or analyses completed during the scan
+        // run, so their .foxp writes would otherwise be silently overwritten.
         if (scanReplacingCachedLibrary_)
         {
             fullLibrary_ = std::move(scanBuffer_);
             scanBuffer_.clear();
             scanReplacingCachedLibrary_ = false;
+            for (auto& t : fullLibrary_)
+                FoxpFile::load(t);
         }
 
         loadingIndicator_.setVisible(false);
@@ -908,6 +977,56 @@ void MainComponent::refreshSidebarPlaylists()
     sidebar_.setPlaylists(items);
 }
 
+std::vector<TrackInfo> MainComponent::getTracksForSidebar(int sidebarId) const
+{
+    std::vector<TrackInfo> result;
+
+    if (sidebarId == 1)
+    {
+        for (const auto& t : fullLibrary_)
+            if (!t.isPodcast) result.push_back(t);
+    }
+    else if (sidebarId == 2)
+    {
+        for (const auto& t : fullLibrary_)
+            if (t.isPodcast) result.push_back(t);
+    }
+    else if (sidebarId >= 4000 && sidebarId < 5000)
+    {
+        const auto it = podcastIdToName_.find(sidebarId);
+        if (it != podcastIdToName_.end())
+            for (const auto& t : fullLibrary_)
+                if (t.isPodcast && t.podcast == it->second) result.push_back(t);
+    }
+    else if (sidebarId >= 2000 && sidebarId < 3000)
+    {
+        const auto it = artistIdToName_.find(sidebarId);
+        if (it != artistIdToName_.end())
+            for (const auto& t : fullLibrary_)
+                if (t.artist == it->second) result.push_back(t);
+    }
+    else if (sidebarId >= 3000 && sidebarId < 4000)
+    {
+        const auto it = albumIdToInfo_.find(sidebarId);
+        if (it != albumIdToInfo_.end())
+        {
+            const auto& [artist, album] = it->second;
+            for (const auto& t : fullLibrary_)
+                if (t.album == album && t.artist == artist) result.push_back(t);
+        }
+    }
+    else if (sidebarId >= 1000 && sidebarId < 2000)
+    {
+        const auto* pl = playlistStore_->findById(sidebarId - 1000);
+        if (pl)
+            for (const auto& path : pl->trackPaths)
+                for (const auto& t : fullLibrary_)
+                    if (t.file.getFullPathName() == path) { result.push_back(t); break; }
+    }
+
+    return result;
+}
+
 void MainComponent::refreshSidebarAlbums()
 {
     // Collect unique (artist, album) pairs using the "ARTIST - ALBUM" label
@@ -1107,17 +1226,41 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track)
 {
     auto* editor = new SongInfoEditor(track);
 
-    editor->onSave = [this](TrackInfo updated) {
-        FoxpFile::save(updated);
-        updateTrackInLibrary(updated);
+    editor->onSave = [this](std::vector<TrackInfo> updated) {
+        for (auto& t : updated) {
+            FoxpFile::save(t);
+            updateTrackInLibrary(t);
+        }
+        LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
     };
 
     juce::DialogWindow::LaunchOptions opts;
     opts.content.setOwned(editor);
-    opts.dialogTitle           = "Edit Song Info";
+    opts.dialogTitle            = "Edit Info";
     opts.dialogBackgroundColour = juce::Colour(0xff1e1e1e);
-    opts.useNativeTitleBar     = true;
-    opts.resizable             = false;
+    opts.useNativeTitleBar      = true;
+    opts.resizable              = false;
+    opts.launchAsync();
+}
+
+void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
+{
+    auto* editor = new SongInfoEditor(tracks);
+
+    editor->onSave = [this](std::vector<TrackInfo> updated) {
+        for (auto& t : updated) {
+            FoxpFile::save(t);
+            updateTrackInLibrary(t);
+        }
+        LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
+    };
+
+    juce::DialogWindow::LaunchOptions opts;
+    opts.content.setOwned(editor);
+    opts.dialogTitle            = "Edit Info";
+    opts.dialogBackgroundColour = juce::Colour(0xff1e1e1e);
+    opts.useNativeTitleBar      = true;
+    opts.resizable              = false;
     opts.launchAsync();
 }
 
@@ -1510,7 +1653,22 @@ void MainComponent::activateRow(int rowIndex, const std::vector<TrackInfo>& libr
     // Capture shuffle state before setTracks resets it via onShuffleStateChanged.
     const bool wasShuffled = shuffleOn_;
 
-    std::vector<TrackInfo> queueTracks(libraryTracks.begin() + rowIndex, libraryTracks.end());
+    std::vector<TrackInfo> queueTracks;
+
+    if (wasShuffled)
+    {
+        // When shuffle is on, seed the queue with the entire visible library:
+        // selected track first, every other track appended in original order.
+        queueTracks.reserve(libraryTracks.size());
+        queueTracks.push_back(libraryTracks[static_cast<size_t>(rowIndex)]);
+        for (int i = 0; i < static_cast<int>(libraryTracks.size()); ++i)
+            if (i != rowIndex)
+                queueTracks.push_back(libraryTracks[static_cast<size_t>(i)]);
+    }
+    else
+    {
+        queueTracks.assign(libraryTracks.begin() + rowIndex, libraryTracks.end());
+    }
 
     PlayQueue::QueueSource source;
     source.sidebarId = activeSidebarId_;

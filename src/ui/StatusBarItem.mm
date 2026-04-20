@@ -53,18 +53,14 @@ typedef NS_ENUM(NSInteger, FoxBarState) {
 
 - (void)buttonClicked:(id)sender
 {
-    NSEvent* ev = NSApp.currentEvent;
-    if (ev.type == NSEventTypeRightMouseUp)
-        [self showContextMenu];
-    else if (_owner && _owner->onShowApp)
-        _owner->onShowApp();
+    [self showContextMenu];
 }
 
 - (void)showContextMenu
 {
     NSMenu* menu = [[NSMenu alloc] init];
 
-    NSMenuItem* showItem = [[NSMenuItem alloc] initWithTitle:@"Show App"
+    NSMenuItem* showItem = [[NSMenuItem alloc] initWithTitle:@"Show FoxPlayer"
                                                       action:@selector(menuShowApp:)
                                                keyEquivalent:@""];
     showItem.target = self;

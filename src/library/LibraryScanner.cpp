@@ -146,6 +146,71 @@ void LibraryScanner::run()
     });
 }
 
+namespace
+{
+    // Returns an episode number extracted from a podcast filename stem, or 0 if
+    // no confident guess can be made. Patterns checked (in order):
+    //   "episode <N>" or "ep <N>" keyword anywhere in the name
+    //   leading digits at the start of the stem (non-year)
+    int guessEpisodeNumber(const juce::String& stem)
+    {
+        // Normalise separators to spaces and lowercase for pattern matching.
+        const juce::String s = stem.toLowerCase().replaceCharacters("-_.", "   ");
+
+        auto parseInt = [&](int i) -> int {
+            const int start = i;
+            while (i < s.length() && juce::CharacterFunctions::isDigit(s[i])) ++i;
+            if (i == start) return 0;
+            return s.substring(start, i).getIntValue();
+        };
+
+        // Pattern A: "episode <N>" or "ep <N>" — keyword followed by digits.
+        for (const auto* kw : { "episode", "ep" })
+        {
+            const juce::String keyword(kw);
+            const int kwLen = keyword.length();
+
+            for (int pos = s.indexOf(keyword); pos >= 0; pos = s.indexOf(pos + 1, keyword))
+            {
+                // Require a word boundary before the keyword.
+                if (pos > 0 && juce::CharacterFunctions::isLetter(s[pos - 1]))
+                    continue;
+
+                int after = pos + kwLen;
+
+                // For "ep", ensure it is not the start of a longer word (e.g. "episode").
+                if (kwLen == 2 && after < s.length() && juce::CharacterFunctions::isLetter(s[after]))
+                    continue;
+
+                // Skip any whitespace between keyword and number.
+                while (after < s.length() && s[after] == ' ') ++after;
+
+                const int num = parseInt(after);
+                if (num > 0) return num;
+            }
+        }
+
+        // Pattern B: leading number at the very start of the stem (1-4 digits).
+        {
+            int i = 0;
+            while (i < s.length() && s[i] == ' ') ++i;
+            const int start = i;
+            while (i < s.length() && juce::CharacterFunctions::isDigit(s[i])) ++i;
+            const int numLen = i - start;
+            if (numLen >= 1 && numLen <= 4)
+            {
+                const int num = s.substring(start, i).getIntValue();
+                // Skip 4-digit years.
+                const bool isYear = (numLen == 4 && num >= 1900 && num <= 2099);
+                if (!isYear && num > 0)
+                    return num;
+            }
+        }
+
+        return 0;
+    }
+}
+
 TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
                                           juce::AudioFormatManager& fmgr,
                                           bool isPodcast) const
@@ -241,6 +306,10 @@ TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
         // Always clear album and stale music-only fields for podcast tracks.
         info.album  = {};
         info.artist = {};
+
+        // Infer episode number from filename when none was found in tags or foxp.
+        if (info.trackNumber == 0)
+            info.trackNumber = guessEpisodeNumber(file.getFileNameWithoutExtension());
     }
     else
     {

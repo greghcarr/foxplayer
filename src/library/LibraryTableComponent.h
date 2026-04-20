@@ -49,6 +49,9 @@ public:
     // The highlight persists when the view changes (e.g. switching playlists).
     void setPlayingFile(const juce::File& file);
 
+    // Selects and scrolls to the currently playing row, if it is visible.
+    void selectAndScrollToPlayingRow();
+
     // When true, hidden tracks are shown dimmed; when false they are invisible.
     void setShowHidden(bool show);
     bool showHidden() const { return showHidden_; }
@@ -78,7 +81,11 @@ public:
     // Called when the user wants to edit a single track's metadata.
     std::function<void(TrackInfo)> onEditRequested;
 
-    // Called when the user chooses "Clear Song Info" for a set of tracks.
+    // Called when the user wants to edit multiple tracks' metadata at once
+    // (all same type: all music or all podcasts).
+    std::function<void(std::vector<TrackInfo>)> onMultiEditRequested;
+
+    // Called when the user chooses "Clear Info" for a set of tracks.
     std::function<void(std::vector<TrackInfo>)> onClearInfoRequested;
 
     // Called when the user chooses "Add to Queue" from the context menu.
@@ -91,6 +98,9 @@ public:
 
     // Called when the user chooses "Look up on Apple Music" from the context menu.
     std::function<void(std::vector<TrackInfo>)> onAppleMusicLookupRequested;
+
+    // Called when the user chooses "Look up on Podcast Index" from the context menu.
+    std::function<void(std::vector<TrackInfo>)> onPodcastLookupRequested;
 
     // Called when the user presses Delete in a playlist view. Tracks should be
     // removed from the playlist only, not hidden from the library.
