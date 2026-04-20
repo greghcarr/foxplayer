@@ -36,7 +36,8 @@ private:
 
     TrackInfo buildTrackInfo(const juce::File& file,
                              juce::AudioFormatManager& fmgr,
-                             bool isPodcast) const;
+                             bool isPodcast,
+                             const juce::File& root = {}) const;
 
     std::vector<juce::File> musicRoots_;
     std::vector<juce::File> podcastRoots_;

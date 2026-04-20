@@ -16,7 +16,8 @@ class AudioPreferencesPanel : public juce::Component,
                                private juce::Timer
 {
 public:
-    explicit AudioPreferencesPanel(juce::AudioDeviceManager& deviceManager);
+    AudioPreferencesPanel(juce::AudioDeviceManager& deviceManager,
+                          juce::ApplicationProperties& appProperties);
     ~AudioPreferencesPanel() override;
 
     void paint(juce::Graphics& g) override;
@@ -27,6 +28,9 @@ private:
     void applySelectedDevice();
     juce::String currentDefaultDeviceName() const;
 
+    void rebuildBufferList();
+    void applySelectedBufferSize();
+
     // juce::ChangeListener (deviceManager broadcasts when devices appear/disappear).
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
 
@@ -35,12 +39,16 @@ private:
     // user has "System default" selected.
     void timerCallback() override;
 
-    juce::AudioDeviceManager& deviceManager_;
-    bool                      usingDefault_     { true };
-    juce::String              lastDefaultName_;
+    juce::AudioDeviceManager&    deviceManager_;
+    juce::ApplicationProperties& appProps_;
+    bool                         usingDefault_  { true };
+    juce::String                 lastDefaultName_;
 
     juce::Label    deviceLabel_;
     juce::ComboBox deviceCombo_;
+
+    juce::Label    bufferLabel_;
+    juce::ComboBox bufferCombo_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPreferencesPanel)
 };
@@ -102,6 +110,26 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryPreferencesPanel)
 };
 
+// ---- Misc panel --------------------------------------------------------------
+// Miscellaneous app-wide preferences.
+class MiscPreferencesPanel : public juce::Component
+{
+public:
+    static constexpr const char* kAskBeforeQuittingKey = "misc.askBeforeQuitting";
+
+    explicit MiscPreferencesPanel(juce::ApplicationProperties& props);
+
+    void paint(juce::Graphics& g) override;
+    void resized() override;
+
+private:
+    juce::ApplicationProperties& props_;
+
+    juce::ToggleButton askBeforeQuittingToggle_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiscPreferencesPanel)
+};
+
 // ---- Debug panel -------------------------------------------------------------
 // Developer toggles that persist to ApplicationProperties.
 class DebugPreferencesPanel : public juce::Component
@@ -134,7 +162,7 @@ public:
     void mouseDown(const juce::MouseEvent& e) override;
 
 private:
-    enum class Category { Audio, Library, Debug };
+    enum class Category { Audio, Library, Misc, Debug };
 
     struct SidebarItem
     {
@@ -155,8 +183,10 @@ private:
     std::vector<SidebarItem>                items_;
     Category                                current_ { Category::Audio };
 
+    juce::ApplicationProperties&             appProperties_;
     std::unique_ptr<AudioPreferencesPanel>   audioPanel_;
     std::unique_ptr<LibraryPreferencesPanel> libraryPanel_;
+    std::unique_ptr<MiscPreferencesPanel>    miscPanel_;
     std::unique_ptr<DebugPreferencesPanel>   debugPanel_;
 
 public:

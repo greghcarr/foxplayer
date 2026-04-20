@@ -41,12 +41,15 @@ LibraryTableComponent::LibraryTableComponent()
     auto& tableVsb = table_.getVerticalScrollBar();
     tableVsb.setColour(juce::ScrollBar::backgroundColourId, Color::headerBackground);
     tableVsb.setColour(juce::ScrollBar::trackColourId,      Color::headerBackground);
+    tableVsb.setColour(juce::ScrollBar::thumbColourId,      Color::scrollbarThumb);
 
     auto& tableHsb = table_.getHorizontalScrollBar();
     tableHsb.setColour(juce::ScrollBar::backgroundColourId, Color::headerBackground);
     tableHsb.setColour(juce::ScrollBar::trackColourId,      Color::headerBackground);
+    tableHsb.setColour(juce::ScrollBar::thumbColourId,      Color::scrollbarThumb);
 
     buildTable();
+    table_.getHeader().addListener(this);
     applyFilter();
 }
 
@@ -75,9 +78,61 @@ void LibraryTableComponent::buildTable()
     hdr.addColumn("Format", colIdFormat, colWidthFormat, 40, 100, flags);
 }
 
+juce::String LibraryTableComponent::columnStateKey(ViewMode mode)
+{
+    switch (mode)
+    {
+        case ViewMode::Library:  return "tableColumns.Library";
+        case ViewMode::Artist:   return "tableColumns.Artist";
+        case ViewMode::Album:    return "tableColumns.Album";
+        case ViewMode::Playlist: return "tableColumns.Playlist";
+        case ViewMode::Podcast:  return "tableColumns.Podcast";
+    }
+    return "tableColumns.Library";
+}
+
+void LibraryTableComponent::saveColumnStateForMode(ViewMode mode)
+{
+    if (!appProperties_ || restoringColumns_) return;
+    if (auto* s = appProperties_->getUserSettings())
+        s->setValue(columnStateKey(mode), table_.getHeader().toString());
+}
+
+void LibraryTableComponent::restoreColumnStateForMode(ViewMode mode)
+{
+    if (!appProperties_) return;
+    if (auto* s = appProperties_->getUserSettings())
+    {
+        const juce::String saved = s->getValue(columnStateKey(mode));
+        if (saved.isNotEmpty())
+        {
+            restoringColumns_ = true;
+            table_.getHeader().restoreFromString(saved);
+            restoringColumns_ = false;
+        }
+    }
+}
+
+void LibraryTableComponent::setAppProperties(juce::ApplicationProperties* props)
+{
+    appProperties_ = props;
+    restoreColumnStateForMode(viewMode_);
+}
+
+void LibraryTableComponent::tableColumnsChanged(juce::TableHeaderComponent*)
+{
+    saveColumnStateForMode(viewMode_);
+}
+
+void LibraryTableComponent::tableColumnsResized(juce::TableHeaderComponent*)
+{
+    saveColumnStateForMode(viewMode_);
+}
+
 void LibraryTableComponent::setViewMode(ViewMode mode)
 {
     if (viewMode_ == mode) return;
+    saveColumnStateForMode(viewMode_);
     viewMode_ = mode;
 
     auto& hdr = table_.getHeader();
@@ -103,6 +158,7 @@ void LibraryTableComponent::setViewMode(ViewMode mode)
         applyFilter();
     }
 
+    restoreColumnStateForMode(mode);
     table_.repaint();
 }
 
@@ -440,6 +496,19 @@ void LibraryTableComponent::selectAndScrollToPlayingRow()
     table_.scrollToEnsureRowIsOnscreen(playingIndex_);
 }
 
+void LibraryTableComponent::scrollToFile(const juce::File& file)
+{
+    for (int i = 0; i < (int)filteredTracks_.size(); ++i)
+    {
+        if (filteredTracks_[(size_t)i]->file == file)
+        {
+            table_.selectRow(i, false, true);
+            table_.scrollToEnsureRowIsOnscreen(i);
+            return;
+        }
+    }
+}
+
 void LibraryTableComponent::setShowHidden(bool show)
 {
     showHidden_ = show;
@@ -462,11 +531,7 @@ void LibraryTableComponent::resized()
 {
     auto bounds = getLocalBounds();
 
-    // Reserve a small gap at the right edge of the search bar so the always-
-    // on-top pin button (owned by MainComponent) can sit neatly next to it.
-    constexpr int rightReserve = 30;
     auto searchRow = bounds.removeFromTop(searchBarHeight).reduced(0, 2);
-    searchRow.removeFromRight(rightReserve);
     searchBox_.setBounds(searchRow);
 
     table_.setBounds(bounds);
@@ -629,10 +694,19 @@ void LibraryTableComponent::setHiddenForSelection(bool hidden)
     }
 }
 
-void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseEvent& e)
+void LibraryTableComponent::cellClicked(int row, int col, const juce::MouseEvent& e)
 {
-    if (!e.mods.isPopupMenu()) return;
     if (row < 0 || row >= static_cast<int>(filteredTracks_.size())) return;
+
+    if (e.getNumberOfClicks() == 3 && isEditableColId(col) && !e.mods.isPopupMenu())
+    {
+        if (editingRow_ == row && editingColId_ == col) return;
+        if (editingRow_ >= 0) commitCellEdit();
+        startCellEdit(row, col);
+        return;
+    }
+
+    if (!e.mods.isPopupMenu()) return;
 
     // Ensure the right-clicked row is selected if it isn't already.
     if (!table_.isRowSelected(row))
@@ -675,9 +749,14 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
     menu.addSeparator();
     menu.addItem(5, "Edit Info",  !mixedType);
     menu.addItem(8, "Clear Info", !mixedType);
+    const bool showUndo    = singleSelect && allMusic
+                             && isLookupUndoable && isLookupUndoable(clickedTrack.file);
+    const bool showArtUndo = singleSelect && allMusic
+                             && isArtLookupUndoable && isArtLookupUndoable(clickedTrack.file);
     if (allMusic) {
-        menu.addItem(4, "Analyze for Key and BPM");
-        menu.addItem(7, "Look up on Apple Music");
+        menu.addItem(7,  showUndo    ? "Undo Apple Music lookup"  : "Look up on Apple Music");
+        menu.addItem(13, showArtUndo ? "Undo Album art lookup"    : "Look up Album Art");
+        menu.addItem(4,  "Analyze for Key and BPM");
     }
     if (allPodcast)
         menu.addItem(12, "Look up on Podcast Index");
@@ -696,7 +775,7 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
 
     menu.showMenuAsync(juce::PopupMenu::Options{}.withTargetScreenArea(
         juce::Rectangle<int>().withPosition(e.getScreenPosition())),
-        [this, file, selectedTracks, clickedTrack, singleSelect](int result) {
+        [this, file, selectedTracks, clickedTrack, singleSelect, showUndo, showArtUndo](int result) {
             if (result == 1)
                 file.revealToUser();
             else if (result == 2)
@@ -711,8 +790,10 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
             }
             else if (result == 6)
                 { if (onAddToQueueRequested) onAddToQueueRequested(selectedTracks); }
-            else if (result == 7)
-                { if (onAppleMusicLookupRequested) onAppleMusicLookupRequested(selectedTracks); }
+            else if (result == 7) {
+                if (showUndo) { if (onAppleMusicUndoRequested)    onAppleMusicUndoRequested(clickedTrack); }
+                else          { if (onAppleMusicLookupRequested) onAppleMusicLookupRequested(selectedTracks); }
+            }
             else if (result == 8)
                 { if (onClearInfoRequested) onClearInfoRequested(selectedTracks); }
             else if (result == 9)
@@ -723,13 +804,169 @@ void LibraryTableComponent::cellClicked(int row, int /*col*/, const juce::MouseE
                 { if (onGoToPodcastRequested) onGoToPodcastRequested(clickedTrack); }
             else if (result == 12)
                 { if (onPodcastLookupRequested) onPodcastLookupRequested(selectedTracks); }
+            else if (result == 13) {
+                if (showArtUndo) { if (onAlbumArtUndoRequested)    onAlbumArtUndoRequested(clickedTrack); }
+                else             { if (onAlbumArtLookupRequested) onAlbumArtLookupRequested(selectedTracks); }
+            }
         });
+}
+
+bool LibraryTableComponent::isEditableColId(int colId)
+{
+    return colId == colIdTitle  || colId == colIdArtist
+        || colId == colIdAlbum  || colId == colIdGenre;
 }
 
 void LibraryTableComponent::cellDoubleClicked(int row, int /*col*/, const juce::MouseEvent&)
 {
-    if (row >= 0 && row < static_cast<int>(filteredTracks_.size()))
-        if (onRowActivated) onRowActivated(row);
+    if (row < 0 || row >= static_cast<int>(filteredTracks_.size())) return;
+    if (editingRow_ >= 0) cancelCellEdit();
+    if (onRowActivated) onRowActivated(row);
+}
+
+void LibraryTableComponent::startCellEdit(int row, int colId)
+{
+    editingRow_   = row;
+    editingColId_ = colId;
+    ++editingSession_;
+
+    table_.getViewport()->setScrollBarsShown(false, false);
+    table_.updateContent();
+    table_.scrollToEnsureRowIsOnscreen(row);
+
+    if (activeCellEditor_)
+    {
+        activeCellEditor_->grabKeyboardFocus();
+        activeCellEditor_->selectAll();
+    }
+}
+
+Component* LibraryTableComponent::refreshComponentForCell(int rowNumber, int columnId,
+                                                           bool /*isRowSelected*/,
+                                                           Component* existing)
+{
+    if (rowNumber != editingRow_ || columnId != editingColId_)
+    {
+        if (existing == activeCellEditor_) activeCellEditor_ = nullptr;
+        delete existing;
+        return nullptr;
+    }
+
+    if (auto* editor = dynamic_cast<juce::TextEditor*>(existing))
+    {
+        activeCellEditor_ = editor;
+        return editor;
+    }
+    delete existing;
+
+    juce::String initialText;
+    if (rowNumber >= 0 && rowNumber < static_cast<int>(filteredTracks_.size()))
+    {
+        const auto& t = *filteredTracks_[static_cast<size_t>(rowNumber)];
+        switch (columnId)
+        {
+            case colIdTitle:  initialText = t.title.isNotEmpty() ? t.title : t.displayTitle(); break;
+            case colIdArtist: initialText = t.isPodcast ? t.podcast : t.artist; break;
+            case colIdAlbum:  initialText = t.album; break;
+            case colIdGenre:  initialText = t.genre;  break;
+            default: break;
+        }
+    }
+
+    const int session = editingSession_;
+    auto* editor = new juce::TextEditor();
+    activeCellEditor_ = editor;
+
+    editor->setFont(juce::Font(juce::FontOptions().withHeight(15.0f)));
+    editor->setText(initialText, false);
+    editor->setColour(juce::TextEditor::backgroundColourId,      Color::tableSelected);
+    editor->setColour(juce::TextEditor::textColourId,            Color::textPrimary);
+    editor->setColour(juce::TextEditor::outlineColourId,         Color::accent);
+    editor->setColour(juce::TextEditor::focusedOutlineColourId,  Color::accent);
+    editor->setColour(juce::TextEditor::highlightColourId,       Color::accent.withAlpha(0.35f));
+    editor->setJustification(juce::Justification::centredLeft);
+    editor->setIndents(4, 0);
+
+    editor->onReturnKey = [this, session] {
+        juce::MessageManager::callAsync([this, session] {
+            if (editingSession_ == session) commitCellEdit();
+        });
+    };
+    editor->onEscapeKey = [this, session] {
+        juce::MessageManager::callAsync([this, session] {
+            if (editingSession_ == session) cancelCellEdit();
+        });
+    };
+    editor->onFocusLost = [this, session] {
+        juce::MessageManager::callAsync([this, session] {
+            if (editingSession_ == session) commitCellEdit();
+        });
+    };
+
+    return editor;
+}
+
+void LibraryTableComponent::commitCellEdit()
+{
+    if (editingRow_ < 0) return;
+
+    const juce::String text = activeCellEditor_ ? activeCellEditor_->getText().trim() : juce::String{};
+    const int row = editingRow_;
+    const int col = editingColId_;
+
+    activeCellEditor_ = nullptr; // clear before updateContent() deletes the editor
+    editingRow_   = -1;
+    editingColId_ = -1;
+
+    table_.getViewport()->setScrollBarsShown(true, true);
+    table_.updateContent();
+    table_.repaint();
+
+    if (row < 0 || row >= static_cast<int>(filteredTracks_.size())) return;
+    if (text.isEmpty()) return; // empty input: no change (silently revert)
+
+    auto* track = filteredTracks_[static_cast<size_t>(row)];
+    bool changed = false;
+
+    switch (col)
+    {
+        case colIdTitle:
+            if (track->title != text) { track->title = text; changed = true; }
+            break;
+        case colIdArtist:
+            if (track->isPodcast) {
+                if (track->podcast != text) { track->podcast = text; changed = true; }
+            } else {
+                if (track->artist != text) { track->artist = text; changed = true; }
+            }
+            break;
+        case colIdAlbum:
+            if (track->album != text) { track->album = text; changed = true; }
+            break;
+        case colIdGenre:
+            if (track->genre != text) { track->genre = text; changed = true; }
+            break;
+        default: break;
+    }
+
+    if (changed)
+    {
+        FoxpFile::save(*track);
+        if (onInlineEditCommitted) onInlineEditCommitted(*track);
+    }
+}
+
+void LibraryTableComponent::cancelCellEdit()
+{
+    if (editingRow_ < 0) return;
+
+    activeCellEditor_ = nullptr;
+    editingRow_   = -1;
+    editingColId_ = -1;
+
+    table_.getViewport()->setScrollBarsShown(true, true);
+    table_.updateContent();
+    table_.repaint();
 }
 
 void LibraryTableComponent::deleteKeyPressed(int /*lastRowSelected*/)
@@ -850,6 +1087,7 @@ void LibraryTableComponent::mouseDrag(const juce::MouseEvent& e)
 
 void LibraryTableComponent::backgroundClicked(const juce::MouseEvent&)
 {
+    if (editingRow_ >= 0) commitCellEdit();
     table_.deselectAllRows();
 }
 

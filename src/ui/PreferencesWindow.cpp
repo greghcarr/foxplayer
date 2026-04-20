@@ -10,8 +10,13 @@ using namespace Constants;
 // AudioPreferencesPanel
 // ============================================================================
 
-AudioPreferencesPanel::AudioPreferencesPanel(juce::AudioDeviceManager& dm)
-    : deviceManager_(dm)
+static constexpr int kBufferSizes[] = { 32, 64, 128, 256, 512, 1024, 2048 };
+static constexpr int kDefaultBufferSize = 512;
+static constexpr const char* kBufferSizeKey = "audio.bufferSize";
+
+AudioPreferencesPanel::AudioPreferencesPanel(juce::AudioDeviceManager& dm,
+                                             juce::ApplicationProperties& appProps)
+    : deviceManager_(dm), appProps_(appProps)
 {
     deviceLabel_.setText("Output Device", juce::dontSendNotification);
     deviceLabel_.setColour(juce::Label::textColourId, Color::textSecondary);
@@ -25,7 +30,20 @@ AudioPreferencesPanel::AudioPreferencesPanel(juce::AudioDeviceManager& dm)
     deviceCombo_.onChange = [this] { applySelectedDevice(); };
     addAndMakeVisible(deviceCombo_);
 
+    bufferLabel_.setText("Buffer Size", juce::dontSendNotification);
+    bufferLabel_.setColour(juce::Label::textColourId, Color::textSecondary);
+    bufferLabel_.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)));
+    addAndMakeVisible(bufferLabel_);
+
+    bufferCombo_.setColour(juce::ComboBox::backgroundColourId, Color::headerBackground);
+    bufferCombo_.setColour(juce::ComboBox::textColourId,       Color::textPrimary);
+    bufferCombo_.setColour(juce::ComboBox::outlineColourId,    Color::border);
+    bufferCombo_.setColour(juce::ComboBox::arrowColourId,      Color::textSecondary);
+    bufferCombo_.onChange = [this] { applySelectedBufferSize(); };
+    addAndMakeVisible(bufferCombo_);
+
     rebuildDeviceList();
+    rebuildBufferList();
     lastDefaultName_ = currentDefaultDeviceName();
     deviceManager_.addChangeListener(this);
 
@@ -67,6 +85,54 @@ void AudioPreferencesPanel::timerCallback()
     // to the new default device so output follows the OS.
     if (usingDefault_)
         applySelectedDevice();
+}
+
+void AudioPreferencesPanel::rebuildBufferList()
+{
+    bufferCombo_.clear(juce::dontSendNotification);
+    for (int size : kBufferSizes)
+        bufferCombo_.addItem(juce::String(size) + " samples", size);
+
+    // Load persisted value, falling back to current device size, then default.
+    int saved = kDefaultBufferSize;
+    if (auto* s = appProps_.getUserSettings())
+        saved = s->getIntValue(kBufferSizeKey, kDefaultBufferSize);
+
+    bufferCombo_.setSelectedId(saved, juce::dontSendNotification);
+
+    // Apply the saved size to the device on first load.
+    juce::AudioDeviceManager::AudioDeviceSetup setup;
+    deviceManager_.getAudioDeviceSetup(setup);
+    if (setup.bufferSize != saved)
+    {
+        setup.bufferSize          = saved;
+        deviceManager_.setAudioDeviceSetup(setup, true);
+    }
+}
+
+void AudioPreferencesPanel::applySelectedBufferSize()
+{
+    const int size = bufferCombo_.getSelectedId();
+    if (size <= 0) return;
+
+    juce::AudioDeviceManager::AudioDeviceSetup setup;
+    deviceManager_.getAudioDeviceSetup(setup);
+    if (setup.bufferSize == size) return;
+
+    setup.bufferSize = size;
+    const auto err = deviceManager_.setAudioDeviceSetup(setup, true);
+    if (err.isNotEmpty())
+    {
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::MessageBoxIconType::WarningIcon,
+            "Audio Buffer",
+            "Could not set buffer size to " + juce::String(size) + ": " + err);
+        rebuildBufferList();
+        return;
+    }
+
+    if (auto* s = appProps_.getUserSettings())
+        s->setValue(kBufferSizeKey, size);
 }
 
 static constexpr int kSystemDefaultId = 1;
@@ -160,10 +226,17 @@ void AudioPreferencesPanel::resized()
 {
     auto bounds = getLocalBounds().reduced(24);
 
-    auto row = bounds.removeFromTop(32);
-    deviceLabel_.setBounds(row.removeFromLeft(140));
-    row.removeFromLeft(8);
-    deviceCombo_.setBounds(row);
+    auto row1 = bounds.removeFromTop(32);
+    deviceLabel_.setBounds(row1.removeFromLeft(140));
+    row1.removeFromLeft(8);
+    deviceCombo_.setBounds(row1);
+
+    bounds.removeFromTop(12);
+
+    auto row2 = bounds.removeFromTop(32);
+    bufferLabel_.setBounds(row2.removeFromLeft(140));
+    row2.removeFromLeft(8);
+    bufferCombo_.setBounds(row2);
 }
 
 // ============================================================================
@@ -414,6 +487,41 @@ void LibraryPreferencesPanel::removeSelectedPodcastFolders()
 }
 
 // ============================================================================
+// MiscPreferencesPanel
+// ============================================================================
+
+MiscPreferencesPanel::MiscPreferencesPanel(juce::ApplicationProperties& props)
+    : props_(props)
+{
+    const bool current = [&] {
+        if (auto* s = props_.getUserSettings())
+            return s->getBoolValue(kAskBeforeQuittingKey, true);
+        return true;
+    }();
+
+    askBeforeQuittingToggle_.setButtonText("Ask before quitting");
+    askBeforeQuittingToggle_.setToggleState(current, juce::dontSendNotification);
+    askBeforeQuittingToggle_.setColour(juce::ToggleButton::textColourId,        Color::textPrimary);
+    askBeforeQuittingToggle_.setColour(juce::ToggleButton::tickColourId,        Color::accent);
+    askBeforeQuittingToggle_.setColour(juce::ToggleButton::tickDisabledColourId, Color::textSecondary);
+    askBeforeQuittingToggle_.onClick = [this] {
+        if (auto* s = props_.getUserSettings())
+            s->setValue(kAskBeforeQuittingKey, askBeforeQuittingToggle_.getToggleState());
+    };
+    addAndMakeVisible(askBeforeQuittingToggle_);
+}
+
+void MiscPreferencesPanel::paint(juce::Graphics& g)
+{
+    g.fillAll(Color::background);
+}
+
+void MiscPreferencesPanel::resized()
+{
+    askBeforeQuittingToggle_.setBounds(getLocalBounds().reduced(24).removeFromTop(32));
+}
+
+// ============================================================================
 // DebugPreferencesPanel
 // ============================================================================
 
@@ -456,17 +564,20 @@ void DebugPreferencesPanel::resized()
 
 PreferencesComponent::PreferencesComponent(juce::AudioDeviceManager& dm,
                                            juce::ApplicationProperties& appProperties)
-    : deviceManager_(dm)
+    : deviceManager_(dm), appProperties_(appProperties)
 {
     items_.push_back({ Category::Audio,   "Audio",   {} });
     items_.push_back({ Category::Library, "Library", {} });
+    items_.push_back({ Category::Misc,    "Misc",    {} });
     items_.push_back({ Category::Debug,   "Debug",   {} });
 
-    audioPanel_   = std::make_unique<AudioPreferencesPanel>(deviceManager_);
+    audioPanel_   = std::make_unique<AudioPreferencesPanel>(deviceManager_, appProperties_);
     libraryPanel_ = std::make_unique<LibraryPreferencesPanel>();
+    miscPanel_    = std::make_unique<MiscPreferencesPanel>(appProperties);
     debugPanel_   = std::make_unique<DebugPreferencesPanel>(appProperties);
     addChildComponent(*libraryPanel_);
     addChildComponent(*audioPanel_);
+    addChildComponent(*miscPanel_);
     addChildComponent(*debugPanel_);
 
     showPanel(current_);
@@ -478,6 +589,7 @@ void PreferencesComponent::showPanel(Category c)
     current_ = c;
     if (audioPanel_)   audioPanel_->setVisible(c == Category::Audio);
     if (libraryPanel_) libraryPanel_->setVisible(c == Category::Library);
+    if (miscPanel_)    miscPanel_->setVisible(c == Category::Misc);
     if (debugPanel_)   debugPanel_->setVisible(c == Category::Debug);
     repaint();
 }
@@ -535,6 +647,7 @@ void PreferencesComponent::resized()
                                               getWidth() - sidebarWidth, getHeight());
     if (audioPanel_)   audioPanel_->setBounds(content);
     if (libraryPanel_) libraryPanel_->setBounds(content);
+    if (miscPanel_)    miscPanel_->setBounds(content);
     if (debugPanel_)   debugPanel_->setBounds(content);
 }
 

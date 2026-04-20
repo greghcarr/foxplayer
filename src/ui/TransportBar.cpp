@@ -7,15 +7,15 @@ namespace FoxPlayer
 
 using namespace Constants;
 
-static constexpr int   modBtnD    = 32;   // diameter of shuffle/repeat circles
+static constexpr int   modBtnD    = 28;   // hit area for shuffle/repeat floating icons
 static constexpr int   skipBtnD   = 38;   // diameter of prev/next circles
 static constexpr int   playBtnD   = 46;   // diameter of play/pause circle
 static constexpr int   seekH      = 6;
 static constexpr int   pad        = 10;
-static constexpr int   artMaxFull        = 80;    // record diameter in pixels
+static constexpr int   artMaxFull        = 64;    // record diameter in pixels
 static constexpr float cdDataInnerRatio  = 0.43f;  // CD hub ring outer radius as fraction of disc radius
 static constexpr float cdHoleRatio       = 0.12f;  // CD spindle hole radius as fraction of disc radius
-static constexpr float infoLetterSpacing = 0.4f;   // extra px between glyphs in info text
+static constexpr float infoLetterSpacing = 0.2f;   // extra px between glyphs in info text
 
 // ----------------------------------------------------------------------------
 // TransportButton
@@ -23,6 +23,9 @@ static constexpr float infoLetterSpacing = 0.4f;   // extra px between glyphs in
 
 void TransportButton::paint(juce::Graphics& g)
 {
+    if (!isEnabled())
+        g.beginTransparencyLayer(0.35f);
+
     const float w  = static_cast<float>(getWidth());
     const float h  = static_cast<float>(getHeight());
     const float d  = juce::jmin(w, h);
@@ -30,33 +33,42 @@ void TransportButton::paint(juce::Graphics& g)
     const float cy = h * 0.5f;
     const float r  = d * 0.5f;
 
-    // Circle fill and icon color. Toggleable buttons (shuffle/repeat/pin) are
-    // dim grey when off and light up chrome + red when on. Non-toggle buttons
-    // (play/pause/prev/next) always show the chrome look.
-    juce::Colour fill, iconColor;
-    if (toggleStyle && toggleState == 0)
+    const bool isMod = (icon == Icon::Shuffle || icon == Icon::Repeat);
+
+    juce::Colour iconColor;
+    if (isMod)
     {
-        fill      = pressed_ ? juce::Colour(0xff3a3a3a)
-                  : hovered_ ? juce::Colour(0xff666666)
-                  :             juce::Colour(0xff505050);
-        iconColor = juce::Colour(0xff909090);
-    }
-    else if (toggleStyle)
-    {
-        fill      = pressed_ ? juce::Colour(0xff989898)
-                  : hovered_ ? juce::Colour(0xffe2e2e2)
-                  :             juce::Colour(0xffc4c4c4);
-        iconColor = Color::accent;
+        // Floating icon — no circle background. Grey when off, accent when engaged.
+        iconColor = (toggleState == 0) ? juce::Colour(0xff606060) : Color::accent;
     }
     else
     {
-        fill      = pressed_ ? juce::Colour(0xff989898)
-                  : hovered_ ? juce::Colour(0xffe2e2e2)
-                  :             juce::Colour(0xffc4c4c4);
-        iconColor = juce::Colours::black;
+        // Circle fill and icon color for non-mod buttons.
+        juce::Colour fill;
+        if (toggleStyle && toggleState == 0)
+        {
+            fill      = pressed_ ? juce::Colour(0xff3a3a3a)
+                      : hovered_ ? juce::Colour(0xff666666)
+                      :             juce::Colour(0xff505050);
+            iconColor = juce::Colour(0xff909090);
+        }
+        else if (toggleStyle)
+        {
+            fill      = pressed_ ? juce::Colour(0xff989898)
+                      : hovered_ ? juce::Colour(0xffe2e2e2)
+                      :             juce::Colour(0xffc4c4c4);
+            iconColor = (icon == Icon::Pin) ? juce::Colour(0xffcc3333) : Color::accent;
+        }
+        else
+        {
+            fill      = pressed_ ? juce::Colour(0xff989898)
+                      : hovered_ ? juce::Colour(0xffe2e2e2)
+                      :             juce::Colour(0xffc4c4c4);
+            iconColor = juce::Colours::black;
+        }
+        g.setColour(fill);
+        g.fillEllipse(cx - r, cy - r, d, d);
     }
-    g.setColour(fill);
-    g.fillEllipse(cx - r, cy - r, d, d);
 
     // Select the SVG source for this icon/state combination.
     const char* svgData = nullptr;
@@ -105,7 +117,7 @@ void TransportButton::paint(juce::Graphics& g)
 
     if (svgCache_.drawable)
     {
-        const float sizeRatio = (icon == Icon::Shuffle || icon == Icon::Repeat) ? 0.66f : 0.52f;
+        const float sizeRatio = isMod ? 1.0f : 0.52f;
         const float iconSize  = d * sizeRatio;
         svgCache_.drawable->drawWithin(
             g,
@@ -113,10 +125,14 @@ void TransportButton::paint(juce::Graphics& g)
             juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize,
             1.0f);
     }
+
+    if (!isEnabled())
+        g.endTransparencyLayer();
 }
 
 void TransportButton::mouseDown(const juce::MouseEvent&)
 {
+    if (!isEnabled()) return;
     pressed_ = true;
     repaint();
 }
@@ -125,6 +141,7 @@ void TransportButton::mouseUp(const juce::MouseEvent& e)
 {
     pressed_ = false;
     repaint();
+    if (!isEnabled()) return;
     if (getLocalBounds().contains(e.getPosition()) && onClick)
         onClick();
 }
@@ -361,6 +378,11 @@ void TransportBar::DraggingDotSliderLnF::drawLinearSlider(juce::Graphics& g,
     }
 }
 
+int TransportBar::DraggingDotSliderLnF::getSliderThumbRadius(juce::Slider& s)
+{
+    return juce::LookAndFeel_V4::getSliderThumbRadius(s) + (hovered ? 2 : 0);
+}
+
 TransportBar::TransportBar(AudioEngine& engine)
     : engine_(engine)
 {
@@ -469,6 +491,20 @@ void TransportBar::setCurrentTrack(const TrackInfo& track)
     updateDisplay();
 }
 
+void TransportBar::updateCurrentTrackInfo(const TrackInfo& updated)
+{
+    if (!hasTrack_ || currentTrack_.file != updated.file) return;
+    currentTrack_ = updated;
+    repaint();
+}
+
+void TransportBar::refreshAlbumArt()
+{
+    if (!hasTrack_) return;
+    albumArt_ = AlbumArtExtractor::extractFromFile(currentTrack_.file);
+    repaint();
+}
+
 void TransportBar::setInitialVolume(double value)
 {
     value = juce::jlimit(0.0, 1.0, value);
@@ -508,6 +544,16 @@ void TransportBar::setRepeatMode(int mode)
 {
     repeatButton_.toggleState = juce::jlimit(0, 2, mode);
     repeatButton_.repaint();
+}
+
+void TransportBar::setCanGoPrev(bool can)
+{
+    prevButton_.setEnabled(can);
+}
+
+void TransportBar::setCanGoNext(bool can)
+{
+    nextButton_.setEnabled(can);
 }
 
 void TransportBar::setPlayingFrom(const juce::String& sourceName, int sourceSidebarId)
@@ -557,6 +603,15 @@ void TransportBar::paint(juce::Graphics& g)
         return static_cast<int>(std::ceil(ga.getBoundingBox(0, -1, true).getWidth()));
     };
 
+    // Width of text rendered via drawTextSpaced (accounts for letter-spacing gaps).
+    auto spacedWidth = [](const juce::Font& f, const juce::String& text, float sp) -> int {
+        juce::GlyphArrangement ga;
+        ga.addLineOfText(f, text, 0.0f, 0.0f);
+        for (int i = 1; i < ga.getNumGlyphs(); ++i)
+            ga.moveRangeOfGlyphs(i, ga.getNumGlyphs() - i, sp, 0.0f);
+        return static_cast<int>(std::ceil(ga.getBoundingBox(0, -1, true).getWidth()));
+    };
+
     // Title rendering depends on whether there's a real title tag or we're
     // falling back to the filename. Real title -> italic, tag text only.
     // Filename fallback -> regular weight, include the file extension.
@@ -565,12 +620,11 @@ void TransportBar::paint(juce::Graphics& g)
                                            ? currentTrack_.title
                                            : currentTrack_.file.getFileName();
 
-    const juce::Font titleFontBase   = juce::Font(juce::FontOptions().withHeight(17.0f));
-    const juce::Font titleFont       = titleFontBase;
-    const juce::Font artistFont      = juce::Font(juce::FontOptions().withHeight(15.0f));
-    const juce::Font noArtistFont    = juce::Font(juce::FontOptions().withHeight(15.0f)).italicised();
-    const juce::Font prefixFont      = juce::Font(juce::FontOptions().withHeight(15.0f)).italicised();
-    const juce::Font sourceFont(juce::FontOptions().withHeight(15.0f));
+    const juce::Font titleFont    = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(18.0f).withStyle("Bold"));
+    const juce::Font artistFont   = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f));
+    const juce::Font noArtistFont = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f)).italicised();
+    const juce::Font prefixFont   = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f)).italicised();
+    const juce::Font sourceFont   = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f));
 
     int infoMaxTextW = 0;
     int prefixTextW  = 0;
@@ -584,8 +638,8 @@ void TransportBar::paint(juce::Graphics& g)
                      : textWidth(artistFont,   currentTrack_.artist));
         if (playingFromName_.isNotEmpty())
         {
-            prefixTextW = textWidth(prefixFont, juce::String("Playing from: "));
-            sourceTextW = textWidth(sourceFont, playingFromName_);
+            prefixTextW = spacedWidth(prefixFont, juce::String("Playing from: "), infoLetterSpacing);
+            sourceTextW = spacedWidth(sourceFont, playingFromName_, infoLetterSpacing);
             infoMaxTextW = juce::jmax(infoMaxTextW, prefixTextW + sourceTextW);
         }
     }
@@ -677,11 +731,34 @@ void TransportBar::paint(juce::Graphics& g)
         const int infoX = infoAreaBounds_.getX();
         const int infoW = infoAreaBounds_.getWidth();
 
+        // Gradient clip: link bounds are trimmed at gradStart so clicks and
+        // underlines don't extend into the faded-out zone.
+        const int gradStart = gradValid ? static_cast<int>(gradLeftTransparent)
+                                        : (infoX + infoW);
+
         // Line 1: song title. Nudged up 2px so there's a touch more breathing
         // room above the artist line.
         g.setColour(Color::textPrimary.withMultipliedAlpha(infoAlpha));
         drawTextSpaced(g, titleFont, titleText, infoLetterSpacing,
                        infoX, infoY - 2, infoW, line1H);
+
+        // Clickable title bounds (clipped to the gradient fade point).
+        {
+            const int titleTextW   = spacedWidth(titleFont, titleText, infoLetterSpacing);
+            const int rawRight     = infoX + juce::jmin(titleTextW, infoW);
+            const int clippedRight = juce::jmin(rawRight, gradStart);
+            titleLinkBounds_ = (clippedRight > infoX)
+                                   ? juce::Rectangle<int>(infoX, infoY - 2, clippedRight - infoX, line1H)
+                                   : juce::Rectangle<int>();
+        }
+
+        if (hoveredTitle_ && !titleLinkBounds_.isEmpty())
+        {
+            g.setColour(Color::textPrimary.withMultipliedAlpha(infoAlpha));
+            g.drawHorizontalLine(titleLinkBounds_.getBottom() - 1,
+                                 static_cast<float>(titleLinkBounds_.getX()),
+                                 static_cast<float>(titleLinkBounds_.getRight()));
+        }
 
         // Line 2: podcast name (for podcasts), artist, or "(no artist)" in italics
         const int artist2Y = infoY + line1H + lineGap;
@@ -695,40 +772,46 @@ void TransportBar::paint(juce::Graphics& g)
             g.setFont(noArtistFont);
             g.drawText("(no artist)", infoX, artist2Y, infoW, line2H,
                        juce::Justification::centredLeft, true);
+            artistLinkBounds_ = {};
         }
         else
         {
             drawTextSpaced(g, artistFont, line2Text, infoLetterSpacing,
                            infoX, artist2Y, infoW, line2H);
+
+            // Clickable artist bounds (clipped to the gradient fade point).
+            const int artistTextW  = spacedWidth(artistFont, line2Text, infoLetterSpacing);
+            const int rawRight2    = infoX + juce::jmin(artistTextW, infoW);
+            const int clippedRight2 = juce::jmin(rawRight2, gradStart);
+            artistLinkBounds_ = (clippedRight2 > infoX)
+                                     ? juce::Rectangle<int>(infoX, artist2Y, clippedRight2 - infoX, line2H)
+                                     : juce::Rectangle<int>();
+
+            if (hoveredArtist_ && !artistLinkBounds_.isEmpty())
+            {
+                g.setColour(Color::textSecondary.withMultipliedAlpha(infoAlpha));
+                g.drawHorizontalLine(artistLinkBounds_.getBottom() - 1,
+                                     static_cast<float>(artistLinkBounds_.getX()),
+                                     static_cast<float>(artistLinkBounds_.getRight()));
+            }
         }
 
-        // Line 3: "Playing from: [source]" where source is accent-colored and
-        // clickable. Nudged down 2px for a bit more separation from the artist.
+        // Line 3: "Playing from: [source]" — both prefix and link in textDim,
+        // underline appears on hover only. Nudged down 2px for separation.
         if (playingFromName_.isNotEmpty())
         {
             const int source3Y = artist2Y + line2H + lineGap + 2;
 
             g.setColour(Color::textDim.withMultipliedAlpha(infoAlpha));
-            g.setFont(prefixFont);
-            g.drawText("Playing from: ", infoX, source3Y, prefixTextW + 2, line3H,
-                       juce::Justification::centredLeft, false);
+            drawTextSpaced(g, prefixFont, "Playing from: ", infoLetterSpacing,
+                           infoX, source3Y, prefixTextW + 2, line3H);
 
             const int linkX = infoX + prefixTextW;
-            g.setFont(sourceFont);
-            g.setColour(Color::accent.withMultipliedAlpha(infoAlpha));
-            g.drawText(playingFromName_, linkX, source3Y, infoW - prefixTextW, line3H,
-                       juce::Justification::centredLeft, false);
+            g.setColour(Color::textSecondary.withMultipliedAlpha(infoAlpha));
+            drawTextSpaced(g, sourceFont, playingFromName_, infoLetterSpacing,
+                           linkX, source3Y, infoW - prefixTextW, line3H);
 
-            // Underline the source link
-            g.drawHorizontalLine(source3Y + line3H - 1,
-                                 static_cast<float>(linkX),
-                                 static_cast<float>(linkX + sourceTextW));
-
-            // Click hit-box: only cover the visible portion of the link. Once
-            // the gradient starts fading the text out, the hidden tail stops
-            // being clickable so we don't "fight" the visual effect.
-            const int gradStart = gradValid ? static_cast<int>(gradLeftTransparent)
-                                            : (infoX + infoW);
+            // Click hit-box: only cover the visible portion of the link.
             const int linkRight = juce::jmin(linkX + sourceTextW + 4,
                                              infoX + (infoW - prefixTextW),
                                              gradStart);
@@ -736,11 +819,25 @@ void TransportBar::paint(juce::Graphics& g)
             sourceLinkBounds_ = (clippedW > 0)
                                     ? juce::Rectangle<int>(linkX, source3Y, clippedW, line3H)
                                     : juce::Rectangle<int>();
+
+            if (hoveredSource_ && !sourceLinkBounds_.isEmpty())
+            {
+                g.setColour(Color::textSecondary.withMultipliedAlpha(infoAlpha));
+                g.drawHorizontalLine(source3Y + line3H - 1,
+                                     static_cast<float>(linkX),
+                                     static_cast<float>(linkX + sourceTextW));
+            }
         }
         else
         {
             sourceLinkBounds_ = {};
         }
+    }
+    else
+    {
+        titleLinkBounds_  = {};
+        artistLinkBounds_ = {};
+        sourceLinkBounds_ = {};
     }
 
     // Horizontal fade: solid transport-bg from the current-time label through
@@ -778,7 +875,7 @@ void TransportBar::paint(juce::Graphics& g)
         g.fillRect(seekBarBounds_.withWidth(fillW));
 
         const auto  seekF  = seekBarBounds_.toFloat();
-        const float thumbD = draggingSeek_ ? 16.0f : 12.0f;
+        const float thumbD = (draggingSeek_ || hoveredSeek_) ? 16.0f : 12.0f;
         const float thumbX = seekF.getX() + static_cast<float>(pos) * seekF.getWidth();
         const float thumbY = seekF.getCentreY();
         g.setColour(juce::Colours::white);
@@ -943,7 +1040,7 @@ void TransportBar::resized()
     // vertical position (matching the pre-offset look in mini player territory).
     // With no track loaded the seek row is hidden, so the buttons sit dead-
     // centre vertically in the bar.
-    constexpr int   playbackRowYOffsetMax   = 11;
+    constexpr int   playbackRowYOffsetMax   = 13;
     constexpr float playbackOffsetFadeStart = 510.0f;
     constexpr float playbackOffsetFadeEnd   = static_cast<float>(miniModeWidth);
     const float playbackOffsetT = juce::jlimit(0.0f, 1.0f,
@@ -987,8 +1084,8 @@ void TransportBar::resized()
     // embedded album art (the label falls back to a dark placeholder).
     if (hasTrack_)
     {
-        const int artX = 13; // matches infoTextLeftGap — fixed position regardless of window width
-        albumArtBounds_ = { artX, (getHeight() - artDim) / 2, artDim, artDim };
+        const int artY = (getHeight() - artDim) / 2;
+        albumArtBounds_ = { artY, artY, artDim, artDim };  // left gap == vertical gap
     }
     else
     {
@@ -998,7 +1095,9 @@ void TransportBar::resized()
     // Push the info-text area in slightly so the title/artist/source lines
     // don't crowd whatever sits to their left (album art, or the window edge
     // if the art is hidden). Mini mode doesn't use infoAreaBounds_.
-    constexpr int infoTextLeftGap = 13;
+    // Gap from CD right edge to info text equals the gap from window left to CD left,
+    // so the info text appears equidistant from the CD as the CD is from the edge.
+    const int infoTextLeftGap = albumArtBounds_.isEmpty() ? 13 : albumArtBounds_.getY();
     if (!mini)
     {
         if (!albumArtBounds_.isEmpty())
@@ -1012,9 +1111,10 @@ void TransportBar::resized()
     // share the row with the other layout elements.
     if (hasTrack_)
     {
-        const int seekRowH = 20;
-        const int gapH     = 3;
-        const int seekRowY = btnCenterY + playBtnD / 2 + gapH;
+        const int seekRowH      = 20;
+        const int gapH          = 3;
+        const int seekRowYNudge = static_cast<int>(playbackOffsetT * 2);
+        const int seekRowY      = btnCenterY + playBtnD / 2 + gapH + seekRowYNudge;
 
         const int timeLW = 48;
         // Seek bar width scales smoothly with the window across the full range:
@@ -1057,10 +1157,39 @@ void TransportBar::resized()
     {
         compactInfoBounds_ = {};
     }
+
+    repaint();
 }
 
 void TransportBar::timerCallback()
 {
+    // Poll hover state for clickable info text. Runs at 30 Hz which is
+    // responsive enough and avoids mouse-listener plumbing for child components.
+    const auto mousePos = getMouseXYRelative();
+    const bool newHoveredTitle  = !titleLinkBounds_.isEmpty()  && titleLinkBounds_.contains(mousePos);
+    const bool newHoveredArtist = !artistLinkBounds_.isEmpty() && artistLinkBounds_.contains(mousePos);
+    const bool newHoveredSource = !sourceLinkBounds_.isEmpty() && sourceLinkBounds_.contains(mousePos);
+    const bool newHoveredSeek   = !draggingSeek_ && !seekBarBounds_.isEmpty()
+                                    && seekBarBounds_.expanded(0, 8).contains(mousePos);
+    const bool newHoveredVolume = volumeSlider_.getBounds().contains(mousePos);
+    if (newHoveredTitle  != hoveredTitle_  ||
+        newHoveredArtist != hoveredArtist_ ||
+        newHoveredSource != hoveredSource_ ||
+        newHoveredSeek   != hoveredSeek_   ||
+        newHoveredVolume != hoveredVolume_)
+    {
+        hoveredTitle_  = newHoveredTitle;
+        hoveredArtist_ = newHoveredArtist;
+        hoveredSource_ = newHoveredSource;
+        hoveredSeek_   = newHoveredSeek;
+        hoveredVolume_ = newHoveredVolume;
+        if (volumeSliderLnF_.hovered != newHoveredVolume)
+        {
+            volumeSliderLnF_.hovered = newHoveredVolume;
+            volumeSlider_.repaint();
+        }
+        repaint();
+    }
     updateDisplay();
 }
 
@@ -1072,13 +1201,19 @@ void TransportBar::updateDisplay()
                                                 : TransportButton::Icon::Play;
     playPauseButton_.repaint();
 
-    // Spin at 33⅓ RPM while playing.
-    if (engine_.isPlaying())
+    // Advance rotation by actual elapsed wall-clock time since the last tick.
+    // Using real time instead of a fixed per-frame amount means paint() always
+    // has an accurate sync point, so the CD keeps spinning even during window
+    // resize (when the timer stops firing but resized() still triggers repaints).
+    const double nowMs = juce::Time::getMillisecondCounterHiRes();
+    if (engine_.isPlaying() && lastUpdateMs_ > 0.0)
     {
-        constexpr float radsPerFrame = juce::MathConstants<float>::twoPi * (33.333f / 60.0f) / 30.0f;
-        recordRotation_ = std::fmod(recordRotation_ + radsPerFrame,
+        const float deltaRads = static_cast<float>((nowMs - lastUpdateMs_) / 1000.0)
+                                * (33.333f / 60.0f) * juce::MathConstants<float>::twoPi;
+        recordRotation_ = std::fmod(recordRotation_ + deltaRads,
                                     juce::MathConstants<float>::twoPi);
     }
+    lastUpdateMs_ = nowMs;
 
     const double elapsed = engine_.elapsedSeconds();
     const double total   = engine_.durationSeconds();
@@ -1127,6 +1262,18 @@ void TransportBar::mouseDown(const juce::MouseEvent& e)
     }
 
     if (!hasTrack_) return;
+
+    if (!titleLinkBounds_.isEmpty() && titleLinkBounds_.contains(e.x, e.y))
+    {
+        if (onTitleClicked) onTitleClicked(playingFromSidebarId_);
+        return;
+    }
+
+    if (!artistLinkBounds_.isEmpty() && artistLinkBounds_.contains(e.x, e.y))
+    {
+        if (onArtistClicked) onArtistClicked(currentTrack_);
+        return;
+    }
 
     // Expand the seek bar hit area vertically so the thumb (which extends
     // above and below the 6px track) is easy to grab.
@@ -1180,6 +1327,12 @@ juce::MouseCursor TransportBar::getMouseCursor()
 
     // "Playing from: <source>" clickable link.
     if (! sourceLinkBounds_.isEmpty() && sourceLinkBounds_.contains(pos))
+        return juce::MouseCursor::PointingHandCursor;
+
+    // Clickable title and artist text.
+    if (! titleLinkBounds_.isEmpty()  && titleLinkBounds_.contains(pos))
+        return juce::MouseCursor::PointingHandCursor;
+    if (! artistLinkBounds_.isEmpty() && artistLinkBounds_.contains(pos))
         return juce::MouseCursor::PointingHandCursor;
 
     return juce::Component::getMouseCursor();

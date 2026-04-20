@@ -21,6 +21,12 @@ public:
     // Called with all edited tracks on Save (1 element for single-track mode).
     std::function<void(std::vector<TrackInfo>)> onSave;
 
+    // SingleMusic mode only. Called when the user clicks "Apple Music Lookup".
+    // Implementations should kick off a lookup for the given track and call the
+    // result callback on the message thread when it completes. success=false
+    // means the lookup failed (network error or no match found).
+    std::function<void(const TrackInfo&, std::function<void(bool, TrackInfo)>)> onLookupRequested;
+
     // juce::Component
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -31,11 +37,15 @@ private:
 
     void init();
     void save();
+    void fillFromLookup(const TrackInfo& result);
+    void lookupFailed();
     juce::String findCommonPrefix() const;
 
     Mode                   mode_;
     std::vector<TrackInfo> tracks_;
     juce::String           detectedPrefix_;  // common prefix at open time (multi-mode)
+    bool                   lookupSucceeded_ { false };
+    juce::String           snapTitle_, snapArtist_, snapAlbum_, snapGenre_, snapYear_;
 
     juce::Label titleLabel_       { {}, "Title" };
     juce::Label titlePrefixLabel_ { {}, "Prefix" };
@@ -48,7 +58,7 @@ private:
     juce::Label episodeNumLabel_  { {}, "Episode #" };
     juce::Label bpmLabel_         { {}, "BPM" };
     juce::Label keyLabel_         { {}, "Key" };
-    juce::Label fileLabel_;
+    juce::TextEditor fileLabel_;
     juce::Label hintLabel_;
 
     juce::TextEditor titleEdit_;
@@ -62,6 +72,7 @@ private:
     juce::TextEditor bpmEdit_;
     juce::TextEditor keyEdit_;
 
+    juce::TextButton lookupButton_;
     juce::TextButton saveButton_   { "Save" };
     juce::TextButton cancelButton_ { "Cancel" };
 

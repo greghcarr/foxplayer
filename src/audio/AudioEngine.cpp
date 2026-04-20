@@ -37,7 +37,8 @@ void AudioEngine::play(const TrackInfo& track)
     loadTrack(track);
     if (!trackLoaded_)
     {
-        DBG("AudioEngine::play - loadTrack failed, aborting");
+        DBG("AudioEngine::play - loadTrack failed, skipping track");
+        juce::MessageManager::callAsync([this] { if (onTrackFailed) onTrackFailed(); });
         return;
     }
     transportSource_.setPosition(0.0);

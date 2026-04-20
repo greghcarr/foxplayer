@@ -21,6 +21,7 @@
 #include "ui/NowPlayingBridge.h"
 #include <JuceHeader.h>
 #include <map>
+#include <set>
 
 namespace FoxPlayer
 {
@@ -70,6 +71,10 @@ public:
     // Called when the user chooses Window -> Show Player Window. MainWindow
     // wires this to bring itself to front.
     std::function<void()> onShowWindowRequested;
+
+    // Checks "Ask before quitting" preference; shows confirmation dialog if
+    // enabled, then calls onConfirmed. Call this instead of quit() directly.
+    void requestQuit(std::function<void()> onConfirmed);
 
 private:
     // Prompts the user for a folder and appends it to the library list.
@@ -125,6 +130,9 @@ private:
     // Recomputes the PODCASTS sidebar section from fullLibrary_. Each unique
     // podcast show gets an id in the [4000, 4999] range.
     void refreshSidebarPodcasts();
+    // Recomputes the GENRES sidebar section from fullLibrary_. Each unique
+    // genre tag gets an id in the [5000, 5999] range.
+    void refreshSidebarGenres();
     // Saves/loads podcast folder list to/from ApplicationProperties.
     void savePodcastFolders();
     std::vector<juce::File> loadSavedPodcastFolders();
@@ -141,6 +149,10 @@ private:
 
     // Wires AudioEngine callbacks to UI.
     void setupAudioEngineCallbacks();
+
+    // Updates the enabled state of the prev/next transport buttons based on
+    // whether the queue has a previous/next item to navigate to.
+    void updateNavButtons();
 
     // Session persistence. Saved state covers the queue, active sidebar view,
     // shuffle/repeat toggles, current track, and elapsed playback time.
@@ -190,6 +202,54 @@ private:
         juce::TextButton closeBtn_ { "Close Preferences" };
     };
     PrefsLockOverlay      prefsLockOverlay_;
+
+    // Full-bleed overlay shown while an Edit Info dialog is open. Same
+    // behaviour as PrefsLockOverlay: dims content, blocks clicks, and exposes
+    // buttons to recentre or close the dialog.
+    class EditInfoLockOverlay : public juce::Component
+    {
+    public:
+        std::function<void()> onOpenEditInfo;
+        std::function<void()> onCloseEditInfo;
+
+        EditInfoLockOverlay();
+        void paint(juce::Graphics& g) override;
+        void resized() override;
+
+    private:
+        juce::Label      message_ { {}, "Edit Info window open." };
+        juce::TextButton openBtn_  { "Open Edit Info" };
+        juce::TextButton closeBtn_ { "Close Edit Info" };
+    };
+    EditInfoLockOverlay   editInfoLockOverlay_;
+
+    // Full-bleed overlay shown while the Confirm Quit dialog is open.
+    class QuitLockOverlay : public juce::Component
+    {
+    public:
+        std::function<void()> onCancelQuit;
+
+        QuitLockOverlay();
+        void paint(juce::Graphics& g) override;
+        void resized() override;
+
+    private:
+        juce::Label      message_   { {}, "Confirm Quit dialog open." };
+        juce::TextButton cancelBtn_ { "Cancel" };
+    };
+    QuitLockOverlay       quitLockOverlay_;
+    juce::Component::SafePointer<juce::Component> activeQuitDialog_;
+
+    // DialogWindow subclass used for Edit Info dialogs. Overrides
+    // closeButtonPressed() to exit the modal state so the cleanup callback fires.
+    class EditInfoDialogWindow : public juce::DialogWindow
+    {
+    public:
+        EditInfoDialogWindow(const juce::String& title, juce::Colour bg)
+            : juce::DialogWindow(title, bg, true) {}
+        void closeButtonPressed() override { exitModalState(0); }
+    };
+    juce::Component::SafePointer<juce::DialogWindow> activeEditInfoWindow_;
 
     // Thin draggable component sitting at the right edge of the sidebar. Drag
     // horizontally to resize the sidebar between "icons only" and half window.
@@ -241,8 +301,26 @@ private:
     std::map<int, AlbumKey> albumIdToInfo_;
     // sidebarId (4000..4999) -> podcast show name, rebuilt by refreshSidebarPodcasts().
     std::map<int, juce::String> podcastIdToName_;
+    // sidebarId (5000..5999) -> genre name, rebuilt by refreshSidebarGenres().
+    std::map<int, juce::String> genreIdToName_;
     std::vector<juce::File> musicFolders_;
     std::vector<juce::File> podcastFolders_;
+
+    // Pending Edit Info dialog lookup: when the user clicks "Apple Music" in
+    // the editor, this stores the callback to forward the result back.
+    juce::File editorLookupFile_;
+    std::function<void(bool, TrackInfo)> editorLookupCallback_;
+
+    // Pre-lookup snapshots for right-click "Look up on Apple Music". Keyed by
+    // file path; populated on confirmation, cleared on failure or undo.
+    std::map<juce::File, TrackInfo> lookupUndoSnapshots_;
+
+    // Pre-art-lookup snapshots for right-click "Look up Album Art".
+    struct ArtUndoData { juce::MemoryBlock data; bool hadArt { false }; };
+    std::map<juce::File, ArtUndoData> artUndoSnapshots_;
+    // Files currently in-flight as art-only jobs (used in onLookupCompleted
+    // to decide whether to clear the art undo snapshot on failure).
+    std::set<juce::File> artOnlyLookupFiles_;
 
     // Apple Music lookup retry state. Failed jobs (network errors) are
     // collected here and re-enqueued after a delay. Retries are always
@@ -260,6 +338,7 @@ private:
     // the persisted session before we've had a chance to read it back).
     bool                   sessionRestored_  { false };
 
+    std::unique_ptr<juce::LookAndFeel>  appLnF_;
     std::unique_ptr<PlaylistStore>      playlistStore_;
     std::unique_ptr<AnalysisLogWindow>  analysisLogWindow_;
     std::unique_ptr<PreferencesWindow>  preferencesWindow_;

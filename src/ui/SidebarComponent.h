@@ -28,6 +28,10 @@ public:
 
     std::function<void(int sidebarId, juce::String newName)> onRenamePlaylist;
     std::function<void(int sidebarId)>                       onDeletePlaylist;
+    std::function<void(int sidebarId)>                       onDuplicatePlaylist;
+    // Fired when the user picks "Create Playlist" from an artist/album/genre item.
+    // suggestedName is pre-filled from the item label.
+    std::function<void(int sidebarId, juce::String suggestedName)> onCreatePlaylistFromItem;
 
     int  selectedId() const { return selectedId_; }
     void setSelectedId(int id);
@@ -53,6 +57,10 @@ public:
     // Each pair is { sidebarId, displayName }.
     void setAlbums(const std::vector<std::pair<int, juce::String>>& albums);
 
+    // Replaces the items shown under the Genres section.
+    // Each pair is { sidebarId, displayName }.
+    void setGenres(const std::vector<std::pair<int, juce::String>>& genres);
+
     // Replaces the items shown under the Podcasts section.
     // Each pair is { sidebarId, displayName }.
     void setPodcasts(const std::vector<std::pair<int, juce::String>>& podcasts);
@@ -60,6 +68,7 @@ public:
     void paint(juce::Graphics& g) override;
     void resized() override;
     void mouseDown(const juce::MouseEvent& e) override;
+    void mouseDoubleClick(const juce::MouseEvent& e) override;
 
     // juce::DragAndDropTarget
     bool isInterestedInDragSource(const SourceDetails& details) override;
@@ -82,6 +91,7 @@ private:
         bool                 collapsible    { false };
         bool                 collapsed      { false };
         bool                 rightClickable { false };
+        bool                 loading        { false };
         std::vector<Item>    items;
         juce::Rectangle<int> headerBounds;
     };
@@ -123,9 +133,9 @@ private:
     std::unique_ptr<juce::Drawable> playlistIconDrawable_;
     std::unique_ptr<juce::Drawable> artistIconDrawable_;
     std::unique_ptr<juce::Drawable> albumIconDrawable_;
+    std::unique_ptr<juce::Drawable> genreIconDrawable_;
 
-    // Spinning loading indicator next to the LIBRARY heading.
-    bool   libraryLoading_   { false };
+    // Spinning loading indicator — driven by section.loading flags.
     float  loadingRotation_  { 0.0f };
 
     void timerCallback() override;

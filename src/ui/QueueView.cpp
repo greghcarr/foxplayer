@@ -18,6 +18,9 @@ QueueView::QueueView()
     list_.setModel(this);
     list_.setColour(juce::ListBox::backgroundColourId, Color::tableBackground);
     list_.setRowHeight(rowHeight);
+    list_.getVerticalScrollBar().setColour(juce::ScrollBar::thumbColourId,      Color::scrollbarThumb);
+    list_.getVerticalScrollBar().setColour(juce::ScrollBar::backgroundColourId, Color::tableBackground);
+    list_.getVerticalScrollBar().setColour(juce::ScrollBar::trackColourId,      Color::tableBackground);
     addAndMakeVisible(list_);
 }
 

@@ -44,6 +44,14 @@ public:
 
     void systemRequestedQuit() override
     {
+        if (mainWindow_ != nullptr)
+        {
+            if (auto* mc = mainWindow_->getMainComponent())
+            {
+                mc->requestQuit([] { juce::JUCEApplication::getInstance()->quit(); });
+                return;
+            }
+        }
         quit();
     }
 

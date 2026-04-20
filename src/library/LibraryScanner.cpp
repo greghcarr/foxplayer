@@ -98,19 +98,20 @@ void LibraryScanner::run()
         return false;
     };
 
-    juce::Array<juce::File> musicFiles;
+    // Collect music files paired with their owning root so folder inference can
+    // determine depth. Sort globally by path so the library appears alphabetical.
+    std::vector<std::pair<juce::File, juce::File>> musicFilesWithRoot;
     for (const auto& root : musicRoots)
     {
         if (threadShouldExit()) return;
         juce::Array<juce::File> candidates;
         collectFiles(root, candidates);
         for (const auto& f : candidates)
-        {
             if (! isUnderPodcastRoot(f))
-                musicFiles.add(f);
-        }
+                musicFilesWithRoot.push_back({ f, root });
     }
-    musicFiles.sort();
+    std::sort(musicFilesWithRoot.begin(), musicFilesWithRoot.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
 
     juce::AudioFormatManager fmgr;
     fmgr.registerBasicFormats();
@@ -127,16 +128,16 @@ void LibraryScanner::run()
         batch.clear();
     };
 
-    auto emit = [&](const juce::File& file, bool asPodcast) {
+    auto emit = [&](const juce::File& file, bool asPodcast, const juce::File& root = {}) {
         if (threadShouldExit()) return;
-        batch.push_back(buildTrackInfo(file, fmgr, asPodcast));
+        batch.push_back(buildTrackInfo(file, fmgr, asPodcast, root));
         ++total;
         if (static_cast<int>(batch.size()) >= Constants::scannerBatchSize)
             flush();
     };
 
-    for (const auto& f : musicFiles)   emit(f, false);
-    for (const auto& f : podcastFiles) emit(f, true);
+    for (const auto& [f, root] : musicFilesWithRoot) emit(f, false, root);
+    for (const auto& f : podcastFiles)                emit(f, true);
     flush();
 
     const int finalTotal = total;
@@ -213,7 +214,8 @@ namespace
 
 TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
                                           juce::AudioFormatManager& fmgr,
-                                          bool isPodcast) const
+                                          bool isPodcast,
+                                          const juce::File& root) const
 {
     TrackInfo info;
     info.file = file;
@@ -284,6 +286,22 @@ TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
                     info.title = stem.substring(sep + 3).trim();
             }
         }
+    }
+
+    // Infer album and artist from folder names when tags and filename parsing
+    // leave them empty. Parent folder = album, grandparent folder = artist,
+    // both only when still inside the music root. FoxpFile::load() below can
+    // still override these with user-edited values.
+    if (!isPodcast && root.isDirectory())
+    {
+        const juce::File parentDir   = file.getParentDirectory();
+        const juce::File grandParDir = parentDir.getParentDirectory();
+
+        if (info.album.isEmpty() && parentDir != root && parentDir.isAChildOf(root))
+            info.album = parentDir.getFileName();
+
+        if (info.artist.isEmpty() && grandParDir != root && grandParDir.isAChildOf(root))
+            info.artist = grandParDir.getFileName();
     }
 
     // Load any previously saved user data from the sidecar. Applied before the

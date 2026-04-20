@@ -12,9 +12,38 @@ using namespace Constants;
 
 static constexpr int orphanCheckIntervalMs = 30'000;
 
+// Global LookAndFeel: pointer cursor on TextButton, light-red hover on "Quit".
+class FoxPlayerLnF : public juce::LookAndFeel_V4
+{
+public:
+    juce::MouseCursor getMouseCursorFor(juce::Component& c) override
+    {
+        if (dynamic_cast<juce::TextButton*>(&c) != nullptr)
+            return juce::MouseCursor::PointingHandCursor;
+        return LookAndFeel_V4::getMouseCursorFor(c);
+    }
+
+    void drawButtonBackground(juce::Graphics& g, juce::Button& button,
+                               const juce::Colour& backgroundColour,
+                               bool highlighted, bool down) override
+    {
+        if (button.getButtonText() == "Quit" && (highlighted || down))
+        {
+            auto bounds = button.getLocalBounds().toFloat().reduced(0.5f, 0.5f);
+            g.setColour(down ? juce::Colour(0xff5a1818) : juce::Colour(0xff8a2222));
+            g.fillRoundedRectangle(bounds, 3.0f);
+            return;
+        }
+        LookAndFeel_V4::drawButtonBackground(g, button, backgroundColour, highlighted, down);
+    }
+};
+
 MainComponent::MainComponent()
     : transportBar_(engine_)
 {
+    appLnF_ = std::make_unique<FoxPlayerLnF>();
+    juce::LookAndFeel::setDefaultLookAndFeel(appLnF_.get());
+
     // ApplicationProperties for persisting settings.
     juce::PropertiesFile::Options opts;
     opts.applicationName = "FoxPlayer";
@@ -37,7 +66,11 @@ MainComponent::MainComponent()
     setSize(defaultWindowWidth, defaultWindowHeight);
 
     // Sub-components
+    libraryTable_.setAppProperties(&appProperties_);
     sidebarViewport_.setViewedComponent(&sidebar_, false);
+    sidebarViewport_.getVerticalScrollBar().setColour(juce::ScrollBar::thumbColourId,      Color::scrollbarThumb);
+    sidebarViewport_.getVerticalScrollBar().setColour(juce::ScrollBar::backgroundColourId, juce::Colours::transparentBlack);
+    sidebarViewport_.getVerticalScrollBar().setColour(juce::ScrollBar::trackColourId,      juce::Colours::transparentBlack);
     addAndMakeVisible(sidebarViewport_);
     addAndMakeVisible(libraryTable_);
     addAndMakeVisible(transportBar_);
@@ -96,6 +129,9 @@ MainComponent::MainComponent()
     // Library table callbacks
     libraryTable_.onRowActivated = [this](int rowIndex) {
         activateRow(rowIndex, libraryTable_.visibleTracks());
+    };
+    libraryTable_.onInlineEditCommitted = [this](const TrackInfo& updated) {
+        updateTrackInLibrary(updated);
     };
     libraryTable_.onAnalyzeRequested = [this](std::vector<TrackInfo> tracks) {
         analysisEngine_.enqueueAll(tracks);
@@ -237,11 +273,54 @@ MainComponent::MainComponent()
                 .withAssociatedComponent(this),
             [this, tracks](int result) {
                 // Button indices: 1 = Yes, 2 = No, 3 = Cancel (also 0 = dismissed).
-                if (result == 1)
-                    appleMusicLookup_.enqueueAll(tracks, true);
-                else if (result == 2)
-                    appleMusicLookup_.enqueueAll(tracks, false);
+                if (result == 1 || result == 2) {
+                    for (const auto& t : tracks)
+                        lookupUndoSnapshots_[t.file] = t;
+                    appleMusicLookup_.enqueueAll(tracks, result == 1);
+                }
             });
+    };
+
+    libraryTable_.isLookupUndoable = [this](const juce::File& file) {
+        return lookupUndoSnapshots_.count(file) > 0;
+    };
+
+    libraryTable_.onAppleMusicUndoRequested = [this](const TrackInfo& track) {
+        auto it = lookupUndoSnapshots_.find(track.file);
+        if (it == lookupUndoSnapshots_.end()) return;
+        TrackInfo snapshot = it->second;
+        lookupUndoSnapshots_.erase(it);
+        FoxpFile::save(snapshot);
+        updateTrackInLibrary(snapshot);
+    };
+
+    libraryTable_.onAlbumArtLookupRequested = [this](std::vector<TrackInfo> tracks) {
+        for (const auto& t : tracks)
+        {
+            const juce::File artFile = AppleMusicLookup::artworkSidecarFor(t.file);
+            ArtUndoData snap;
+            snap.hadArt = artFile.existsAsFile();
+            if (snap.hadArt) artFile.loadFileAsData(snap.data);
+            artUndoSnapshots_[t.file] = std::move(snap);
+            artOnlyLookupFiles_.insert(t.file);
+        }
+        appleMusicLookup_.enqueueAllArtOnly(tracks);
+    };
+
+    libraryTable_.isArtLookupUndoable = [this](const juce::File& file) {
+        return artUndoSnapshots_.count(file) > 0;
+    };
+
+    libraryTable_.onAlbumArtUndoRequested = [this](const TrackInfo& track) {
+        auto it = artUndoSnapshots_.find(track.file);
+        if (it == artUndoSnapshots_.end()) return;
+        const juce::File artFile = AppleMusicLookup::artworkSidecarFor(track.file);
+        if (it->second.hadArt && it->second.data.getSize() > 0)
+            artFile.replaceWithData(it->second.data.getData(), it->second.data.getSize());
+        else
+            artFile.deleteFile();
+        artUndoSnapshots_.erase(it);
+        transportBar_.refreshAlbumArt();
     };
 
     libraryTable_.onLibraryChanged = [this] {
@@ -266,6 +345,38 @@ MainComponent::MainComponent()
             scrollSelectedSidebarItemIntoView();
             libraryTable_.selectAndScrollToPlayingRow();
         });
+    };
+    transportBar_.onTitleClicked = [this](int sidebarId) {
+        sidebar_.setSelectedId(sidebarId);
+        showSidebarItem(sidebarId);
+        juce::MessageManager::callAsync([this] {
+            scrollSelectedSidebarItemIntoView();
+            libraryTable_.selectAndScrollToPlayingRow();
+        });
+    };
+    transportBar_.onArtistClicked = [this](TrackInfo t) {
+        if (t.isPodcast)
+        {
+            for (const auto& [id, name] : podcastIdToName_)
+                if (name == t.podcast)
+                {
+                    sidebar_.setSelectedId(id);
+                    showSidebarItem(id);
+                    juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
+                    return;
+                }
+        }
+        else if (t.artist.isNotEmpty())
+        {
+            for (const auto& [id, name] : artistIdToName_)
+                if (name == t.artist)
+                {
+                    sidebar_.setSelectedId(id);
+                    showSidebarItem(id);
+                    juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
+                    return;
+                }
+        }
     };
     transportBar_.onShuffleToggled = [this](bool on) {
         shuffleOn_ = on;
@@ -376,6 +487,7 @@ MainComponent::MainComponent()
         // incrementally during the scan instead of staying empty until the end.
         refreshSidebarArtists();
         refreshSidebarAlbums();
+        refreshSidebarGenres();
         refreshSidebarPodcasts();
     };
     scanner_.onScanComplete = [this](int total) {
@@ -402,6 +514,7 @@ MainComponent::MainComponent()
         sidebar_.setLibraryLoading(false);
         refreshSidebarArtists();
         refreshSidebarAlbums();
+        refreshSidebarGenres();
         refreshSidebarPodcasts();
         // Always refresh the visible table after a complete scan so the
         // isPodcast split is applied regardless of which scan path was used.
@@ -488,6 +601,30 @@ MainComponent::MainComponent()
     };
     addChildComponent(prefsLockOverlay_);
 
+    editInfoLockOverlay_.onOpenEditInfo = [this] {
+        if (auto* w = activeEditInfoWindow_.getComponent())
+        {
+            w->setCentrePosition(getScreenBounds().getCentre());
+            w->toFront(true);
+        }
+    };
+    editInfoLockOverlay_.onCloseEditInfo = [this] {
+        if (auto* w = activeEditInfoWindow_.getComponent())
+            w->closeButtonPressed();
+    };
+    addChildComponent(editInfoLockOverlay_);
+
+    quitLockOverlay_.onCancelQuit = [this] {
+        if (auto* dlg = activeQuitDialog_.getComponent())
+        {
+            activeQuitDialog_ = nullptr;
+            quitLockOverlay_.setVisible(false);
+            resized();
+            delete dlg;
+        }
+    };
+    addChildComponent(quitLockOverlay_);
+
     // Wire the Library panel in Preferences to the live folder list.
     if (auto* libPanel = preferencesWindow_->libraryPanel())
     {
@@ -528,7 +665,24 @@ MainComponent::MainComponent()
     };
     appleMusicLookup_.onLookupCompleted = [this](TrackInfo t, juce::String summary, bool isBatch) {
         updateTrackInLibrary(t);
+        transportBar_.refreshAlbumArt();
         if (analysisLogWindow_) analysisLogWindow_->log().lookupCompleted(t, summary);
+
+        const bool isEditorLookup = (editorLookupCallback_ && t.file == editorLookupFile_);
+        if (isEditorLookup)
+        {
+            auto cb = std::move(editorLookupCallback_);
+            editorLookupFile_ = juce::File();
+            cb(summary.startsWith("Found"), t);
+        }
+
+        const bool isArtOnly = artOnlyLookupFiles_.count(t.file) > 0;
+        if (isArtOnly) artOnlyLookupFiles_.erase(t.file);
+
+        if (!summary.startsWith("Found") && !isEditorLookup)
+            lookupUndoSnapshots_.erase(t.file);
+        if (!summary.startsWith("Found") && isArtOnly)
+            artUndoSnapshots_.erase(t.file);
 
         if (summary == "Network error" && ! appleMusicLookup_.isSuspended())
         {
@@ -605,6 +759,7 @@ MainComponent::MainComponent()
             updateQueueButtonIcon();
             resized();
         }
+        updateNavButtons();
         saveSessionState();
     };
     queue_.onIndexChanged = [this](int index) {
@@ -648,6 +803,21 @@ MainComponent::MainComponent()
             sidebar_.setSelectedId(1);
             refreshCurrentView();
         }
+    };
+    sidebar_.onDuplicatePlaylist = [this](int sidebarId) {
+        const auto* pl = playlistStore_->findById(sidebarId - 1000);
+        if (!pl) return;
+        const int newId = playlistStore_->createPlaylist(pl->name + " copy");
+        playlistStore_->addTracksToPlaylist(newId, pl->trackPaths);
+    };
+    sidebar_.onCreatePlaylistFromItem = [this](int sidebarId, juce::String name) {
+        const auto tracks = getTracksForSidebar(sidebarId);
+        if (tracks.empty()) return;
+        const int newId = playlistStore_->createPlaylist(name);
+        std::vector<juce::String> paths;
+        paths.reserve(tracks.size());
+        for (const auto& t : tracks) paths.push_back(t.file.getFullPathName());
+        playlistStore_->addTracksToPlaylist(newId, paths);
     };
     refreshSidebarPlaylists();
 
@@ -717,6 +887,7 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
     DBG("MainComponent destructor begin (sessionRestored=" + juce::String((int) sessionRestored_) + ")");
     stopTimer();
     removeKeyListener(this);
@@ -763,6 +934,7 @@ void MainComponent::timerCallback()
     {
         refreshSidebarArtists();
         refreshSidebarAlbums();
+        refreshSidebarGenres();
         refreshSidebarPodcasts();
         refreshCurrentView();
     }
@@ -771,45 +943,92 @@ void MainComponent::timerCallback()
 void MainComponent::updateTrackInLibrary(const TrackInfo& updated)
 {
     for (auto& t : fullLibrary_)
-    {
-        if (t.file == updated.file)
-        {
-            t = updated;
-            break;
-        }
-    }
+        if (t.file == updated.file) { t = updated; break; }
+
     libraryTable_.updateTrack(updated);
+    transportBar_.updateCurrentTrackInfo(updated);
     refreshSidebarArtists();
     refreshSidebarAlbums();
+    refreshSidebarGenres();
     refreshSidebarPodcasts();
 
-    // On an artist view the edit may have removed the selected artist (e.g.
-    // the only track by that artist was renamed). Re-resolve the sidebar
-    // selection to an artist that still exists and refresh the library view
-    // so what's shown matches what's highlighted.
-    if (activeSidebarId_ >= 2000 && activeSidebarId_ < 3000)
+    // If the edited track is no longer in the current categorical view (because
+    // its artist/album/genre changed), navigate to the view that now contains it.
+    const bool inDynamicView = (activeSidebarId_ >= 2000 && activeSidebarId_ < 3000)
+                             || (activeSidebarId_ >= 3000 && activeSidebarId_ < 4000)
+                             || (activeSidebarId_ >= 5000 && activeSidebarId_ < 6000);
+    if (inDynamicView)
     {
-        if (artistIdToName_.find(activeSidebarId_) == artistIdToName_.end())
+        bool trackStillHere = false;
+        for (const auto& t : getTracksForSidebar(activeSidebarId_))
+            if (t.file == updated.file) { trackStillHere = true; break; }
+
+        if (!trackStillHere)
         {
-            if (!artistIdToName_.empty())
+            int newId = 1;
+            if (activeSidebarId_ >= 2000 && activeSidebarId_ < 3000)
             {
-                // Pick the highest id that doesn't exceed the old one (so the
-                // sidebar selection naturally drops to the artist that slid
-                // into the now-removed slot); fall back to the last artist.
-                int replacement = artistIdToName_.rbegin()->first;
                 for (const auto& [id, name] : artistIdToName_)
-                    if (id <= activeSidebarId_) replacement = id;
-                activeSidebarId_ = replacement;
+                    if (name == updated.artist) { newId = id; break; }
             }
-            else
+            else if (activeSidebarId_ >= 3000 && activeSidebarId_ < 4000)
             {
-                activeSidebarId_ = 1;
+                for (const auto& [id, info] : albumIdToInfo_)
+                    if (info.artist == updated.artist && info.album == updated.album)
+                        { newId = id; break; }
             }
-            sidebar_.setSelectedId(activeSidebarId_);
+            else if (activeSidebarId_ >= 5000 && activeSidebarId_ < 6000)
+            {
+                if (updated.genre.isEmpty())
+                    newId = Constants::noGenreId;
+                else
+                    for (const auto& [id, name] : genreIdToName_)
+                        if (name == updated.genre) { newId = id; break; }
+            }
+            activeSidebarId_ = newId;
+            sidebar_.setSelectedId(newId);
         }
-        refreshCurrentView();
-        updatePlayingHighlight();
     }
+
+    // Fix the transport bar's "Playing from" link if the source name changed
+    // (e.g. the only track for an artist was renamed, making the old artist disappear).
+    if (queue_.hasCurrent() && queue_.current().file == updated.file)
+    {
+        const auto qsrc = queue_.currentSource();
+        if (qsrc.sidebarId >= 2000 && qsrc.sidebarId < 3000)
+        {
+            bool nameFound = false;
+            for (const auto& [id, name] : artistIdToName_)
+                if (name == qsrc.name) { nameFound = true; break; }
+            if (!nameFound)
+                for (const auto& [id, name] : artistIdToName_)
+                    if (name == updated.artist) { transportBar_.setPlayingFrom(name, id); break; }
+        }
+        else if (qsrc.sidebarId >= 3000 && qsrc.sidebarId < 4000)
+        {
+            bool nameFound = false;
+            for (const auto& [id, info] : albumIdToInfo_)
+                if (info.artist == updated.artist && info.album == updated.album)
+                    { nameFound = true; break; }
+            if (!nameFound)
+                for (const auto& [id, info] : albumIdToInfo_)
+                    if (info.artist == updated.artist && info.album == updated.album)
+                    {
+                        const juce::String label = (updated.artist.isNotEmpty() ? updated.artist : "Unknown Artist")
+                                                 + " - " + updated.album;
+                        transportBar_.setPlayingFrom(label, id);
+                        break;
+                    }
+        }
+    }
+
+    refreshCurrentView();
+    updatePlayingHighlight();
+
+    // Scroll the library to show the edited track in its new position.
+    juce::MessageManager::callAsync([this, file = updated.file] {
+        libraryTable_.scrollToFile(file);
+    });
 }
 
 void MainComponent::scrollSelectedSidebarItemIntoView()
@@ -874,6 +1093,7 @@ void MainComponent::refreshCurrentView()
     else if (activeSidebarId_ >= 2000 && activeSidebarId_ < 3000)  mode = VM::Artist;
     else if (activeSidebarId_ >= 3000 && activeSidebarId_ < 4000)  mode = VM::Album;
     else if (activeSidebarId_ >= 4000 && activeSidebarId_ < 5000)  mode = VM::Podcast;
+    else if (activeSidebarId_ >= 5000 && activeSidebarId_ < 6000)  mode = VM::Library;
     else if (activeSidebarId_ >= 1000 && activeSidebarId_ < 2000)  mode = VM::Playlist;
     libraryTable_.setViewMode(mode);
 
@@ -939,6 +1159,21 @@ void MainComponent::refreshCurrentView()
             if (t.album == album && t.artist == artist)
                 tracks.push_back(t);
 
+        libraryTable_.setTracks(tracks);
+    }
+    else if (activeSidebarId_ >= 5000 && activeSidebarId_ < 6000)
+    {
+        const auto it = genreIdToName_.find(activeSidebarId_);
+        if (it == genreIdToName_.end())
+        {
+            libraryTable_.clearTracks();
+            return;
+        }
+        const juce::String& genre = it->second;
+        std::vector<TrackInfo> tracks;
+        for (const auto& t : fullLibrary_)
+            if (!t.isPodcast && t.genre == genre)
+                tracks.push_back(t);
         libraryTable_.setTracks(tracks);
     }
     else
@@ -1015,6 +1250,21 @@ std::vector<TrackInfo> MainComponent::getTracksForSidebar(int sidebarId) const
                 if (t.album == album && t.artist == artist) result.push_back(t);
         }
     }
+    else if (sidebarId >= 5000 && sidebarId < 6000)
+    {
+        if (sidebarId == Constants::noGenreId)
+        {
+            for (const auto& t : fullLibrary_)
+                if (!t.isPodcast && t.genre.isEmpty()) result.push_back(t);
+        }
+        else
+        {
+            const auto it = genreIdToName_.find(sidebarId);
+            if (it != genreIdToName_.end())
+                for (const auto& t : fullLibrary_)
+                    if (!t.isPodcast && t.genre == it->second) result.push_back(t);
+        }
+    }
     else if (sidebarId >= 1000 && sidebarId < 2000)
     {
         const auto* pl = playlistStore_->findById(sidebarId - 1000);
@@ -1029,6 +1279,14 @@ std::vector<TrackInfo> MainComponent::getTracksForSidebar(int sidebarId) const
 
 void MainComponent::refreshSidebarAlbums()
 {
+    const bool activeInRange = (activeSidebarId_ >= 3000 && activeSidebarId_ < 4000);
+    juce::String prevActiveName;
+    if (activeInRange)
+        prevActiveName = sourceNameForSidebar(activeSidebarId_);
+
+    const auto qsrc = queue_.hasCurrent() ? queue_.currentSource() : PlayQueue::QueueSource{};
+    const bool srcInRange = (qsrc.sidebarId >= 3000 && qsrc.sidebarId < 4000);
+
     // Collect unique (artist, album) pairs using the "ARTIST - ALBUM" label
     // as the sort key so the sidebar order matches the label order.
     struct Item { juce::String artist, album, label; };
@@ -1052,16 +1310,43 @@ void MainComponent::refreshSidebarAlbums()
     int id = 3000;
     for (const auto& it : items)
     {
-        if (id >= 4000) break;   // keep within reserved range
+        if (id >= 4000) break;
         albumIdToInfo_[id] = { it.artist, it.album };
         sidebarItems.push_back({ id, it.label });
         ++id;
     }
     sidebar_.setAlbums(sidebarItems);
+
+    // Remap activeSidebarId_ if the label at this ID has shifted.
+    if (activeInRange && prevActiveName.isNotEmpty())
+        for (const auto& [newId, label] : sidebarItems)
+            if (label == prevActiveName && newId != activeSidebarId_)
+            {
+                activeSidebarId_ = newId;
+                sidebar_.setSelectedId(newId);
+                break;
+            }
+
+    if (srcInRange && qsrc.name.isNotEmpty())
+        for (const auto& [newId, label] : sidebarItems)
+            if (label == qsrc.name && newId != qsrc.sidebarId)
+            {
+                transportBar_.setPlayingFrom(qsrc.name, newId);
+                break;
+            }
 }
 
 void MainComponent::refreshSidebarPodcasts()
 {
+    const bool activeInRange = (activeSidebarId_ >= 4000 && activeSidebarId_ < 5000);
+    juce::String prevActiveName;
+    if (activeInRange)
+        if (auto it = podcastIdToName_.find(activeSidebarId_); it != podcastIdToName_.end())
+            prevActiveName = it->second;
+
+    const auto qsrc = queue_.hasCurrent() ? queue_.currentSource() : PlayQueue::QueueSource{};
+    const bool srcInRange = (qsrc.sidebarId >= 4000 && qsrc.sidebarId < 5000);
+
     std::set<juce::String> unique;
     for (const auto& t : fullLibrary_)
         if (t.isPodcast && t.podcast.isNotEmpty())
@@ -1083,6 +1368,23 @@ void MainComponent::refreshSidebarPodcasts()
         ++id;
     }
     sidebar_.setPodcasts(items);
+
+    if (activeInRange && prevActiveName.isNotEmpty())
+        for (const auto& [newId, name] : podcastIdToName_)
+            if (name == prevActiveName && newId != activeSidebarId_)
+            {
+                activeSidebarId_ = newId;
+                sidebar_.setSelectedId(newId);
+                break;
+            }
+
+    if (srcInRange && qsrc.name.isNotEmpty())
+        for (const auto& [newId, name] : podcastIdToName_)
+            if (name == qsrc.name && newId != qsrc.sidebarId)
+            {
+                transportBar_.setPlayingFrom(qsrc.name, newId);
+                break;
+            }
 }
 
 void MainComponent::savePodcastFolders()
@@ -1127,6 +1429,16 @@ void MainComponent::setPodcastFolders(std::vector<juce::File> folders)
 
 void MainComponent::refreshSidebarArtists()
 {
+    // Capture names for any IDs we need to remap after the rebuild.
+    const bool activeInRange = (activeSidebarId_ >= 2000 && activeSidebarId_ < 3000);
+    juce::String prevActiveName;
+    if (activeInRange)
+        if (auto it = artistIdToName_.find(activeSidebarId_); it != artistIdToName_.end())
+            prevActiveName = it->second;
+
+    const auto qsrc = queue_.hasCurrent() ? queue_.currentSource() : PlayQueue::QueueSource{};
+    const bool srcInRange = (qsrc.sidebarId >= 2000 && qsrc.sidebarId < 3000);
+
     // Collect unique non-empty artist names (non-podcast tracks only), sorted case-insensitively.
     std::set<juce::String> unique;
     for (const auto& t : fullLibrary_)
@@ -1135,7 +1447,6 @@ void MainComponent::refreshSidebarArtists()
 
     std::vector<juce::String> sorted(unique.begin(), unique.end());
     std::sort(sorted.begin(), sorted.end(), [](const juce::String& a, const juce::String& b) {
-        // Second arg is isCaseSensitive; false mixes upper/lower case artists.
         return a.compareNatural(b, false) < 0;
     });
 
@@ -1144,12 +1455,67 @@ void MainComponent::refreshSidebarArtists()
     int id = 2000;
     for (const auto& name : sorted)
     {
-        if (id >= 3000) break;   // keep within the reserved 2000..2999 range
+        if (id >= 3000) break;
         artistIdToName_[id] = name;
         items.push_back({ id, name });
         ++id;
     }
     sidebar_.setArtists(items);
+
+    // Remap activeSidebarId_ if it drifted due to insertion/removal shifting positions.
+    if (activeInRange && prevActiveName.isNotEmpty())
+        for (const auto& [newId, name] : artistIdToName_)
+            if (name == prevActiveName && newId != activeSidebarId_)
+            {
+                activeSidebarId_ = newId;
+                sidebar_.setSelectedId(newId);
+                break;
+            }
+
+    // Remap the transport bar's playing-from ID to match the new assignment.
+    if (srcInRange && qsrc.name.isNotEmpty())
+        for (const auto& [newId, name] : artistIdToName_)
+            if (name == qsrc.name && newId != qsrc.sidebarId)
+            {
+                transportBar_.setPlayingFrom(qsrc.name, newId);
+                break;
+            }
+}
+
+void MainComponent::refreshSidebarGenres()
+{
+    bool hasNoGenre = false;
+    std::set<juce::String> unique;
+    for (const auto& t : fullLibrary_)
+    {
+        if (t.isPodcast) continue;
+        if (t.genre.isEmpty()) hasNoGenre = true;
+        else                   unique.insert(t.genre);
+    }
+
+    std::vector<juce::String> sorted(unique.begin(), unique.end());
+    std::sort(sorted.begin(), sorted.end(), [](const juce::String& a, const juce::String& b) {
+        return a.compareNatural(b, false) < 0;
+    });
+
+    genreIdToName_.clear();
+    std::vector<std::pair<int, juce::String>> items;
+
+    if (hasNoGenre)
+    {
+        genreIdToName_[Constants::noGenreId] = {};
+        items.push_back({ Constants::noGenreId, "(no genre)" });
+    }
+
+    int id = 5000;
+    for (const auto& name : sorted)
+    {
+        if (id >= Constants::noGenreId) break;   // leave 5999 reserved
+        genreIdToName_[id] = name;
+        items.push_back({ id, name });
+        ++id;
+    }
+    sidebar_.setGenres(items);
 }
 
 void MainComponent::handleTracksDroppedOnPlaylist(int sidebarId,
@@ -1234,13 +1600,31 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track)
         LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
     };
 
-    juce::DialogWindow::LaunchOptions opts;
-    opts.content.setOwned(editor);
-    opts.dialogTitle            = "Edit Info";
-    opts.dialogBackgroundColour = juce::Colour(0xff1e1e1e);
-    opts.useNativeTitleBar      = true;
-    opts.resizable              = false;
-    opts.launchAsync();
+    editor->onLookupRequested = [this](const TrackInfo& t, std::function<void(bool, TrackInfo)> cb) {
+        editorLookupFile_     = t.file;
+        editorLookupCallback_ = std::move(cb);
+        appleMusicLookup_.enqueue(t, true);
+    };
+
+    auto* dw = new EditInfoDialogWindow("Edit Info", juce::Colour(0xff1e1e1e));
+    dw->setUsingNativeTitleBar(true);
+    dw->setResizable(false, false);
+    dw->setContentOwned(editor, true);
+    dw->centreWithSize(editor->getWidth(), editor->getHeight());
+    activeEditInfoWindow_ = dw;
+
+    editInfoLockOverlay_.setVisible(true);
+    editInfoLockOverlay_.toFront(false);
+    resized();
+
+    dw->enterModalState(true,
+        juce::ModalCallbackFunction::create([this, dw](int) {
+            activeEditInfoWindow_ = nullptr;
+            editInfoLockOverlay_.setVisible(false);
+            resized();
+            delete dw;
+        }),
+        false);
 }
 
 void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
@@ -1255,13 +1639,25 @@ void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
         LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
     };
 
-    juce::DialogWindow::LaunchOptions opts;
-    opts.content.setOwned(editor);
-    opts.dialogTitle            = "Edit Info";
-    opts.dialogBackgroundColour = juce::Colour(0xff1e1e1e);
-    opts.useNativeTitleBar      = true;
-    opts.resizable              = false;
-    opts.launchAsync();
+    auto* dw = new EditInfoDialogWindow("Edit Info", juce::Colour(0xff1e1e1e));
+    dw->setUsingNativeTitleBar(true);
+    dw->setResizable(false, false);
+    dw->setContentOwned(editor, true);
+    dw->centreWithSize(editor->getWidth(), editor->getHeight());
+    activeEditInfoWindow_ = dw;
+
+    editInfoLockOverlay_.setVisible(true);
+    editInfoLockOverlay_.toFront(false);
+    resized();
+
+    dw->enterModalState(true,
+        juce::ModalCallbackFunction::create([this, dw](int) {
+            activeEditInfoWindow_ = nullptr;
+            editInfoLockOverlay_.setVisible(false);
+            resized();
+            delete dw;
+        }),
+        false);
 }
 
 void MainComponent::setupAudioEngineCallbacks()
@@ -1301,6 +1697,15 @@ void MainComponent::setupAudioEngineCallbacks()
             transportBar_.clearTrack();
             libraryTable_.setPlayingFile({});
             nowPlaying_.clearNowPlaying();
+            updateNavButtons();
+        }
+    };
+
+    engine_.onTrackFailed = [this] {
+        if (queue_.hasNext())
+        {
+            queue_.advanceToNext();
+            playCurrentQueueItem();
         }
     };
 
@@ -1399,6 +1804,135 @@ void MainComponent::PrefsLockOverlay::resized()
     closeBtn_.setBounds(row.removeFromLeft(btnW));
 }
 
+// ----------------------------------------------------------------------------
+// EditInfoLockOverlay
+// ----------------------------------------------------------------------------
+
+MainComponent::EditInfoLockOverlay::EditInfoLockOverlay()
+{
+    setInterceptsMouseClicks(true, true);
+
+    message_.setFont(juce::Font(juce::FontOptions().withHeight(18.0f)).boldened());
+    message_.setColour(juce::Label::textColourId, Constants::Color::textPrimary);
+    message_.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(message_);
+
+    auto styleButton = [](juce::TextButton& b) {
+        b.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
+        b.setColour(juce::TextButton::textColourOffId, Constants::Color::textPrimary);
+    };
+    styleButton(openBtn_);
+    styleButton(closeBtn_);
+    openBtn_.onClick  = [this] { if (onOpenEditInfo)  onOpenEditInfo(); };
+    closeBtn_.onClick = [this] { if (onCloseEditInfo) onCloseEditInfo(); };
+    addAndMakeVisible(openBtn_);
+    addAndMakeVisible(closeBtn_);
+}
+
+void MainComponent::EditInfoLockOverlay::paint(juce::Graphics& g)
+{
+    g.fillAll(juce::Colours::black.withAlpha(0.55f));
+
+    constexpr int msgH   = 28;
+    constexpr int gap    = 12;
+    constexpr int btnH   = 32;
+    constexpr int btnW   = 180;
+    constexpr int btnGap = 12;
+    constexpr int padX   = 22;
+    constexpr int padY   = 16;
+
+    const int groupW = btnW * 2 + btnGap;
+    const int groupH = msgH + gap + btnH;
+    const auto panel = getLocalBounds()
+                          .withSizeKeepingCentre(groupW + padX * 2,
+                                                 groupH + padY * 2)
+                          .toFloat();
+
+    g.setColour(Constants::Color::background);
+    g.fillRoundedRectangle(panel, 8.0f);
+
+    g.setColour(Constants::Color::border);
+    g.drawRoundedRectangle(panel.reduced(0.5f), 8.0f, 1.0f);
+}
+
+void MainComponent::EditInfoLockOverlay::resized()
+{
+    constexpr int msgH   = 28;
+    constexpr int gap    = 12;
+    constexpr int btnH   = 32;
+    constexpr int btnW   = 180;
+    constexpr int btnGap = 12;
+
+    const int groupW = btnW * 2 + btnGap;
+    const int groupH = msgH + gap + btnH;
+    auto area = getLocalBounds().withSizeKeepingCentre(groupW, groupH);
+
+    message_.setBounds(area.removeFromTop(msgH));
+    area.removeFromTop(gap);
+    auto row = area.removeFromTop(btnH);
+    openBtn_.setBounds(row.removeFromLeft(btnW));
+    row.removeFromLeft(btnGap);
+    closeBtn_.setBounds(row.removeFromLeft(btnW));
+}
+
+// ----------------------------------------------------------------------------
+// QuitLockOverlay
+// ----------------------------------------------------------------------------
+
+MainComponent::QuitLockOverlay::QuitLockOverlay()
+{
+    setInterceptsMouseClicks(true, true);
+
+    message_.setFont(juce::Font(juce::FontOptions().withHeight(18.0f)).boldened());
+    message_.setColour(juce::Label::textColourId, Constants::Color::textPrimary);
+    message_.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(message_);
+
+    cancelBtn_.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
+    cancelBtn_.setColour(juce::TextButton::textColourOffId, Constants::Color::textPrimary);
+    cancelBtn_.onClick = [this] { if (onCancelQuit) onCancelQuit(); };
+    addAndMakeVisible(cancelBtn_);
+}
+
+void MainComponent::QuitLockOverlay::paint(juce::Graphics& g)
+{
+    g.fillAll(juce::Colours::black.withAlpha(0.55f));
+
+    constexpr int msgH = 28;
+    constexpr int gap  = 12;
+    constexpr int btnH = 32;
+    constexpr int btnW = 180;
+    constexpr int padX = 22;
+    constexpr int padY = 16;
+
+    const int groupW = btnW;
+    const int groupH = msgH + gap + btnH;
+    const auto panel = getLocalBounds()
+                          .withSizeKeepingCentre(groupW + padX * 2,
+                                                 groupH + padY * 2)
+                          .toFloat();
+
+    g.setColour(Constants::Color::background);
+    g.fillRoundedRectangle(panel, 8.0f);
+    g.setColour(Constants::Color::border);
+    g.drawRoundedRectangle(panel.reduced(0.5f), 8.0f, 1.0f);
+}
+
+void MainComponent::QuitLockOverlay::resized()
+{
+    constexpr int msgH = 28;
+    constexpr int gap  = 12;
+    constexpr int btnH = 32;
+    constexpr int btnW = 180;
+
+    const int groupH = msgH + gap + btnH;
+    auto area = getLocalBounds().withSizeKeepingCentre(btnW, groupH);
+
+    message_.setBounds(area.removeFromTop(msgH));
+    area.removeFromTop(gap);
+    cancelBtn_.setBounds(area.removeFromTop(btnH));
+}
+
 void MainComponent::resized()
 {
     auto bounds = getLocalBounds();
@@ -1433,39 +1967,27 @@ void MainComponent::resized()
 
     // Viewport doesn't auto-size its viewed component's width, so sync it to the
     // visible area (shrunk when a vertical scrollbar is shown). layoutItems()
-    // handles the height.
+    // handles the height, but it only runs when setSize triggers resized(). If
+    // the viewport grows taller while the width is unchanged, JUCE skips the
+    // call, leaving a void. Force a layout pass in that case too.
     const int sbVisibleW = sidebarViewport_.getMaximumVisibleWidth();
+    const int sbVisibleH = sidebarViewport_.getMaximumVisibleHeight();
     if (sbVisibleW > 0 && sidebar_.getWidth() != sbVisibleW)
-        sidebar_.setSize(sbVisibleW, juce::jmax(sidebar_.getHeight(), 1));
+        sidebar_.setSize(sbVisibleW, juce::jmax(sidebar_.getHeight(), sbVisibleH));
+    else if (sbVisibleH > sidebar_.getHeight())
+        sidebar_.setSize(sidebar_.getWidth(), sbVisibleH);
 
     // Library fills remaining space
     libraryTable_.setBounds(bounds);
 
-    // Pin button: normally sits in the void reserved at the right end of the
-    // library search bar. As the window approaches minimum height (mini player
-    // territory), it slides leftward so it lands directly above the speaker
-    // icon in the transport bar.
-    constexpr int pinSize         = 17;
-    constexpr int pinRightPad     = 7;
-    constexpr int librarySearchH  = 30;   // matches LibraryTableComponent::searchBarHeight
+    // Pin button: always sits above the speaker icon in the transport bar.
+    constexpr int pinSize = 17;
     // X-distance from the window's right edge to the speaker icon's centre.
-    // Must stay in sync with TransportBar::resized()'s pad + volAreaW geometry
-    // (10pt edge pad + 22pt speaker + 6pt gap + 20pt slider, centred at
-    // windowRight - 10 - 48 + 11 = windowRight - 47).
+    // Must stay in sync with TransportBar::resized()'s pad + volAreaW geometry.
     constexpr int speakerCentreFromRight = 47;
-
-    const int normalPinX  = libraryTable_.getRight() - pinSize - pinRightPad;
-    const int compactPinX = getWidth() - speakerCentreFromRight - pinSize / 2 - 1;
-    const int normalPinY  = libraryTable_.getY() + (librarySearchH - pinSize) / 2;
-    const int compactPinY = normalPinY + 6;   // small downward nudge to sit closer to the speaker
-
-    const float pinShiftT = juce::jlimit(0.0f, 1.0f,
-        (static_cast<float>(Constants::compactHeight) - static_cast<float>(getHeight()))
-            / static_cast<float>(Constants::compactHeight - Constants::minWindowHeight));
-    const int pinX = normalPinX
-                   + static_cast<int>(pinShiftT * (compactPinX - normalPinX));
-    const int pinY = normalPinY
-                   + static_cast<int>(pinShiftT * (compactPinY - normalPinY));
+    const int pinX = getWidth() - speakerCentreFromRight - pinSize / 2 - 1;
+    const int thirdH = transportBar_.getHeight() / 3;
+    const int pinY   = transportBar_.getY() + (thirdH - pinSize) / 2 + 5;
 
     pinButton_.setBounds(pinX, pinY, pinSize, pinSize);
     pinButton_.toFront(false);
@@ -1482,6 +2004,14 @@ void MainComponent::resized()
     prefsLockOverlay_.setBounds(getLocalBounds());
     if (prefsLockOverlay_.isVisible())
         prefsLockOverlay_.toFront(false);
+
+    editInfoLockOverlay_.setBounds(getLocalBounds());
+    if (editInfoLockOverlay_.isVisible())
+        editInfoLockOverlay_.toFront(false);
+
+    quitLockOverlay_.setBounds(getLocalBounds());
+    if (quitLockOverlay_.isVisible())
+        quitLockOverlay_.toFront(false);
 }
 
 bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
@@ -1644,6 +2174,13 @@ juce::String MainComponent::sourceNameForSidebar(int sidebarId) const
         return (artist.isNotEmpty() ? artist : juce::String("Unknown Artist"))
              + " - " + album;
     }
+    if (sidebarId == Constants::noGenreId)
+        return "(no genre)";
+    if (sidebarId >= 5000 && sidebarId < 6000)
+    {
+        const auto it = genreIdToName_.find(sidebarId);
+        return it != genreIdToName_.end() ? it->second : juce::String("Genre");
+    }
     const auto* pl = playlistStore_->findById(sidebarId - 1000);
     return pl ? pl->name : "Playlist";
 }
@@ -1687,6 +2224,12 @@ void MainComponent::activateRow(int rowIndex, const std::vector<TrackInfo>& libr
     playCurrentQueueItem();
 }
 
+void MainComponent::updateNavButtons()
+{
+    transportBar_.setCanGoPrev(queue_.hasCurrent());
+    transportBar_.setCanGoNext(queue_.hasNext());
+}
+
 void MainComponent::playCurrentQueueItem()
 {
     if (!queue_.hasCurrent()) return;
@@ -1697,6 +2240,7 @@ void MainComponent::playCurrentQueueItem()
     const auto src = queue_.currentSource();
     transportBar_.setPlayingFrom(src.name, src.sidebarId);
     queueView_.refresh(queue_);
+    updateNavButtons();
 }
 
 void MainComponent::playNext()
@@ -1710,11 +2254,11 @@ void MainComponent::playNext()
 
 void MainComponent::playPrev()
 {
-    if (engine_.elapsedSeconds() > 3.0)
+    if (engine_.elapsedSeconds() > 3.0 || !queue_.hasPrev())
     {
         engine_.seekToNormalized(0.0);
     }
-    else if (queue_.hasPrev())
+    else
     {
         queue_.retreatToPrev();
         playCurrentQueueItem();
@@ -2170,6 +2714,95 @@ void MainComponent::restoreSessionState()
     // processed, meaning the sidebar's item bounds + viewport height are
     // final by the time we compute the scroll position.
     juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
+}
+
+void MainComponent::requestQuit(std::function<void()> onConfirmed)
+{
+    // Dismiss any open modal dialogs before proceeding.
+    if (activeEditInfoWindow_ != nullptr)
+        activeEditInfoWindow_->exitModalState(0);
+    if (preferencesWindow_ && preferencesWindow_->isVisible())
+        preferencesWindow_->setVisible(false);
+
+    bool ask = true;
+    if (auto* s = appProperties_.getUserSettings())
+        ask = s->getBoolValue(MiscPreferencesPanel::kAskBeforeQuittingKey, true);
+
+    if (!ask || !engine_.isPlaying())
+    {
+        if (onConfirmed) onConfirmed();
+        return;
+    }
+
+    // Custom modal dialog so we control all padding and can use a native title bar.
+    struct QuitDialog : public juce::Component
+    {
+        juce::Label        msg      { {}, "Quitting will end playback immediately." };
+        juce::ToggleButton dontShow { "Don't show again" };
+        juce::TextButton   cancelBtn { "Cancel" };
+        juce::TextButton   quitBtn   { "Quit" };
+
+        enum { pad = 18, rowH = 22, btnH = 28 };
+
+        QuitDialog()
+        {
+            msg.setColour(juce::Label::textColourId, juce::Colours::white);
+            addAndMakeVisible(msg);
+            addAndMakeVisible(dontShow);
+            addAndMakeVisible(cancelBtn);
+            addAndMakeVisible(quitBtn);
+            setSize(320, pad + rowH + 10 + rowH + 16 + btnH + pad);
+        }
+
+        void paint(juce::Graphics& g) override
+        {
+            g.fillAll(getLookAndFeel().findColour(juce::AlertWindow::backgroundColourId));
+        }
+
+        void resized() override
+        {
+            int y = pad;
+            msg.setBounds(pad, y, getWidth() - 2 * pad, rowH);
+            y += rowH + 10;
+            dontShow.setBounds(pad, y, getWidth() - 2 * pad, rowH);
+            y += rowH + 16;
+            const int bw = 80;
+            const int x2 = getWidth() - pad - bw;
+            cancelBtn.setBounds(x2 - bw - 8, y, bw, btnH);
+            quitBtn.setBounds(x2, y, bw, btnH);
+        }
+    };
+
+    auto* dlg      = new QuitDialog();
+    auto* dontShow = &dlg->dontShow;
+    dlg->setName("Confirm Quit");
+
+    auto dismiss = [this, dlg](bool confirmed, std::function<void()> cb) {
+        activeQuitDialog_ = nullptr;
+        quitLockOverlay_.setVisible(false);
+        resized();
+        delete dlg;
+        if (confirmed && cb) cb();
+    };
+
+    dlg->cancelBtn.onClick = [dismiss] { dismiss(false, {}); };
+    dlg->quitBtn.onClick   = [this, dismiss, dontShow, onConfirmed] {
+        if (dontShow->getToggleState())
+            if (auto* s = appProperties_.getUserSettings())
+                s->setValue(MiscPreferencesPanel::kAskBeforeQuittingKey, false);
+        dismiss(true, onConfirmed);
+    };
+
+    dlg->addToDesktop(juce::ComponentPeer::windowHasTitleBar
+                    | juce::ComponentPeer::windowHasDropShadow
+                    | juce::ComponentPeer::windowIsTemporary);
+    dlg->setVisible(true);
+    dlg->setCentrePosition(getScreenBounds().getCentreX(), getScreenBounds().getCentreY());
+
+    activeQuitDialog_ = dlg;
+    quitLockOverlay_.setVisible(true);
+    quitLockOverlay_.toFront(false);
+    resized();
 }
 
 } // namespace FoxPlayer

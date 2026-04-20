@@ -53,6 +53,7 @@ public:
     std::function<void(const TrackInfo&)> onTrackStarted;
     std::function<void()>                onPlaybackStopped;
     std::function<void()>                onTrackFinished;   // natural end-of-track
+    std::function<void()>                onTrackFailed;     // load failed (missing/corrupt file)
     std::function<void()>                onStateChanged;
 
 private:

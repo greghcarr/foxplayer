@@ -50,6 +50,31 @@ void AppleMusicLookup::enqueueAll(const std::vector<TrackInfo>& tracks, bool ove
         startThread(juce::Thread::Priority::low);
 }
 
+void AppleMusicLookup::enqueueArtOnly(const TrackInfo& track)
+{
+    {
+        juce::ScopedLock sl(queueLock_);
+        queue_.push_back(Job{ track, /*overwrite=*/true, /*isBatch=*/false, /*artOnly=*/true });
+    }
+    if (onLookupQueued) onLookupQueued(track);
+    if (! suspended_.load() && ! isThreadRunning())
+        startThread(juce::Thread::Priority::low);
+}
+
+void AppleMusicLookup::enqueueAllArtOnly(const std::vector<TrackInfo>& tracks)
+{
+    {
+        juce::ScopedLock sl(queueLock_);
+        for (const auto& t : tracks)
+            queue_.push_back(Job{ t, /*overwrite=*/true, /*isBatch=*/true, /*artOnly=*/true });
+    }
+    if (onLookupQueued)
+        for (const auto& t : tracks)
+            onLookupQueued(t);
+    if (! suspended_.load() && ! isThreadRunning())
+        startThread(juce::Thread::Priority::low);
+}
+
 void AppleMusicLookup::cancelAll()
 {
     {
@@ -170,9 +195,10 @@ namespace
 
 void AppleMusicLookup::processOne(Job job)
 {
-    TrackInfo       track   = job.track;
+    TrackInfo       track     = job.track;
     const bool      overwrite = job.overwrite;
     const bool      isBatch   = job.isBatch;
+    const bool      artOnly   = job.artOnly;
 
     juce::MessageManager::callAsync([this, t = track]() mutable {
         if (onLookupStarted) onLookupStarted(std::move(t));
@@ -253,45 +279,48 @@ void AppleMusicLookup::processOne(Job job)
         return;
     }
 
-    // Fill in text metadata. With overwrite=false only blank fields are
-    // populated; with overwrite=true any matching Apple Music value replaces
-    // the existing content.
     bool changed = false;
 
-    auto applyString = [&](juce::String& field, const juce::String& value) {
-        if (value.isEmpty()) return;
-        if (! overwrite && ! field.isEmpty()) return;
-        if (field == value) return;
-        field   = value;
-        changed = true;
-    };
-
-    applyString(track.album,  matchObj->getProperty("collectionName").toString());
-    applyString(track.artist, matchObj->getProperty("artistName").toString());
-    applyString(track.genre,  matchObj->getProperty("primaryGenreName").toString());
-    applyString(track.title,  matchObj->getProperty("trackName").toString());
-
-    if (overwrite || track.year.isEmpty())
+    if (! artOnly)
     {
-        const juce::String releaseDate = matchObj->getProperty("releaseDate").toString();
-        if (releaseDate.length() >= 4)
+        // Fill in text metadata. With overwrite=false only blank fields are
+        // populated; with overwrite=true any matching Apple Music value replaces
+        // the existing content.
+        auto applyString = [&](juce::String& field, const juce::String& value) {
+            if (value.isEmpty()) return;
+            if (! overwrite && ! field.isEmpty()) return;
+            if (field == value) return;
+            field   = value;
+            changed = true;
+        };
+
+        applyString(track.album,  matchObj->getProperty("collectionName").toString());
+        applyString(track.artist, matchObj->getProperty("artistName").toString());
+        applyString(track.genre,  matchObj->getProperty("primaryGenreName").toString());
+        applyString(track.title,  matchObj->getProperty("trackName").toString());
+
+        if (overwrite || track.year.isEmpty())
         {
-            const juce::String y = releaseDate.substring(0, 4);
-            if (track.year != y)
+            const juce::String releaseDate = matchObj->getProperty("releaseDate").toString();
+            if (releaseDate.length() >= 4)
             {
-                track.year = y;
-                changed    = true;
+                const juce::String y = releaseDate.substring(0, 4);
+                if (track.year != y)
+                {
+                    track.year = y;
+                    changed    = true;
+                }
             }
         }
-    }
 
-    if ((overwrite || track.trackNumber == 0) && matchObj->hasProperty("trackNumber"))
-    {
-        const int n = static_cast<int>(matchObj->getProperty("trackNumber"));
-        if (n > 0 && n != track.trackNumber)
+        if ((overwrite || track.trackNumber == 0) && matchObj->hasProperty("trackNumber"))
         {
-            track.trackNumber = n;
-            changed           = true;
+            const int n = static_cast<int>(matchObj->getProperty("trackNumber"));
+            if (n > 0 && n != track.trackNumber)
+            {
+                track.trackNumber = n;
+                changed           = true;
+            }
         }
     }
 
@@ -319,7 +348,7 @@ void AppleMusicLookup::processOne(Job job)
         }
     }
 
-    if (changed)
+    if (changed && ! artOnly)
         FoxpFile::save(track);
 
     // A successful match resets the consecutive-failure counter.

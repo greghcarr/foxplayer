@@ -33,11 +33,11 @@ AnalysisLogComponent::AnalysisLogComponent()
     hdr.setColour(juce::TableHeaderComponent::outlineColourId,    Color::border);
 
     const auto nonSortable = juce::TableHeaderComponent::notSortable;
-    hdr.addColumn("Status", colStatus, 100, 80,  140, nonSortable);
-    hdr.addColumn("Title",  colTitle,  240, 120, 500, nonSortable);
-    hdr.addColumn("Artist", colArtist, 180, 80,  400, nonSortable);
-    hdr.addColumn("BPM",    colBpm,     70, 50,  100, nonSortable);
-    hdr.addColumn("Key",    colKey,     60, 40,  100, nonSortable);
+    hdr.addColumn("Status", colStatus, 100, 80,  -1, nonSortable);
+    hdr.addColumn("Title",  colTitle,  240, 120, -1, nonSortable);
+    hdr.addColumn("Artist", colArtist, 180, 80,  -1, nonSortable);
+    hdr.addColumn("BPM",    colBpm,     70, 50,  -1, nonSortable);
+    hdr.addColumn("Key",    colKey,     60, 40,  -1, nonSortable);
 }
 
 int AnalysisLogComponent::findEntryIndex(const juce::File& file, Type type) const

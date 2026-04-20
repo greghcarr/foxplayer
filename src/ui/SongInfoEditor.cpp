@@ -6,6 +6,9 @@ namespace FoxPlayer
 
 using namespace Constants;
 
+static const juce::String kLookupLabel =
+    juce::String("Apple Music ") + juce::String(juce::CharPointer_UTF8("\xf0\x9f\x94\x8d"));
+
 static constexpr int dialogW      = 460;
 static constexpr int labelW       = 76;
 static constexpr int rowH         = 26;
@@ -109,9 +112,14 @@ void SongInfoEditor::init()
                              : juce::String(), false);
         keyEdit_.setText(tracks_[0].musicalKey, false);
 
-        fileLabel_.setText(tracks_[0].file.getFullPathName(), juce::dontSendNotification);
-        fileLabel_.setColour(juce::Label::textColourId, Color::textDim);
-        fileLabel_.setMinimumHorizontalScale(0.5f);
+        fileLabel_.setText(tracks_[0].file.getFullPathName(), false);
+        fileLabel_.setReadOnly(true);
+        fileLabel_.setScrollbarsShown(false);
+        fileLabel_.setColour(juce::TextEditor::backgroundColourId,      juce::Colours::transparentBlack);
+        fileLabel_.setColour(juce::TextEditor::outlineColourId,         juce::Colours::transparentBlack);
+        fileLabel_.setColour(juce::TextEditor::focusedOutlineColourId,  juce::Colours::transparentBlack);
+        fileLabel_.setColour(juce::TextEditor::textColourId,            Color::textDim);
+        fileLabel_.setMouseCursor(juce::MouseCursor::IBeamCursor);
         addAndMakeVisible(fileLabel_);
     }
     else if (mode_ == Mode::SinglePodcast)
@@ -137,9 +145,14 @@ void SongInfoEditor::init()
                                     ? juce::String(tracks_[0].trackNumber)
                                     : juce::String(), false);
 
-        fileLabel_.setText(tracks_[0].file.getFullPathName(), juce::dontSendNotification);
-        fileLabel_.setColour(juce::Label::textColourId, Color::textDim);
-        fileLabel_.setMinimumHorizontalScale(0.5f);
+        fileLabel_.setText(tracks_[0].file.getFullPathName(), false);
+        fileLabel_.setReadOnly(true);
+        fileLabel_.setScrollbarsShown(false);
+        fileLabel_.setColour(juce::TextEditor::backgroundColourId,      juce::Colours::transparentBlack);
+        fileLabel_.setColour(juce::TextEditor::outlineColourId,         juce::Colours::transparentBlack);
+        fileLabel_.setColour(juce::TextEditor::focusedOutlineColourId,  juce::Colours::transparentBlack);
+        fileLabel_.setColour(juce::TextEditor::textColourId,            Color::textDim);
+        fileLabel_.setMouseCursor(juce::MouseCursor::IBeamCursor);
         addAndMakeVisible(fileLabel_);
     }
     else if (mode_ == Mode::MultiMusic)
@@ -221,6 +234,45 @@ void SongInfoEditor::init()
         }
     });
 
+    if (mode_ == Mode::SingleMusic)
+    {
+        lookupButton_.setButtonText(kLookupLabel);
+        lookupButton_.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a2a2a));
+        lookupButton_.setColour(juce::TextButton::textColourOffId, Color::textSecondary);
+        lookupButton_.onClick = [this] {
+            if (lookupSucceeded_)
+            {
+                titleEdit_.setText(snapTitle_,  false);
+                artistEdit_.setText(snapArtist_, false);
+                albumEdit_.setText(snapAlbum_,   false);
+                genreEdit_.setText(snapGenre_,   false);
+                yearEdit_.setText(snapYear_,     false);
+                lookupSucceeded_ = false;
+                lookupButton_.setButtonText(kLookupLabel);
+                return;
+            }
+            if (!onLookupRequested) return;
+            snapTitle_  = titleEdit_.getText();
+            snapArtist_ = artistEdit_.getText();
+            snapAlbum_  = albumEdit_.getText();
+            snapGenre_  = genreEdit_.getText();
+            snapYear_   = yearEdit_.getText();
+            lookupButton_.setButtonText("Looking up...");
+            lookupButton_.setEnabled(false);
+            juce::Component::SafePointer<SongInfoEditor> safeThis(this);
+            onLookupRequested(tracks_[0], [safeThis](bool success, TrackInfo result) {
+                if (auto* self = safeThis.getComponent())
+                {
+                    if (success)
+                        self->fillFromLookup(result);
+                    else
+                        self->lookupFailed();
+                }
+            });
+        };
+        addAndMakeVisible(lookupButton_);
+    }
+
     saveButton_.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
     saveButton_.setColour(juce::TextButton::textColourOffId, Color::textPrimary);
     saveButton_.onClick = [this] { save(); };
@@ -233,6 +285,33 @@ void SongInfoEditor::init()
             dw->exitModalState(0);
     };
     addAndMakeVisible(cancelButton_);
+}
+
+void SongInfoEditor::fillFromLookup(const TrackInfo& result)
+{
+    if (result.title.isNotEmpty())  titleEdit_.setText(result.title,  false);
+    if (result.artist.isNotEmpty()) artistEdit_.setText(result.artist, false);
+    if (result.album.isNotEmpty())  albumEdit_.setText(result.album,   false);
+    if (result.genre.isNotEmpty())  genreEdit_.setText(result.genre,   false);
+    if (result.year.isNotEmpty())   yearEdit_.setText(result.year,     false);
+
+    lookupSucceeded_ = true;
+    lookupButton_.setButtonText("Undo");
+    lookupButton_.setEnabled(true);
+}
+
+void SongInfoEditor::lookupFailed()
+{
+    lookupButton_.setButtonText("Failed");
+    lookupButton_.setEnabled(false);
+    juce::Component::SafePointer<SongInfoEditor> safeThis(this);
+    juce::Timer::callAfterDelay(2000, [safeThis] {
+        if (auto* self = safeThis.getComponent())
+        {
+            self->lookupButton_.setButtonText(kLookupLabel);
+            self->lookupButton_.setEnabled(true);
+        }
+    });
 }
 
 void SongInfoEditor::save()
@@ -402,6 +481,8 @@ void SongInfoEditor::resized()
     cancelButton_.setBounds(btnRow.removeFromRight(btnW));
     btnRow.removeFromRight(8);
     saveButton_.setBounds(btnRow.removeFromRight(btnW));
+    if (mode_ == Mode::SingleMusic)
+        lookupButton_.setBounds(btnRow.removeFromLeft(120));
 }
 
 } // namespace FoxPlayer

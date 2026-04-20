@@ -107,6 +107,7 @@ juce_add_binary_data(FoxPlayerIcons
         resources/icons/list-bullets-fill.svg
         resources/icons/user-fill.svg
         resources/icons/vinyl-record-fill.svg
+        resources/icons/tag-fill.svg
         resources/icons/caret-double-right-fill.svg
         resources/icons/microphone-fill.svg
         resources/fonts/Foxwhelp-Regular.ttf

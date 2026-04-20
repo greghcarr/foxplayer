@@ -27,6 +27,11 @@ public:
     void enqueue(const TrackInfo& track, bool overwrite);
     void enqueueAll(const std::vector<TrackInfo>& tracks, bool overwrite);
 
+    // Art-only variants: query iTunes and download cover art sidecar only.
+    // Metadata fields in the TrackInfo are left untouched and no .foxp is written.
+    void enqueueArtOnly(const TrackInfo& track);
+    void enqueueAllArtOnly(const std::vector<TrackInfo>& tracks);
+
     // Returns true after maxConsecutiveFailures consecutive network errors.
     // While suspended the background thread will not process further jobs.
     bool isSuspended() const { return suspended_.load(); }
@@ -56,6 +61,7 @@ private:
         TrackInfo track;
         bool      overwrite { false };
         bool      isBatch   { false };
+        bool      artOnly   { false };
     };
 
     void run() override;

@@ -24,6 +24,7 @@ SidebarComponent::SidebarComponent()
     playlistIconDrawable_ = loadSvg(BinaryData::listbulletsfill_svg, BinaryData::listbulletsfill_svgSize);
     artistIconDrawable_   = loadSvg(BinaryData::userfill_svg,        BinaryData::userfill_svgSize);
     albumIconDrawable_    = loadSvg(BinaryData::vinylrecordfill_svg, BinaryData::vinylrecordfill_svgSize);
+    genreIconDrawable_    = loadSvg(BinaryData::tagfill_svg,         BinaryData::tagfill_svgSize);
 
     // LIBRARY section: not collapsible
     Section library;
@@ -50,13 +51,13 @@ SidebarComponent::SidebarComponent()
     albums.rightClickable = false;
     sections_.push_back(std::move(albums));
 
-    // PODCASTS section: collapsible, shows one entry per podcast show.
-    Section podcasts;
-    podcasts.heading        = "PODCASTS";
-    podcasts.collapsible    = true;
-    podcasts.collapsed      = true;
-    podcasts.rightClickable = false;
-    sections_.push_back(std::move(podcasts));
+    // GENRES section: collapsible, one entry per unique genre tag.
+    Section genres;
+    genres.heading        = "GENRES";
+    genres.collapsible    = true;
+    genres.collapsed      = true;
+    genres.rightClickable = false;
+    sections_.push_back(std::move(genres));
 
     // PLAYLISTS section: collapsible, right-clickable for "Create New Playlist"
     Section playlists;
@@ -65,11 +66,29 @@ SidebarComponent::SidebarComponent()
     playlists.collapsed      = false;
     playlists.rightClickable = true;
     sections_.push_back(std::move(playlists));
+
+    // PODCASTS section: collapsible, shows one entry per podcast show.
+    Section podcasts;
+    podcasts.heading        = "PODCASTS";
+    podcasts.collapsible    = true;
+    podcasts.collapsed      = true;
+    podcasts.rightClickable = false;
+    sections_.push_back(std::move(podcasts));
+}
+
+void SidebarComponent::setGenres(const std::vector<std::pair<int, juce::String>>& genres)
+{
+    auto& section = sections_[3]; // GENRES is always index 3
+    section.items.clear();
+    for (const auto& [id, name] : genres)
+        section.items.push_back({ name, id, {} });
+    layoutItems();
+    repaint();
 }
 
 void SidebarComponent::setPodcasts(const std::vector<std::pair<int, juce::String>>& podcasts)
 {
-    auto& section = sections_[3]; // PODCASTS is always index 3
+    auto& section = sections_[5]; // PODCASTS is always index 5
     section.items.clear();
     for (const auto& [id, name] : podcasts)
         section.items.push_back({ name, id, {} });
@@ -122,8 +141,10 @@ juce::Rectangle<int> SidebarComponent::boundsForSelectedItem() const
 
 void SidebarComponent::setLibraryLoading(bool loading)
 {
-    if (libraryLoading_ == loading) return;
-    libraryLoading_ = loading;
+    // LIBRARY (0), ARTISTS (1), ALBUMS (2), GENRES (3) all populate from the same scan.
+    for (int i : { 0, 1, 2, 3 })
+        sections_[(size_t)i].loading = loading;
+
     if (loading) startTimerHz(30);
     else         stopTimer();
     repaint();
@@ -233,15 +254,17 @@ void SidebarComponent::drawSectionHeader(juce::Graphics& g, const Section& secti
         drawDisclosureTriangle(g, triX, y + sectionHeaderH / 2, section.collapsed);
     }
 
-    if (libraryLoading_ && section.heading == "LIBRARY")
+    if (section.loading)
     {
-        const juce::Font f2(juce::FontOptions().withHeight(12.0f));
         juce::GlyphArrangement ga;
-        ga.addLineOfText(f2, section.heading, 0.0f, 0.0f);
+        ga.addLineOfText(headingFont, section.heading, 0.0f, 0.0f);
         const float textW = ga.getBoundingBox(0, -1, true).getWidth();
 
-        const float r  = 5.5f;
-        const float cx = static_cast<float>(itemPadL) + textW + 12.0f + r;
+        const float r = 5.5f;
+        // If the section also has a disclosure triangle (ends at textW+12), push
+        // the spinner past it; otherwise use the original offset.
+        const float baseOffset = section.collapsible ? 20.0f : 12.0f;
+        const float cx = static_cast<float>(itemPadL) + textW + baseOffset + r;
         const float cy = static_cast<float>(y + sectionHeaderH / 2);
 
         g.setColour(Color::textDim);
@@ -305,6 +328,7 @@ void SidebarComponent::drawSectionItem(juce::Graphics& g,
       : (item.id >= 2000 && item.id < 3000) ? artistIconDrawable_.get()
       : (item.id >= 3000 && item.id < 4000) ? albumIconDrawable_.get()
       : (item.id >= 4000 && item.id < 5000) ? podcastIconDrawable_.get()
+      : (item.id >= 5000 && item.id < 6000) ? genreIconDrawable_.get()
       :                                       playlistIconDrawable_.get();
     const int iconX = rowBounds.getX() + itemPadL + indicatorW;
     const int iconY = rowBounds.getY() + (rowBounds.getHeight() - iconDim) / 2;
@@ -321,8 +345,12 @@ void SidebarComponent::drawSectionItem(juce::Graphics& g,
     }
 
     const int labelX = iconX + iconDim + iconGap;
-    g.setColour(selected ? Color::textPrimary : Color::textSecondary);
-    g.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)));
+    const bool isDim = (item.id == Constants::noGenreId);
+    g.setColour(selected ? Color::textPrimary
+                : isDim  ? Color::textDim
+                         : Color::textSecondary);
+    g.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)
+                         .withStyle(isDim ? "Italic" : "Regular")));
     g.drawText(item.label,
                labelX, rowBounds.getY(),
                rowBounds.getRight() - labelX - 8,
@@ -549,6 +577,7 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                     {
                         juce::PopupMenu menu;
                         menu.addItem(1, "Rename Playlist");
+                        menu.addItem(3, "Duplicate Playlist");
                         menu.addItem(2, "Delete Playlist");
                         const int capturedId = item.id;
                         menu.showMenuAsync(
@@ -559,6 +588,25 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                                     startRename(capturedId);
                                 else if (result == 2 && onDeletePlaylist)
                                     onDeletePlaylist(capturedId);
+                                else if (result == 3 && onDuplicatePlaylist)
+                                    onDuplicatePlaylist(capturedId);
+                            });
+                    }
+                    else if (e.mods.isPopupMenu() && (
+                        (item.id >= 2000 && item.id < 3000) ||
+                        (item.id >= 3000 && item.id < 4000) ||
+                        (item.id >= 5000 && item.id < 6000)))
+                    {
+                        juce::PopupMenu menu;
+                        menu.addItem(1, "Create Playlist");
+                        const int capturedId     = item.id;
+                        const juce::String label = item.label;
+                        menu.showMenuAsync(
+                            juce::PopupMenu::Options{}.withTargetScreenArea(
+                                juce::Rectangle<int>().withPosition(e.getScreenPosition())),
+                            [this, capturedId, label](int result) {
+                                if (result == 1 && onCreatePlaylistFromItem)
+                                    onCreatePlaylistFromItem(capturedId, label);
                             });
                     }
                     else if (!e.mods.isPopupMenu())
@@ -567,6 +615,22 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                     }
                     return;
                 }
+            }
+        }
+    }
+}
+
+void SidebarComponent::mouseDoubleClick(const juce::MouseEvent& e)
+{
+    for (const auto& section : sections_)
+    {
+        if (section.collapsed) continue;
+        for (const auto& item : section.items)
+        {
+            if (item.id >= 1000 && item.id < 2000 && item.bounds.contains(e.x, e.y))
+            {
+                startRename(item.id);
+                return;
             }
         }
     }

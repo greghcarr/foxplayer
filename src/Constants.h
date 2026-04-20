@@ -49,6 +49,9 @@ namespace FoxPlayer::Constants
 
     static constexpr int rowHeight = 24;
 
+    // Sidebar dynamic ID ranges
+    static constexpr int noGenreId = 5999;  // reserved; real genres use 5000..5998
+
     // Scanner
     static constexpr int scannerBatchSize = 50;
 

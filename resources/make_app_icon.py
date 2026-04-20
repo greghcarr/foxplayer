@@ -36,15 +36,24 @@ ImageDraw.Draw(mask).rounded_rectangle(
     fill=255,
 )
 
-# ---- Drop shadow beneath the squircle ----------------------------------------
-shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-ImageDraw.Draw(shadow).rounded_rectangle(
-    (INSET, INSET + 24, INSET + GRID_SIZE, INSET + GRID_SIZE + 24),
+# ---- Drop shadow beneath the squircle (two passes: tight core + wide halo) ---
+shadow_halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+ImageDraw.Draw(shadow_halo).rounded_rectangle(
+    (INSET, INSET + 20, INSET + GRID_SIZE, INSET + GRID_SIZE + 20),
     CORNER_RADIUS,
-    fill=(0, 0, 0, 130),
+    fill=(0, 0, 0, 110),
 )
-shadow = shadow.filter(ImageFilter.GaussianBlur(radius=22))
-img = Image.alpha_composite(img, shadow)
+shadow_halo = shadow_halo.filter(ImageFilter.GaussianBlur(radius=42))
+img = Image.alpha_composite(img, shadow_halo)
+
+shadow_core = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+ImageDraw.Draw(shadow_core).rounded_rectangle(
+    (INSET, INSET + 28, INSET + GRID_SIZE, INSET + GRID_SIZE + 28),
+    CORNER_RADIUS,
+    fill=(0, 0, 0, 200),
+)
+shadow_core = shadow_core.filter(ImageFilter.GaussianBlur(radius=20))
+img = Image.alpha_composite(img, shadow_core)
 
 # ---- Squircle body -----------------------------------------------------------
 body = Image.new("RGBA", (W, H), (0, 0, 0, 0))

@@ -10,7 +10,8 @@ namespace FoxPlayer
 
 class LibraryTableComponent : public juce::Component,
                                public juce::TableListBoxModel,
-                               public juce::DragAndDropTarget
+                               public juce::DragAndDropTarget,
+                               public juce::TableHeaderComponent::Listener
 {
 public:
     LibraryTableComponent();
@@ -52,6 +53,12 @@ public:
     // Selects and scrolls to the currently playing row, if it is visible.
     void selectAndScrollToPlayingRow();
 
+    // Scrolls to and selects the row for a given file, if it is visible.
+    void scrollToFile(const juce::File& file);
+
+    // Wires up ApplicationProperties so column state is saved/restored per view mode.
+    void setAppProperties(juce::ApplicationProperties* props);
+
     // When true, hidden tracks are shown dimmed; when false they are invisible.
     void setShowHidden(bool show);
     bool showHidden() const { return showHidden_; }
@@ -69,8 +76,12 @@ public:
     // Full unfiltered library as currently held by this component.
     const std::vector<TrackInfo>& allTracks() const { return tracks_; }
 
-    // Called when the user activates a row (double-click or Enter).
+    // Called when the user activates a row (double-click or Enter on a non-editable column).
     std::function<void(int rowIndex)> onRowActivated;
+
+    // Called after the user commits an in-place cell edit (Enter or focus-loss).
+    // The updated TrackInfo has the new value already saved to the foxp sidecar.
+    std::function<void(const TrackInfo&)> onInlineEditCommitted;
 
     // Called when the hidden state of one or more tracks changes.
     std::function<void()> onLibraryChanged;
@@ -98,6 +109,24 @@ public:
 
     // Called when the user chooses "Look up on Apple Music" from the context menu.
     std::function<void(std::vector<TrackInfo>)> onAppleMusicLookupRequested;
+
+    // Returns true if the given file has a completed Apple Music lookup that
+    // can be undone (i.e. a snapshot was stored before the lookup ran).
+    std::function<bool(const juce::File&)> isLookupUndoable;
+
+    // Called when the user chooses "Undo Apple Music lookup" from the context menu.
+    // Only fires for single-track selections when isLookupUndoable returned true.
+    std::function<void(const TrackInfo&)> onAppleMusicUndoRequested;
+
+    // Called when the user chooses "Look up Album Art" from the context menu.
+    std::function<void(std::vector<TrackInfo>)> onAlbumArtLookupRequested;
+
+    // Returns true if the given file has an album art lookup that can be undone.
+    std::function<bool(const juce::File&)> isArtLookupUndoable;
+
+    // Called when the user chooses "Undo Album art lookup" from the context menu.
+    // Only fires for single-track selections when isArtLookupUndoable returned true.
+    std::function<void(const TrackInfo&)> onAlbumArtUndoRequested;
 
     // Called when the user chooses "Look up on Podcast Index" from the context menu.
     std::function<void(std::vector<TrackInfo>)> onPodcastLookupRequested;
@@ -137,6 +166,8 @@ public:
     void backgroundClicked(const juce::MouseEvent&) override;
     void sortOrderChanged(int newSortColumnId, bool isForwards) override;
     juce::String getCellTooltip(int row, int col) override;
+    Component* refreshComponentForCell(int rowNumber, int columnId, bool isRowSelected,
+                                       Component* existingComponentToUpdate) override;
 
 private:
     void buildTable();
@@ -145,6 +176,11 @@ private:
     void refreshPlayingIndex();
     void updateArtistColumnHeader();
     juce::String cellText(int row, int colId) const;
+
+    static bool isEditableColId(int colId);
+    void startCellEdit(int row, int colId);
+    void commitCellEdit();
+    void cancelCellEdit();
 
     // Hides (or unhides) all currently selected rows.
     void setHiddenForSelection(bool hidden);
@@ -167,6 +203,25 @@ private:
     // Y position (in this component's coords) of the drop-indicator line
     // shown during a playlist drag-to-reorder. -1 means no indicator.
     int                      dropIndicatorY_ { -1 };
+
+    // Column state persistence
+    juce::ApplicationProperties* appProperties_ { nullptr };
+    bool                         restoringColumns_ { false };
+    void saveColumnStateForMode(ViewMode mode);
+    void restoreColumnStateForMode(ViewMode mode);
+    static juce::String columnStateKey(ViewMode mode);
+
+    // TableHeaderComponent::Listener
+    void tableColumnsChanged(juce::TableHeaderComponent*) override;
+    void tableColumnsResized(juce::TableHeaderComponent*) override;
+    void tableSortOrderChanged(juce::TableHeaderComponent*) override {}
+    void tableColumnDraggingChanged(juce::TableHeaderComponent*, int) override {}
+
+    // In-place cell editing state.
+    int               editingRow_       { -1 };
+    int               editingColId_     { -1 };
+    int               editingSession_   { 0 };  // incremented on each new edit; guards stale async callbacks
+    juce::TextEditor* activeCellEditor_ { nullptr }; // raw ptr, lifetime managed by TableListBox
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryTableComponent)
 };

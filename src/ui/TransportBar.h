@@ -61,6 +61,12 @@ public:
     ~TransportBar() override;
 
     void setCurrentTrack(const TrackInfo& track);
+    // Updates metadata fields on the displayed track without re-extracting album
+    // art. No-op if the file doesn't match the currently loaded track.
+    void updateCurrentTrackInfo(const TrackInfo& updated);
+    // Re-extracts album art for the current track (call after a lookup may have
+    // downloaded a sidecar image). No-op if no track is loaded.
+    void refreshAlbumArt();
     void clearTrack();
 
     // Sets the "Playing from:" source label displayed below the artist name.
@@ -68,6 +74,10 @@ public:
 
     // Resets the shuffle button toggle state (called externally when queue is replaced).
     void setShuffleOn(bool on);
+
+    // Enables or disables the prev/next skip buttons (greyed out when no track exists).
+    void setCanGoPrev(bool can);
+    void setCanGoNext(bool can);
 
     // Sets the repeat button state. 0=off, 1=repeat-all, 2=repeat-one.
     void setRepeatMode(int mode);
@@ -78,6 +88,11 @@ public:
     std::function<void()>    onChangeFolderClicked;
     // Fired when the user clicks the "Playing from: X" source link.
     std::function<void(int)> onPlayingFromClicked;
+    // Fired when the user clicks the artist/podcast name. TrackInfo carries
+    // artist/podcast for MainComponent to resolve the sidebar item.
+    std::function<void(TrackInfo)> onArtistClicked;
+    // Fired when the user clicks the song title. Int is the source sidebar ID.
+    std::function<void(int)> onTitleClicked;
     // Fired with the new toggle state when the user clicks shuffle/repeat.
     // Shuffle: true=on, false=off.
     // Repeat: 0=off, 1=repeat-all, 2=repeat-one.
@@ -133,11 +148,14 @@ private:
     // thumb while the user is dragging.
     struct DraggingDotSliderLnF : public juce::LookAndFeel_V4
     {
+        bool hovered { false };
+
         void drawLinearSlider(juce::Graphics& g,
                               int x, int y, int width, int height,
                               float sliderPos, float minPos, float maxPos,
                               juce::Slider::SliderStyle style,
                               juce::Slider& slider) override;
+        int getSliderThumbRadius(juce::Slider& s) override;
     };
 
     DraggingDotSliderLnF volumeSliderLnF_;
@@ -151,10 +169,20 @@ private:
     juce::Rectangle<int> albumArtBounds_;
     juce::Rectangle<int> infoAreaBounds_;
     juce::Rectangle<int> sourceLinkBounds_;     // clickable "X" portion of "Playing from: X"
+    juce::Rectangle<int> titleLinkBounds_;      // clickable song title text
+    juce::Rectangle<int> artistLinkBounds_;     // clickable artist/podcast name text
     juce::Rectangle<int> compactInfoBounds_;    // mini-mode "Artist - Title" line above the buttons
     juce::Rectangle<int> speakerBounds_;     // clickable speaker icon area
     juce::Image          albumArt_;
     float                recordRotation_ { 0.0f };
+    double               lastUpdateMs_   { 0.0 };  // wall-clock time of last timer tick
+
+    // Hover state for clickable info text, seek thumb, and volume slider (polled at 30 Hz).
+    bool hoveredTitle_  { false };
+    bool hoveredArtist_ { false };
+    bool hoveredSource_ { false };
+    bool hoveredSeek_   { false };
+    bool hoveredVolume_ { false };
 
     // Speaker/mute state
     bool   muted_         { false };
