@@ -137,8 +137,8 @@ MainComponent::MainComponent()
         analysisEngine_.enqueueAll(tracks);
     };
 
-    libraryTable_.onEditRequested = [this](TrackInfo track) {
-        showSongInfoEditor(track);
+    libraryTable_.onEditRequested = [this](TrackInfo track, std::vector<TrackInfo> peerList, int peerIndex) {
+        showSongInfoEditor(track, std::move(peerList), peerIndex);
     };
 
     libraryTable_.onMultiEditRequested = [this](std::vector<TrackInfo> tracks) {
@@ -381,39 +381,9 @@ MainComponent::MainComponent()
     transportBar_.onShuffleToggled = [this](bool on) {
         shuffleOn_ = on;
         if (on)
-        {
-            if (queue_.hasCurrent())
-            {
-                // Rebuild the queue from the full source view so toggling
-                // shuffle on always gives the entire source library, not just
-                // the tracks that happened to be queued from the double-click.
-                const TrackInfo current = queue_.current();
-                const auto source       = queue_.currentSource();
-                std::vector<TrackInfo> sourceTracks = getTracksForSidebar(source.sidebarId);
-
-                std::vector<TrackInfo> queueTracks;
-                queueTracks.reserve(sourceTracks.size());
-                queueTracks.push_back(current);
-                for (const auto& t : sourceTracks)
-                    if (t.file != current.file)
-                        queueTracks.push_back(t);
-
-                // setTracks fires onShuffleStateChanged(false); restore state after.
-                queue_.setTracks(std::move(queueTracks), 0, source);
-                shuffleOn_ = true;
-                transportBar_.setShuffleOn(true);
-                queue_.shuffleRemaining();
-            }
-            else
-            {
-                queue_.shuffleRemaining();
-            }
-        }
+            queue_.shuffleAll();
         else
-        {
             queue_.unshuffleRemaining();
-        }
-
         saveSessionState();
     };
     transportBar_.onRepeatToggled = [this](int mode) {
@@ -482,6 +452,7 @@ MainComponent::MainComponent()
         }
 
         showEmptyLibraryPrompt(false);
+        libraryTable_.setSuppressEmptyLabel(true);
         loadingIndicator_.setVisible(false);
         // Refresh Artists/Albums/Podcasts on every batch so they fill in
         // incrementally during the scan instead of staying empty until the end.
@@ -512,6 +483,7 @@ MainComponent::MainComponent()
 
         loadingIndicator_.setVisible(false);
         sidebar_.setLibraryLoading(false);
+        libraryTable_.setSuppressEmptyLabel(emptyPromptLabel_.isVisible() || podcastPromptLabel_.isVisible());
         refreshSidebarArtists();
         refreshSidebarAlbums();
         refreshSidebarGenres();
@@ -610,7 +582,13 @@ MainComponent::MainComponent()
     };
     editInfoLockOverlay_.onCloseEditInfo = [this] {
         if (auto* w = activeEditInfoWindow_.getComponent())
-            w->closeButtonPressed();
+        {
+            libraryTable_.scrollToFile(lastEditedInfoFile_);
+            activeEditInfoWindow_ = nullptr;
+            editInfoLockOverlay_.setVisible(false);
+            resized();
+            juce::MessageManager::callAsync([w] { delete w; });
+        }
     };
     addChildComponent(editInfoLockOverlay_);
 
@@ -643,6 +621,14 @@ MainComponent::MainComponent()
             if (auto* p = preferencesWindow_->libraryPanel())
                 p->setPodcastFolders(podcastFolders_);
         };
+    }
+
+    // Rescan buttons. Both trigger the same keepLibrary rescan — the scanner
+    // processes music and podcast folders in a single pass.
+    if (auto* libPanel = preferencesWindow_->libraryPanel())
+    {
+        libPanel->onRescanMusicFolders   = [this] { setMusicFolders(musicFolders_, /*keepLibrary*/ true); };
+        libPanel->onRescanPodcastFolders = [this] { setMusicFolders(musicFolders_, /*keepLibrary*/ true); };
     }
 
     // Analysis callbacks - feed both the library and the log window.
@@ -810,33 +796,106 @@ MainComponent::MainComponent()
         const int newId = playlistStore_->createPlaylist(pl->name + " copy");
         playlistStore_->addTracksToPlaylist(newId, pl->trackPaths);
     };
+    sidebar_.onPlaylistsReordered = [this](std::vector<int> newOrder) {
+        std::vector<int> storeIds;
+        storeIds.reserve(newOrder.size());
+        for (int sidebarId : newOrder)
+            storeIds.push_back(sidebarId - 1000);
+        playlistStore_->reorderPlaylists(storeIds);
+    };
     sidebar_.onCreatePlaylistFromItem = [this](int sidebarId, juce::String name) {
-        const auto tracks = getTracksForSidebar(sidebarId);
+        auto tracks = getTracksForSidebar(sidebarId);
         if (tracks.empty()) return;
+
+        // Album view: sort by track number (unnumbered tracks last), then title.
+        if (sidebarId >= 3000 && sidebarId < 4000)
+        {
+            std::sort(tracks.begin(), tracks.end(), [](const TrackInfo& a, const TrackInfo& b) {
+                const bool aNum = a.trackNumber > 0;
+                const bool bNum = b.trackNumber > 0;
+                if (aNum != bNum) return aNum > bNum;
+                if (aNum && a.trackNumber != b.trackNumber) return a.trackNumber < b.trackNumber;
+                return a.displayTitle().compareIgnoreCase(b.displayTitle()) < 0;
+            });
+        }
+        // Artist view: unnumbered-album tracks first (alpha by title), then
+        // albums in alphabetical order, each album sorted by track number then title.
+        else if (sidebarId >= 2000 && sidebarId < 3000)
+        {
+            std::sort(tracks.begin(), tracks.end(), [](const TrackInfo& a, const TrackInfo& b) {
+                const bool aNoAlbum = a.album.isEmpty();
+                const bool bNoAlbum = b.album.isEmpty();
+                if (aNoAlbum != bNoAlbum) return aNoAlbum > bNoAlbum;
+                if (aNoAlbum)
+                    return a.displayTitle().compareIgnoreCase(b.displayTitle()) < 0;
+                const int albumCmp = a.album.compareIgnoreCase(b.album);
+                if (albumCmp != 0) return albumCmp < 0;
+                const bool aNum = a.trackNumber > 0;
+                const bool bNum = b.trackNumber > 0;
+                if (aNum != bNum) return aNum > bNum;
+                if (aNum && a.trackNumber != b.trackNumber) return a.trackNumber < b.trackNumber;
+                return a.displayTitle().compareIgnoreCase(b.displayTitle()) < 0;
+            });
+        }
+
         const int newId = playlistStore_->createPlaylist(name);
         std::vector<juce::String> paths;
         paths.reserve(tracks.size());
         for (const auto& t : tracks) paths.push_back(t.file.getFullPathName());
         playlistStore_->addTracksToPlaylist(newId, paths);
     };
+
+    auto sortTracksForSidebar = [](std::vector<TrackInfo>& tracks, int sidebarId) {
+        if (sidebarId >= 3000 && sidebarId < 4000)
+        {
+            std::sort(tracks.begin(), tracks.end(), [](const TrackInfo& a, const TrackInfo& b) {
+                const bool aNum = a.trackNumber > 0, bNum = b.trackNumber > 0;
+                if (aNum != bNum) return aNum > bNum;
+                if (aNum && a.trackNumber != b.trackNumber) return a.trackNumber < b.trackNumber;
+                return a.displayTitle().compareIgnoreCase(b.displayTitle()) < 0;
+            });
+        }
+        else if (sidebarId >= 2000 && sidebarId < 3000)
+        {
+            std::sort(tracks.begin(), tracks.end(), [](const TrackInfo& a, const TrackInfo& b) {
+                const bool aNoAlbum = a.album.isEmpty(), bNoAlbum = b.album.isEmpty();
+                if (aNoAlbum != bNoAlbum) return aNoAlbum > bNoAlbum;
+                if (aNoAlbum) return a.displayTitle().compareIgnoreCase(b.displayTitle()) < 0;
+                const int albumCmp = a.album.compareIgnoreCase(b.album);
+                if (albumCmp != 0) return albumCmp < 0;
+                const bool aNum = a.trackNumber > 0, bNum = b.trackNumber > 0;
+                if (aNum != bNum) return aNum > bNum;
+                if (aNum && a.trackNumber != b.trackNumber) return a.trackNumber < b.trackNumber;
+                return a.displayTitle().compareIgnoreCase(b.displayTitle()) < 0;
+            });
+        }
+    };
+
+    sidebar_.onPlayNextFromItem = [this, sortTracksForSidebar](int sidebarId) {
+        auto tracks = getTracksForSidebar(sidebarId);
+        if (tracks.empty()) return;
+        sortTracksForSidebar(tracks, sidebarId);
+        queue_.insertAfterCurrent(std::move(tracks), { sourceNameForSidebar(sidebarId), sidebarId });
+    };
+
+    sidebar_.onAddToQueueFromItem = [this, sortTracksForSidebar](int sidebarId) {
+        auto tracks = getTracksForSidebar(sidebarId);
+        if (tracks.empty()) return;
+        sortTracksForSidebar(tracks, sidebarId);
+        queue_.appendTracks(std::move(tracks), { sourceNameForSidebar(sidebarId), sidebarId });
+    };
+
     refreshSidebarPlaylists();
 
     setupAudioEngineCallbacks();
 
     // Restore saved podcast folders.
     podcastFolders_ = loadSavedPodcastFolders();
-    podcastFolders_.erase(std::remove_if(podcastFolders_.begin(), podcastFolders_.end(),
-                                          [](const juce::File& f) { return ! f.isDirectory(); }),
-                          podcastFolders_.end());
     if (auto* libPanel = preferencesWindow_->libraryPanel())
         libPanel->setPodcastFolders(podcastFolders_);
 
     // Restore saved music folders (or show the empty prompt if none).
     auto savedFolders = loadSavedMusicFolders();
-    // Prune anything that's no longer a valid directory.
-    savedFolders.erase(std::remove_if(savedFolders.begin(), savedFolders.end(),
-                                       [](const juce::File& f) { return ! f.isDirectory(); }),
-                       savedFolders.end());
 
     if (! savedFolders.empty())
     {
@@ -915,8 +974,34 @@ MainComponent::~MainComponent()
     }
 }
 
+void MainComponent::checkFolderAccessibility()
+{
+    juce::StringArray errors;
+    for (const auto& f : musicFolders_)
+    {
+        if (!f.isDirectory())
+            errors.add("Not found: " + f.getFullPathName());
+        else if (!f.hasReadAccess())
+            errors.add("No read access: " + f.getFullPathName());
+    }
+
+    if (errors == lastFolderErrors_) return;
+
+    const bool wasError = !lastFolderErrors_.isEmpty();
+    const bool isError  = !errors.isEmpty();
+    lastFolderErrors_ = errors;
+
+    sidebar_.setLibraryErrors(errors);
+
+    // A folder that was missing and is now accessible — trigger a rescan.
+    if (wasError && !isError)
+        setMusicFolders(musicFolders_, /*keepLibrary=*/true);
+}
+
 void MainComponent::timerCallback()
 {
+    checkFolderAccessibility();
+
     // Persist playback position periodically so a crash doesn't lose the spot.
     saveSessionElapsed();
 
@@ -1026,8 +1111,11 @@ void MainComponent::updateTrackInLibrary(const TrackInfo& updated)
     updatePlayingHighlight();
 
     // Scroll the library to show the edited track in its new position.
+    // Skip when an edit-info dialog is open: the navigation flow calls scrollToFile
+    // with the correct (new) track, and this deferred call would overwrite it.
     juce::MessageManager::callAsync([this, file = updated.file] {
-        libraryTable_.scrollToFile(file);
+        if (!activeEditInfoWindow_.getComponent())
+            libraryTable_.scrollToFile(file);
     });
 }
 
@@ -1588,9 +1676,42 @@ void MainComponent::incrementPlayCount(const juce::File& file)
     }
 }
 
-void MainComponent::showSongInfoEditor(const TrackInfo& track)
+void MainComponent::showSongInfoEditor(const TrackInfo& track,
+                                       std::vector<TrackInfo> peerList,
+                                       int peerIndex)
 {
+    lastEditedInfoFile_ = track.file;
+    libraryTable_.scrollToFile(track.file);
+
     auto* editor = new SongInfoEditor(track);
+    auto* dw     = new EditInfoDialogWindow("Edit Info", juce::Colour(0xff1e1e1e));
+    dw->setUsingNativeTitleBar(true);
+    dw->setResizable(false, false);
+    dw->setContentOwned(editor, true);
+    dw->centreWithSize(editor->getWidth(), editor->getHeight());
+    activeEditInfoWindow_ = dw;
+
+    editInfoLockOverlay_.setVisible(true);
+    editInfoLockOverlay_.toFront(false);
+    resized();
+
+    // Closes the dialog window and, optionally, hides the overlay.
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    auto closeDialog = [safeThis](bool hideOverlay) {
+        if (auto* self = safeThis.getComponent())
+        {
+            if (auto* w = self->activeEditInfoWindow_.getComponent())
+            {
+                self->activeEditInfoWindow_ = nullptr;
+                if (hideOverlay)
+                {
+                    self->editInfoLockOverlay_.setVisible(false);
+                    self->resized();
+                }
+                juce::MessageManager::callAsync([w] { delete w; });
+            }
+        }
+    };
 
     editor->onSave = [this](std::vector<TrackInfo> updated) {
         for (auto& t : updated) {
@@ -1606,7 +1727,33 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track)
         appleMusicLookup_.enqueue(t, true);
     };
 
-    auto* dw = new EditInfoDialogWindow("Edit Info", juce::Colour(0xff1e1e1e));
+    editor->onDismiss = [closeDialog] { closeDialog(true); };
+    dw->onDismiss     = [closeDialog] { closeDialog(true); };
+
+    if (peerIndex >= 0 && (int)peerList.size() > 1)
+    {
+        editor->setPeerNavigation(peerIndex, (int)peerList.size());
+        editor->onSaveAndNavigate = [safeThis, closeDialog, peerList, peerIndex](int delta) {
+            const int newIndex = peerIndex + delta;
+            if (newIndex < 0 || newIndex >= (int)peerList.size()) return;
+            closeDialog(false); // close old dialog without hiding the overlay
+            if (auto* self = safeThis.getComponent())
+            {
+                TrackInfo trackToEdit = peerList[static_cast<size_t>(newIndex)];
+                for (const auto& t : self->fullLibrary_)
+                    if (t.file == trackToEdit.file) { trackToEdit = t; break; }
+                self->showSongInfoEditor(trackToEdit, peerList, newIndex);
+            }
+        };
+    }
+
+    dw->setVisible(true);
+}
+
+void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
+{
+    auto* editor = new SongInfoEditor(tracks);
+    auto* dw     = new EditInfoDialogWindow("Edit Info", juce::Colour(0xff1e1e1e));
     dw->setUsingNativeTitleBar(true);
     dw->setResizable(false, false);
     dw->setContentOwned(editor, true);
@@ -1617,19 +1764,19 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track)
     editInfoLockOverlay_.toFront(false);
     resized();
 
-    dw->enterModalState(true,
-        juce::ModalCallbackFunction::create([this, dw](int) {
-            activeEditInfoWindow_ = nullptr;
-            editInfoLockOverlay_.setVisible(false);
-            resized();
-            delete dw;
-        }),
-        false);
-}
-
-void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
-{
-    auto* editor = new SongInfoEditor(tracks);
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    auto closeDialog = [safeThis] {
+        if (auto* self = safeThis.getComponent())
+        {
+            if (auto* w = self->activeEditInfoWindow_.getComponent())
+            {
+                self->activeEditInfoWindow_ = nullptr;
+                self->editInfoLockOverlay_.setVisible(false);
+                self->resized();
+                juce::MessageManager::callAsync([w] { delete w; });
+            }
+        }
+    };
 
     editor->onSave = [this](std::vector<TrackInfo> updated) {
         for (auto& t : updated) {
@@ -1639,25 +1786,9 @@ void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
         LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
     };
 
-    auto* dw = new EditInfoDialogWindow("Edit Info", juce::Colour(0xff1e1e1e));
-    dw->setUsingNativeTitleBar(true);
-    dw->setResizable(false, false);
-    dw->setContentOwned(editor, true);
-    dw->centreWithSize(editor->getWidth(), editor->getHeight());
-    activeEditInfoWindow_ = dw;
-
-    editInfoLockOverlay_.setVisible(true);
-    editInfoLockOverlay_.toFront(false);
-    resized();
-
-    dw->enterModalState(true,
-        juce::ModalCallbackFunction::create([this, dw](int) {
-            activeEditInfoWindow_ = nullptr;
-            editInfoLockOverlay_.setVisible(false);
-            resized();
-            delete dw;
-        }),
-        false);
+    editor->onDismiss = closeDialog;
+    dw->onDismiss     = closeDialog;
+    dw->setVisible(true);
 }
 
 void MainComponent::setupAudioEngineCallbacks()
@@ -2086,7 +2217,10 @@ void MainComponent::setMusicFolders(std::vector<juce::File> folders, bool keepLi
         return;
     }
 
+    checkFolderAccessibility();
+
     showEmptyLibraryPrompt(false);
+    libraryTable_.setSuppressEmptyLabel(true);
     // Only show the centred loading overlay when we have nothing to display
     // already. With a cached library visible, the spinner next to the LIBRARY
     // heading is enough to signal background activity.
@@ -2190,35 +2324,22 @@ void MainComponent::activateRow(int rowIndex, const std::vector<TrackInfo>& libr
     // Capture shuffle state before setTracks resets it via onShuffleStateChanged.
     const bool wasShuffled = shuffleOn_;
 
-    std::vector<TrackInfo> queueTracks;
-
-    if (wasShuffled)
-    {
-        // When shuffle is on, seed the queue with the entire visible library:
-        // selected track first, every other track appended in original order.
-        queueTracks.reserve(libraryTracks.size());
-        queueTracks.push_back(libraryTracks[static_cast<size_t>(rowIndex)]);
-        for (int i = 0; i < static_cast<int>(libraryTracks.size()); ++i)
-            if (i != rowIndex)
-                queueTracks.push_back(libraryTracks[static_cast<size_t>(i)]);
-    }
-    else
-    {
-        queueTracks.assign(libraryTracks.begin() + rowIndex, libraryTracks.end());
-    }
+    // Always load in natural view order with the selected track as startIndex.
+    // shuffleRemaining() will shuffle only what follows, and originalTracks_ will
+    // hold the full natural order so unshuffling restores it correctly.
+    std::vector<TrackInfo> queueTracks(libraryTracks.begin(), libraryTracks.end());
 
     PlayQueue::QueueSource source;
     source.sidebarId = activeSidebarId_;
     source.name      = sourceNameForSidebar(activeSidebarId_);
 
-    queue_.setTracks(std::move(queueTracks), 0, source);
+    queue_.setTracks(std::move(queueTracks), rowIndex, source);
 
-    // Re-apply shuffle immediately so the new queue is shuffled from the start.
     if (wasShuffled)
     {
         shuffleOn_ = true;
         transportBar_.setShuffleOn(true);
-        queue_.shuffleRemaining();
+        queue_.shuffleAll();
     }
 
     playCurrentQueueItem();
@@ -2402,6 +2523,7 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& commands)
     commands.add(cmdAlwaysOnTop);
     commands.add(cmdFocusSearch);
     commands.add(cmdShowPlayerWindow);
+    commands.add(cmdEditInfo);
 }
 
 void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandInfo& info)
@@ -2451,6 +2573,14 @@ void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandI
                          "Window", 0);
             break;
 
+        case cmdEditInfo:
+            info.setInfo("Edit Info",
+                         "Edit metadata for the selected track(s)",
+                         "File", 0);
+            info.setActive(libraryTable_.hasSelection() && !activeEditInfoWindow_.getComponent());
+            info.addDefaultKeypress('r', juce::ModifierKeys::commandModifier);
+            break;
+
         case cmdFocusSearch:
             info.setInfo("Find",
                          "Focus the library search box",
@@ -2489,6 +2619,10 @@ bool MainComponent::perform(const ApplicationCommandTarget::InvocationInfo& info
 
         case cmdShowPlayerWindow:
             if (onShowWindowRequested) onShowWindowRequested();
+            return true;
+
+        case cmdEditInfo:
+            libraryTable_.triggerEditInfoForSelection();
             return true;
 
         default:
@@ -2688,7 +2822,7 @@ void MainComponent::restoreSessionState()
             shuffleOn_ = props->getBoolValue("sessionShuffleOn", false);
             transportBar_.setShuffleOn(shuffleOn_);
             if (shuffleOn_)
-                queue_.shuffleRemaining();
+                queue_.shuffleAll();
 
             // Load the current track paused at the saved elapsed position.
             // User explicitly wants the app to never auto-resume playback.
@@ -2718,6 +2852,13 @@ void MainComponent::restoreSessionState()
 
 void MainComponent::requestQuit(std::function<void()> onConfirmed)
 {
+    // If the dialog is already open, just bring it to front.
+    if (activeQuitDialog_.getComponent() != nullptr)
+    {
+        activeQuitDialog_.getComponent()->toFront(true);
+        return;
+    }
+
     // Dismiss any open modal dialogs before proceeding.
     if (activeEditInfoWindow_ != nullptr)
         activeEditInfoWindow_->exitModalState(0);
@@ -2756,7 +2897,7 @@ void MainComponent::requestQuit(std::function<void()> onConfirmed)
 
         void paint(juce::Graphics& g) override
         {
-            g.fillAll(getLookAndFeel().findColour(juce::AlertWindow::backgroundColourId));
+            g.fillAll(juce::Colour(0xff1e1e1e));
         }
 
         void resized() override

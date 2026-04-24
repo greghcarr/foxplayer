@@ -22,6 +22,22 @@ void FoxPlayer_activateAndShowWindow(void* nativeHandle)
     window.collectionBehavior = old;
 }
 
+void FoxPlayer_activateExistingWindow(void* nativeHandle)
+{
+    NSView*   view   = (__bridge NSView*)nativeHandle;
+    NSWindow* window = view.window;
+    if (window == nil) return;
+
+    // No MoveToActiveSpace here: activating the app while its key window is on
+    // another Space causes macOS to switch to that Space.
+    if (@available(macOS 14.0, *))
+        [NSApp activate];
+    else
+        [NSApp activateIgnoringOtherApps:YES];
+
+    [window makeKeyAndOrderFront:nil];
+}
+
 // ---------------------------------------------------------------------------
 // Dock icon / app-reopen support.
 //

@@ -26,9 +26,23 @@ void PlayQueue::appendTracks(std::vector<TrackInfo> tracks, PlayQueue::QueueSour
 {
     for (auto& t : tracks)
     {
+        if (isShuffled_)
+        {
+            originalTracks_.push_back(t);
+            originalSources_.push_back(source);
+        }
         tracks_.push_back(std::move(t));
         sources_.push_back(source);
     }
+    if (onQueueChanged) onQueueChanged();
+}
+
+void PlayQueue::insertAfterCurrent(std::vector<TrackInfo> tracks, PlayQueue::QueueSource source)
+{
+    if (tracks.empty()) return;
+    const int pos = hasCurrent() ? index_ + 1 : static_cast<int>(tracks_.size());
+    tracks_.insert (tracks_.begin()  + pos, tracks.begin(),  tracks.end());
+    sources_.insert(sources_.begin() + pos, tracks.size(), source);
     if (onQueueChanged) onQueueChanged();
 }
 
@@ -120,6 +134,45 @@ void PlayQueue::shuffleRemaining()
     if (onQueueChanged) onQueueChanged();
 }
 
+void PlayQueue::shuffleAll()
+{
+    if (!hasCurrent()) return;
+
+    originalTracks_  = tracks_;
+    originalSources_ = sources_;
+    isShuffled_      = true;
+
+    // Build new list: current track first, all others appended.
+    const size_t ci = static_cast<size_t>(index_);
+    std::vector<TrackInfo>   newTracks  { tracks_[ci] };
+    std::vector<QueueSource> newSources { sources_[ci] };
+    newTracks.reserve(tracks_.size());
+    newSources.reserve(sources_.size());
+    for (int i = 0; i < static_cast<int>(tracks_.size()); ++i)
+        if (i != index_)
+        {
+            newTracks.push_back(tracks_[static_cast<size_t>(i)]);
+            newSources.push_back(sources_[static_cast<size_t>(i)]);
+        }
+
+    // Fisher-Yates shuffle of everything after position 0.
+    juce::Random rng;
+    const int count = static_cast<int>(newTracks.size()) - 1;
+    for (int i = count - 1; i > 0; --i)
+    {
+        const int j = rng.nextInt(i + 1);
+        std::swap(newTracks [static_cast<size_t>(1 + i)], newTracks [static_cast<size_t>(1 + j)]);
+        std::swap(newSources[static_cast<size_t>(1 + i)], newSources[static_cast<size_t>(1 + j)]);
+    }
+
+    tracks_  = std::move(newTracks);
+    sources_ = std::move(newSources);
+    index_   = 0;
+
+    if (onQueueChanged) onQueueChanged();
+    if (onIndexChanged) onIndexChanged(index_);
+}
+
 void PlayQueue::unshuffleRemaining()
 {
     if (!isShuffled_) return;
@@ -146,12 +199,10 @@ void PlayQueue::unshuffleRemaining()
         }
     }
 
-    if (originalIdx >= 0)
-    {
-        tracks_.assign (originalTracks_.begin()  + originalIdx, originalTracks_.end());
-        sources_.assign(originalSources_.begin() + originalIdx, originalSources_.end());
-        index_ = 0;
-    }
+    // Restore full original order and place index_ at the current track.
+    tracks_  = originalTracks_;
+    sources_ = originalSources_;
+    index_   = (originalIdx >= 0) ? originalIdx : 0;
 
     originalTracks_.clear();
     originalSources_.clear();

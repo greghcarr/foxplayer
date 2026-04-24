@@ -21,6 +21,7 @@ public:
 
     void setTracks(std::vector<TrackInfo> tracks, int startIndex, QueueSource source);
     void appendTracks(std::vector<TrackInfo> tracks, QueueSource source);
+    void insertAfterCurrent(std::vector<TrackInfo> tracks, QueueSource source);
     void clear();
 
     bool hasCurrent() const;
@@ -48,6 +49,9 @@ public:
 
     // Shuffle all tracks after the current index. Saves original order for restoration.
     void shuffleRemaining();
+    // Move the current track to index 0 and shuffle all other tracks after it.
+    // Saves original order for restoration. Used when activating a track with shuffle on.
+    void shuffleAll();
     // Restore the original pre-shuffle order, keeping the current track at its original position.
     void unshuffleRemaining();
     bool isShuffled() const { return isShuffled_; }

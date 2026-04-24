@@ -82,25 +82,36 @@ private:
     {
         // Restore normal command routing now that the window is visible.
         mainComponent_->commandManager().setFirstCommandTarget(nullptr);
-        setVisible(true);
 
-        // Centre on whichever display the mouse is currently on.
-        auto& displays = juce::Desktop::getInstance().getDisplays();
-        auto mousePos  = juce::Desktop::getMousePosition();
-        auto* display  = displays.getDisplayForPoint(mousePos, false);
-        if (display == nullptr) display = displays.getPrimaryDisplay();
-        if (display != nullptr)
+        const bool wasVisible = isVisible();
+        if (! wasVisible)
         {
-            auto area = display->userArea;
-            setBounds(area.getCentreX() - getWidth()  / 2,
-                      area.getCentreY() - getHeight() / 2,
-                      getWidth(), getHeight());
+            // Window had been closed (hidden). Re-centre on the display under
+            // the mouse so it re-appears where the user is working.
+            auto& displays = juce::Desktop::getInstance().getDisplays();
+            auto mousePos  = juce::Desktop::getMousePosition();
+            auto* display  = displays.getDisplayForPoint(mousePos, false);
+            if (display == nullptr) display = displays.getPrimaryDisplay();
+            if (display != nullptr)
+            {
+                auto area = display->userArea;
+                setBounds(area.getCentreX() - getWidth()  / 2,
+                          area.getCentreY() - getHeight() / 2,
+                          getWidth(), getHeight());
+            }
+            setVisible(true);
         }
 
-        // Use native macOS APIs: JUCE's toFront() uses the deprecated
-        // activateIgnoringOtherApps:YES which is a no-op on macOS 14+.
+        // Native activation. When the window was already visible on another
+        // Space, FoxPlayer_activateExistingWindow leaves it in place so macOS
+        // switches Spaces to it instead of dragging it to the current Space.
         if (auto* peer = getPeer())
-            FoxPlayer_activateAndShowWindow(peer->getNativeHandle());
+        {
+            if (wasVisible)
+                FoxPlayer_activateExistingWindow(peer->getNativeHandle());
+            else
+                FoxPlayer_activateAndShowWindow(peer->getNativeHandle());
+        }
     }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainWindow)

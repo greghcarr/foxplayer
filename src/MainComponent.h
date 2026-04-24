@@ -66,6 +66,7 @@ public:
         cmdAlwaysOnTop       = 0x1005,
         cmdFocusSearch       = 0x1006,
         cmdShowPlayerWindow  = 0x1007,
+        cmdEditInfo          = 0x1008,
     };
 
     // Called when the user chooses Window -> Show Player Window. MainWindow
@@ -100,7 +101,7 @@ private:
     void showPodcastPrompt(bool show);
     void showPreferencesLibrary();
     void deleteOldStyleFoxpFiles(const juce::File& folder);
-    void showSongInfoEditor(const TrackInfo& track);
+    void showSongInfoEditor(const TrackInfo& track, std::vector<TrackInfo> peerList, int peerIndex);
     void showMultiInfoEditor(const std::vector<TrackInfo>& tracks);
     void toggleAnalysisLog();
     void showPreferences();
@@ -218,7 +219,7 @@ private:
 
     private:
         juce::Label      message_ { {}, "Edit Info window open." };
-        juce::TextButton openBtn_  { "Open Edit Info" };
+        juce::TextButton openBtn_  { "Show Edit Info" };
         juce::TextButton closeBtn_ { "Close Edit Info" };
     };
     EditInfoLockOverlay   editInfoLockOverlay_;
@@ -245,11 +246,13 @@ private:
     class EditInfoDialogWindow : public juce::DialogWindow
     {
     public:
+        std::function<void()> onDismiss;
         EditInfoDialogWindow(const juce::String& title, juce::Colour bg)
             : juce::DialogWindow(title, bg, true) {}
-        void closeButtonPressed() override { exitModalState(0); }
+        void closeButtonPressed() override { if (onDismiss) onDismiss(); }
     };
     juce::Component::SafePointer<juce::DialogWindow> activeEditInfoWindow_;
+    juce::File                                        lastEditedInfoFile_;
 
     // Thin draggable component sitting at the right edge of the sidebar. Drag
     // horizontally to resize the sidebar between "icons only" and half window.
@@ -305,6 +308,7 @@ private:
     std::map<int, juce::String> genreIdToName_;
     std::vector<juce::File> musicFolders_;
     std::vector<juce::File> podcastFolders_;
+    juce::StringArray       lastFolderErrors_; // cached to detect changes between timer ticks
 
     // Pending Edit Info dialog lookup: when the user clicks "Apple Music" in
     // the editor, this stores the callback to forward the result back.
@@ -345,6 +349,17 @@ private:
     juce::ApplicationCommandManager     commandManager_;
     StatusBarItem                       statusBarItem_;
     NowPlayingBridge                    nowPlaying_;
+    struct SidebarTooltipWindow : public juce::TooltipWindow {
+        SidebarTooltipWindow(juce::Component* p, int ms) : TooltipWindow(p, ms) {}
+        juce::String getTipFor(juce::Component& c) override {
+            if (dynamic_cast<SidebarComponent*>(&c) != nullptr)
+                return juce::TooltipWindow::getTipFor(c);
+            return {};
+        }
+    };
+    SidebarTooltipWindow                tooltipWindow_ { this, 600 };
+
+    void checkFolderAccessibility();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

@@ -32,6 +32,9 @@ struct TrackInfo
     // --- Play statistics ---
     int          playCount    { 0 };     // incremented each time the track starts playing
 
+    // --- Library metadata ---
+    juce::int64  dateAdded    { 0 };     // ms since epoch; set on first scan, persisted in .foxp
+
     bool isValid() const { return file.existsAsFile(); }
 
     juce::String formattedDuration() const

@@ -10,6 +10,8 @@ static const juce::String kLookupLabel =
     juce::String("Apple Music ") + juce::String(juce::CharPointer_UTF8("\xf0\x9f\x94\x8d"));
 
 static constexpr int dialogW      = 460;
+static constexpr int singleW      = 490; // wider to fit Prev/Next buttons
+static constexpr int navBtnW      = 70;
 static constexpr int labelW       = 76;
 static constexpr int rowH         = 26;
 static constexpr int rowGap       = 6;
@@ -51,15 +53,15 @@ juce::String SongInfoEditor::findCommonPrefix() const
 
 void SongInfoEditor::init()
 {
-    int h = 302;
+    int w = dialogW, h = 302;
     switch (mode_)
     {
-        case Mode::SingleMusic:   h = 302; break;
-        case Mode::SinglePodcast: h = 222; break;
-        case Mode::MultiMusic:    h = 254; break;
-        case Mode::MultiPodcast:  h = 222; break;
+        case Mode::SingleMusic:   w = singleW; h = 302; break;
+        case Mode::SinglePodcast: w = singleW; h = 222; break;
+        case Mode::MultiMusic:                 h = 254; break;
+        case Mode::MultiPodcast:               h = 222; break;
     }
-    setSize(dialogW, h);
+    setSize(w, h);
 
     auto styleLabel = [](juce::Label& lbl) {
         lbl.setColour(juce::Label::textColourId, Color::textSecondary);
@@ -259,9 +261,9 @@ void SongInfoEditor::init()
             snapYear_   = yearEdit_.getText();
             lookupButton_.setButtonText("Looking up...");
             lookupButton_.setEnabled(false);
-            juce::Component::SafePointer<SongInfoEditor> safeThis(this);
-            onLookupRequested(tracks_[0], [safeThis](bool success, TrackInfo result) {
-                if (auto* self = safeThis.getComponent())
+            juce::Component::SafePointer<SongInfoEditor> safeLookup(this);
+            onLookupRequested(tracks_[0], [safeLookup](bool success, TrackInfo result) {
+                if (auto* self = safeLookup.getComponent())
                 {
                     if (success)
                         self->fillFromLookup(result);
@@ -273,6 +275,27 @@ void SongInfoEditor::init()
         addAndMakeVisible(lookupButton_);
     }
 
+    if (mode_ == Mode::SingleMusic || mode_ == Mode::SinglePodcast)
+    {
+        for (auto* btn : { &prevButton_, &nextButton_ })
+        {
+            btn->setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a2a2a));
+            btn->setColour(juce::TextButton::textColourOffId, Color::textPrimary);
+            btn->setEnabled(false);
+            addAndMakeVisible(*btn);
+        }
+        prevButton_.onClick = [this] {
+            collectEditsIntoTracks();
+            if (onSave) onSave(tracks_);
+            if (onSaveAndNavigate) onSaveAndNavigate(-1);
+        };
+        nextButton_.onClick = [this] {
+            collectEditsIntoTracks();
+            if (onSave) onSave(tracks_);
+            if (onSaveAndNavigate) onSaveAndNavigate(+1);
+        };
+    }
+
     saveButton_.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
     saveButton_.setColour(juce::TextButton::textColourOffId, Color::textPrimary);
     saveButton_.onClick = [this] { save(); };
@@ -281,8 +304,7 @@ void SongInfoEditor::init()
     cancelButton_.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a2a2a));
     cancelButton_.setColour(juce::TextButton::textColourOffId, Color::textPrimary);
     cancelButton_.onClick = [this] {
-        if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
-            dw->exitModalState(0);
+        if (onDismiss) onDismiss();
     };
     addAndMakeVisible(cancelButton_);
 }
@@ -314,7 +336,7 @@ void SongInfoEditor::lookupFailed()
     });
 }
 
-void SongInfoEditor::save()
+void SongInfoEditor::collectEditsIntoTracks()
 {
     if (mode_ == Mode::SingleMusic)
     {
@@ -337,9 +359,23 @@ void SongInfoEditor::save()
         t.year        = yearEdit_.getText().trim();
         t.trackNumber = episodeNumEdit_.getText().trim().getIntValue();
     }
+}
+
+void SongInfoEditor::setPeerNavigation(int index, int total)
+{
+    prevButton_.setEnabled(index > 0);
+    nextButton_.setEnabled(index < total - 1);
+}
+
+void SongInfoEditor::save()
+{
+    if (mode_ == Mode::SingleMusic || mode_ == Mode::SinglePodcast)
+    {
+        collectEditsIntoTracks();
+    }
     else // multi-edit
     {
-        const juce::String newPrefix  = titleEdit_.getText().trim();
+        const juce::String newPrefix  = titleEdit_.getText().trimStart();
         const bool         prefixChanged = (newPrefix != detectedPrefix_);
 
         const juce::String newArtist  = (mode_ == Mode::MultiMusic) ? artistEdit_.getText().trim() : juce::String();
@@ -375,17 +411,25 @@ void SongInfoEditor::save()
     }
 
     if (onSave) onSave(tracks_);
-
-    if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
-        dw->exitModalState(1);
+    if (onDismiss) onDismiss();
 }
 
 void SongInfoEditor::focusOfChildComponentChanged(juce::Component::FocusChangeType)
 {
     for (auto* comp : getChildren())
+    {
         if (auto* ed = dynamic_cast<juce::TextEditor*>(comp))
+        {
             if (ed->hasKeyboardFocus(false))
-                { ed->selectAll(); break; }
+            {
+                juce::Component::SafePointer<juce::TextEditor> safe(ed);
+                juce::MessageManager::callAsync([safe] {
+                    if (safe) safe->selectAll();
+                });
+                break;
+            }
+        }
+    }
 }
 
 void SongInfoEditor::paint(juce::Graphics& g)
@@ -481,6 +525,13 @@ void SongInfoEditor::resized()
     cancelButton_.setBounds(btnRow.removeFromRight(btnW));
     btnRow.removeFromRight(8);
     saveButton_.setBounds(btnRow.removeFromRight(btnW));
+    if (mode_ == Mode::SingleMusic || mode_ == Mode::SinglePodcast)
+    {
+        btnRow.removeFromRight(8);
+        nextButton_.setBounds(btnRow.removeFromRight(navBtnW));
+        btnRow.removeFromRight(4);
+        prevButton_.setBounds(btnRow.removeFromRight(navBtnW));
+    }
     if (mode_ == Mode::SingleMusic)
         lookupButton_.setBounds(btnRow.removeFromLeft(120));
 }

@@ -33,13 +33,16 @@ void TransportButton::paint(juce::Graphics& g)
     const float cy = h * 0.5f;
     const float r  = d * 0.5f;
 
-    const bool isMod = (icon == Icon::Shuffle || icon == Icon::Repeat);
+    const bool isMod = (icon == Icon::Shuffle || icon == Icon::Repeat || icon == Icon::Pin);
 
     juce::Colour iconColor;
     if (isMod)
     {
-        // Floating icon — no circle background. Grey when off, accent when engaged.
-        iconColor = (toggleState == 0) ? juce::Colour(0xff606060) : Color::accent;
+        // Floating icon — no circle background.
+        if (icon == Icon::Pin)
+            iconColor = (toggleState == 0) ? juce::Colour(0xff606060) : juce::Colour(0xffcc3333);
+        else
+            iconColor = (toggleState == 0) ? juce::Colour(0xff606060) : Color::accent;
     }
     else
     {
@@ -57,7 +60,7 @@ void TransportButton::paint(juce::Graphics& g)
             fill      = pressed_ ? juce::Colour(0xff989898)
                       : hovered_ ? juce::Colour(0xffe2e2e2)
                       :             juce::Colour(0xffc4c4c4);
-            iconColor = (icon == Icon::Pin) ? juce::Colour(0xffcc3333) : Color::accent;
+            iconColor = Color::accent;
         }
         else
         {
@@ -330,6 +333,47 @@ static void drawSpinningRecord(juce::Graphics& g,
     g.fillEllipse(centre.x - holeR, centre.y - holeR, holeR * 2.0f, holeR * 2.0f);
 
     g.restoreState();
+}
+
+static void drawPodcastArt(juce::Graphics& g,
+                            juce::Rectangle<int> bounds,
+                            const juce::Image& art,
+                            const juce::String& fallbackText)
+{
+    constexpr float cornerR = 6.0f;
+    const auto boundsF = bounds.toFloat();
+
+    juce::Path shadow;
+    shadow.addRoundedRectangle(boundsF, cornerR);
+    juce::DropShadow(juce::Colours::black.withAlpha(0.85f), 12, {}).drawForPath(g, shadow);
+
+    if (art.isValid())
+    {
+        juce::Path clip;
+        clip.addRoundedRectangle(boundsF, cornerR);
+        g.saveState();
+        g.reduceClipRegion(clip);
+        g.drawImage(art,
+                    bounds.getX(), bounds.getY(),
+                    bounds.getWidth(), bounds.getHeight(),
+                    0, 0, art.getWidth(), art.getHeight());
+        g.restoreState();
+    }
+    else
+    {
+        g.setColour(juce::Colour(0xff1e1e1e));
+        g.fillRoundedRectangle(boundsF, cornerR);
+        g.setColour(juce::Colour(0xff555555));
+        g.drawRoundedRectangle(boundsF.reduced(0.5f), cornerR, 1.0f);
+
+        if (fallbackText.isNotEmpty())
+        {
+            const auto tf = getFoxwhelpTypeface();
+            g.setColour(juce::Colour(0xffaaaaaa));
+            g.setFont(juce::Font(tf).withHeight(static_cast<float>(bounds.getHeight()) * 0.18f));
+            g.drawText(fallbackText, bounds.reduced(4), juce::Justification::centred, true);
+        }
+    }
 }
 
 // Parses an SVG binary resource and returns a tinted Drawable.
@@ -696,25 +740,35 @@ void TransportBar::paint(juce::Graphics& g)
         gradValid = leftFadeWidth > 0.0f;
     }
 
-    // Spinning CD (with album art, or a white label with track info).
+    // Album art / CD — podcasts get a stationary rounded square, music gets the spinning CD.
     if (!albumArtBounds_.isEmpty() && hasTrack_)
     {
-        juce::String labelText;
-        if (currentTrack_.artist.isNotEmpty() || currentTrack_.displayTitle().isNotEmpty())
+        if (currentTrack_.isPodcast)
         {
-            if (currentTrack_.artist.isNotEmpty() && currentTrack_.displayTitle().isNotEmpty())
-                labelText = currentTrack_.artist
-                            + juce::String(juce::CharPointer_UTF8(" \xc2\xb7 "))
-                            + currentTrack_.displayTitle();
-            else
-                labelText = currentTrack_.artist.isNotEmpty() ? currentTrack_.artist
-                                                               : currentTrack_.displayTitle();
+            const juce::String fallback = currentTrack_.podcast.isNotEmpty()
+                                              ? currentTrack_.podcast
+                                              : currentTrack_.displayTitle();
+            drawPodcastArt(g, albumArtBounds_, albumArt_, fallback);
         }
         else
         {
-            labelText = currentTrack_.file.getFileNameWithoutExtension();
+            juce::String labelText;
+            if (currentTrack_.artist.isNotEmpty() || currentTrack_.displayTitle().isNotEmpty())
+            {
+                if (currentTrack_.artist.isNotEmpty() && currentTrack_.displayTitle().isNotEmpty())
+                    labelText = currentTrack_.artist
+                                + juce::String(juce::CharPointer_UTF8(" \xc2\xb7 "))
+                                + currentTrack_.displayTitle();
+                else
+                    labelText = currentTrack_.artist.isNotEmpty() ? currentTrack_.artist
+                                                                   : currentTrack_.displayTitle();
+            }
+            else
+            {
+                labelText = currentTrack_.file.getFileNameWithoutExtension();
+            }
+            drawSpinningRecord(g, albumArtBounds_, recordRotation_, albumArt_, labelText);
         }
-        drawSpinningRecord(g, albumArtBounds_, recordRotation_, albumArt_, labelText);
     }
 
     // Three-line track info - faded by infoAlpha so it dissolves smoothly into
@@ -1206,7 +1260,7 @@ void TransportBar::updateDisplay()
     // has an accurate sync point, so the CD keeps spinning even during window
     // resize (when the timer stops firing but resized() still triggers repaints).
     const double nowMs = juce::Time::getMillisecondCounterHiRes();
-    if (engine_.isPlaying() && lastUpdateMs_ > 0.0)
+    if (engine_.isPlaying() && lastUpdateMs_ > 0.0 && !currentTrack_.isPodcast)
     {
         const float deltaRads = static_cast<float>((nowMs - lastUpdateMs_) / 1000.0)
                                 * (33.333f / 60.0f) * juce::MathConstants<float>::twoPi;

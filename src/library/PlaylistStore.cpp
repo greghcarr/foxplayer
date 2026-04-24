@@ -145,4 +145,24 @@ void PlaylistStore::setPlaylistTracks(int id, std::vector<juce::String> paths)
     }
 }
 
+void PlaylistStore::reorderPlaylists(const std::vector<int>& orderedIds)
+{
+    std::vector<Playlist> reordered;
+    reordered.reserve(playlists_.size());
+    for (int id : orderedIds)
+        for (const auto& pl : playlists_)
+            if (pl.id == id) { reordered.push_back(pl); break; }
+    for (const auto& pl : playlists_)
+    {
+        bool listed = false;
+        for (int id : orderedIds)
+            if (pl.id == id) { listed = true; break; }
+        if (!listed)
+            reordered.push_back(pl);
+    }
+    playlists_ = std::move(reordered);
+    save();
+    if (onPlaylistsChanged) onPlaylistsChanged();
+}
+
 } // namespace FoxPlayer

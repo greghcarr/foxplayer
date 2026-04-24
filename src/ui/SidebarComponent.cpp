@@ -145,8 +145,25 @@ void SidebarComponent::setLibraryLoading(bool loading)
     for (int i : { 0, 1, 2, 3 })
         sections_[(size_t)i].loading = loading;
 
-    if (loading) startTimerHz(30);
-    else         stopTimer();
+    // Only animate spinner when loading with no folder errors.
+    if (loading && libraryErrorMessages_.isEmpty()) startTimerHz(30);
+    else                                            stopTimer();
+    repaint();
+}
+
+void SidebarComponent::setLibraryErrors(const juce::StringArray& messages)
+{
+    libraryErrorMessages_ = messages;
+    const bool hasErr = !messages.isEmpty();
+    for (int i : { 0, 1, 2, 3 })
+        sections_[(size_t)i].hasError = hasErr;
+
+    // Stop spinner animation when showing the static error icon.
+    if (hasErr)
+        stopTimer();
+    else if (sections_[0].loading)
+        startTimerHz(30);
+
     repaint();
 }
 
@@ -254,30 +271,46 @@ void SidebarComponent::drawSectionHeader(juce::Graphics& g, const Section& secti
         drawDisclosureTriangle(g, triX, y + sectionHeaderH / 2, section.collapsed);
     }
 
-    if (section.loading)
+    if (section.loading || section.hasError)
     {
         juce::GlyphArrangement ga;
         ga.addLineOfText(headingFont, section.heading, 0.0f, 0.0f);
         const float textW = ga.getBoundingBox(0, -1, true).getWidth();
 
         const float r = 5.5f;
-        // If the section also has a disclosure triangle (ends at textW+12), push
-        // the spinner past it; otherwise use the original offset.
         const float baseOffset = section.collapsible ? 20.0f : 12.0f;
         const float cx = static_cast<float>(itemPadL) + textW + baseOffset + r;
         const float cy = static_cast<float>(y + sectionHeaderH / 2);
 
-        g.setColour(Color::textDim);
-        g.drawEllipse(cx - r, cy - r, r * 2.0f, r * 2.0f, 1.5f);
+        if (section.hasError)
+        {
+            // Red filled circle.
+            g.setColour(juce::Colour(0xffcc2222));
+            g.fillEllipse(cx - r, cy - r, r * 2.0f, r * 2.0f);
 
-        juce::Path arc;
-        const float sweep = juce::MathConstants<float>::pi * 1.55f;
-        arc.addCentredArc(cx, cy, r, r, 0.0f,
-                          loadingRotation_, loadingRotation_ + sweep, true);
-        g.setColour(Color::accent);
-        g.strokePath(arc, juce::PathStrokeType(1.5f,
-                                               juce::PathStrokeType::curved,
-                                               juce::PathStrokeType::rounded));
+            // White "!" drawn as two shapes: bar + dot.
+            g.setColour(juce::Colours::white);
+            const float barW = r * 0.28f;
+            g.fillRoundedRectangle(cx - barW * 0.5f, cy - r * 0.62f, barW, r * 0.72f, barW * 0.3f);
+            const float dotR = barW * 0.6f;
+            g.fillEllipse(cx - dotR, cy + r * 0.18f, dotR * 2.0f, dotR * 2.0f);
+
+            libraryErrorIconRects_.push_back({ cx - r, cy - r, r * 2.0f, r * 2.0f });
+        }
+        else
+        {
+            g.setColour(Color::textDim);
+            g.drawEllipse(cx - r, cy - r, r * 2.0f, r * 2.0f, 1.5f);
+
+            juce::Path arc;
+            const float sweep = juce::MathConstants<float>::pi * 1.55f;
+            arc.addCentredArc(cx, cy, r, r, 0.0f,
+                              loadingRotation_, loadingRotation_ + sweep, true);
+            g.setColour(Color::accent);
+            g.strokePath(arc, juce::PathStrokeType(1.5f,
+                                                   juce::PathStrokeType::curved,
+                                                   juce::PathStrokeType::rounded));
+        }
     }
 }
 
@@ -400,8 +433,19 @@ void SidebarComponent::moved()
     repaint();
 }
 
+juce::String SidebarComponent::getTooltip()
+{
+    if (libraryErrorMessages_.isEmpty()) return {};
+    const auto mouse = getMouseXYRelative().toFloat();
+    for (const auto& rect : libraryErrorIconRects_)
+        if (rect.expanded(3.0f).contains(mouse))
+            return libraryErrorMessages_.joinIntoString("\n");
+    return {};
+}
+
 void SidebarComponent::paint(juce::Graphics& g)
 {
+    libraryErrorIconRects_.clear();
     g.fillAll(Color::headerBackground);
     g.setColour(Color::border);
     g.drawVerticalLine(getWidth() - 1, 0.0f, (float)getHeight());
@@ -412,7 +456,36 @@ void SidebarComponent::paint(juce::Graphics& g)
         drawSectionHeader(g, section, section.headerBounds.getY());
         if (!section.collapsed)
             for (const auto& item : section.items)
+            {
                 drawSectionItem(g, item, item.bounds);
+                // Dim the item being drag-reordered
+                if (reorderActive_ && item.id == reorderDragId_)
+                {
+                    g.setColour(Color::headerBackground.withAlpha(0.72f));
+                    g.fillRect(item.bounds);
+                }
+            }
+    }
+
+    // Draw playlist drag-reorder insertion line
+    if (reorderActive_ && reorderInsertBefore_ >= 0)
+    {
+        const auto& playlistSection = sections_[4];
+        int insertY = -1;
+        int pi = 0;
+        for (const auto& item : playlistSection.items)
+        {
+            if (item.id < 1000 || item.id >= 2000) continue;
+            if (pi == reorderInsertBefore_) { insertY = item.bounds.getY(); break; }
+            insertY = item.bounds.getBottom();
+            ++pi;
+        }
+        if (insertY >= 0)
+        {
+            g.setColour(Color::accent);
+            g.fillRect(itemPadL + indicatorW + 4, insertY - 1,
+                       getWidth() - itemPadL - indicatorW - 12, 2);
+        }
     }
 
     // Sticky overlay — only needed once we've scrolled past the LIBRARY header
@@ -573,39 +646,62 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                         if (!e.mods.isPopupMenu() && onCreatePlaylistRequested)
                             onCreatePlaylistRequested();
                     }
+                    else if (!e.mods.isPopupMenu() && item.id >= 1000 && item.id < 2000)
+                    {
+                        reorderDragId_    = item.id;
+                        reorderDragStart_ = e.getPosition();
+                        selectId(item.id);
+                        return;
+                    }
                     else if (e.mods.isPopupMenu() && item.id >= 1000 && item.id < 2000)
                     {
                         juce::PopupMenu menu;
-                        menu.addItem(1, "Rename Playlist");
-                        menu.addItem(3, "Duplicate Playlist");
-                        menu.addItem(2, "Delete Playlist");
+                        menu.addItem(1, "Play Next");
+                        menu.addItem(2, "Add to Queue");
+                        menu.addSeparator();
+                        menu.addItem(3, "Rename Playlist");
+                        menu.addItem(4, "Duplicate Playlist");
+                        menu.addItem(5, "Delete Playlist");
                         const int capturedId = item.id;
                         menu.showMenuAsync(
                             juce::PopupMenu::Options{}.withTargetScreenArea(
                                 juce::Rectangle<int>().withPosition(e.getScreenPosition())),
                             [this, capturedId](int result) {
-                                if (result == 1)
+                                if (result == 1 && onPlayNextFromItem)
+                                    onPlayNextFromItem(capturedId);
+                                else if (result == 2 && onAddToQueueFromItem)
+                                    onAddToQueueFromItem(capturedId);
+                                else if (result == 3)
                                     startRename(capturedId);
-                                else if (result == 2 && onDeletePlaylist)
-                                    onDeletePlaylist(capturedId);
-                                else if (result == 3 && onDuplicatePlaylist)
+                                else if (result == 4 && onDuplicatePlaylist)
                                     onDuplicatePlaylist(capturedId);
+                                else if (result == 5 && onDeletePlaylist)
+                                    onDeletePlaylist(capturedId);
                             });
                     }
                     else if (e.mods.isPopupMenu() && (
                         (item.id >= 2000 && item.id < 3000) ||
                         (item.id >= 3000 && item.id < 4000) ||
+                        (item.id >= 4000 && item.id < 5000) ||
                         (item.id >= 5000 && item.id < 6000)))
                     {
+                        const bool isPodcast = (item.id >= 4000 && item.id < 5000);
                         juce::PopupMenu menu;
-                        menu.addItem(1, "Create Playlist");
+                        menu.addItem(1, "Play Next");
+                        menu.addItem(2, "Add to Queue");
+                        if (!isPodcast)
+                            menu.addItem(3, "Create Playlist");
                         const int capturedId     = item.id;
                         const juce::String label = item.label;
                         menu.showMenuAsync(
                             juce::PopupMenu::Options{}.withTargetScreenArea(
                                 juce::Rectangle<int>().withPosition(e.getScreenPosition())),
                             [this, capturedId, label](int result) {
-                                if (result == 1 && onCreatePlaylistFromItem)
+                                if (result == 1 && onPlayNextFromItem)
+                                    onPlayNextFromItem(capturedId);
+                                else if (result == 2 && onAddToQueueFromItem)
+                                    onAddToQueueFromItem(capturedId);
+                                else if (result == 3 && onCreatePlaylistFromItem)
                                     onCreatePlaylistFromItem(capturedId, label);
                             });
                     }
@@ -618,6 +714,104 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
             }
         }
     }
+}
+
+void SidebarComponent::mouseDrag(const juce::MouseEvent& e)
+{
+    if (reorderDragId_ == -1 || inlineEditor_) return;
+
+    if (!reorderActive_
+        && std::abs(e.getDistanceFromDragStartY()) < 5
+        && std::abs(e.getDistanceFromDragStartX()) < 5)
+        return;
+
+    reorderActive_ = true;
+
+    const auto& section = sections_[4]; // PLAYLISTS
+    int playlistCount = 0;
+    for (const auto& item : section.items)
+        if (item.id >= 1000 && item.id < 2000) ++playlistCount;
+
+    int insertIdx = playlistCount; // default: end
+    int pi = 0;
+    for (const auto& item : section.items)
+    {
+        if (item.id < 1000 || item.id >= 2000) continue;
+        if (e.y < item.bounds.getCentreY()) { insertIdx = pi; break; }
+        ++pi;
+    }
+
+    if (insertIdx != reorderInsertBefore_)
+    {
+        reorderInsertBefore_ = insertIdx;
+        repaint();
+    }
+}
+
+void SidebarComponent::mouseUp(const juce::MouseEvent& /*e*/)
+{
+    if (reorderDragId_ == -1) return;
+
+    if (reorderActive_ && reorderInsertBefore_ >= 0)
+    {
+        const auto& section = sections_[4]; // PLAYLISTS
+        std::vector<int> oldOrder;
+        for (const auto& item : section.items)
+            if (item.id >= 1000 && item.id < 2000)
+                oldOrder.push_back(item.id);
+
+        const int draggedId = reorderDragId_;
+        int srcIdx = -1;
+        for (int i = 0; i < (int)oldOrder.size(); ++i)
+            if (oldOrder[(size_t)i] == draggedId) { srcIdx = i; break; }
+
+        std::vector<int> newOrder;
+        for (int id : oldOrder)
+            if (id != draggedId) newOrder.push_back(id);
+
+        int insertIdx = reorderInsertBefore_;
+        if (srcIdx >= 0 && srcIdx < insertIdx) --insertIdx;
+        insertIdx = juce::jlimit(0, (int)newOrder.size(), insertIdx);
+        newOrder.insert(newOrder.begin() + insertIdx, draggedId);
+
+        if (newOrder != oldOrder && onPlaylistsReordered)
+            onPlaylistsReordered(newOrder);
+    }
+
+    reorderDragId_       = -1;
+    reorderInsertBefore_ = -1;
+    reorderActive_       = false;
+    repaint();
+}
+
+void SidebarComponent::mouseMove(const juce::MouseEvent& e)
+{
+    int scrollY, libStickyH, activeSectionIdx;
+    getStickyZone(scrollY, libStickyH, activeSectionIdx);
+
+    bool overCollapsible = false;
+
+    // Sticky active-section header.
+    if (activeSectionIdx >= 0)
+    {
+        const int activeY = scrollY + libStickyH;
+        if (e.y >= activeY && e.y < activeY + sectionHeaderH)
+            overCollapsible = sections_[(size_t)activeSectionIdx].collapsible;
+    }
+
+    // Normal layout headers.
+    if (!overCollapsible)
+        for (const auto& sec : sections_)
+            if (sec.collapsible && sec.headerBounds.contains(e.x, e.y))
+                { overCollapsible = true; break; }
+
+    setMouseCursor(overCollapsible ? juce::MouseCursor::PointingHandCursor
+                                   : juce::MouseCursor::NormalCursor);
+}
+
+void SidebarComponent::mouseExit(const juce::MouseEvent&)
+{
+    setMouseCursor(juce::MouseCursor::NormalCursor);
 }
 
 void SidebarComponent::mouseDoubleClick(const juce::MouseEvent& e)

@@ -8,6 +8,7 @@ namespace FoxPlayer
 {
 
 class SidebarComponent : public juce::Component,
+                         public juce::TooltipClient,
                          public juce::DragAndDropTarget,
                          private juce::Timer
 {
@@ -33,12 +34,27 @@ public:
     // suggestedName is pre-filled from the item label.
     std::function<void(int sidebarId, juce::String suggestedName)> onCreatePlaylistFromItem;
 
+    // Fired when the user picks "Play Next" or "Add to Queue" from a sidebar item.
+    std::function<void(int sidebarId)> onPlayNextFromItem;
+    std::function<void(int sidebarId)> onAddToQueueFromItem;
+
+    // Fired when the user drags a playlist item to a new position.
+    // newOrder contains the playlist sidebar IDs (1000+storeId) in the new order.
+    std::function<void(std::vector<int>)> onPlaylistsReordered;
+
     int  selectedId() const { return selectedId_; }
     void setSelectedId(int id);
 
     // Toggles a small spinning indicator next to the LIBRARY heading while
     // the music-folder scanner is running.
     void setLibraryLoading(bool loading);
+
+    // Shows a red error icon on the LIBRARY headings instead of the spinner.
+    // Each string in messages describes one inaccessible folder.
+    // Pass an empty array to clear the error state.
+    void setLibraryErrors(const juce::StringArray& messages);
+
+    juce::String getTooltip() override;
 
     // Returns the bounds (in this component's coord space) of the currently
     // selected item, or an empty rectangle if no selected item is visible
@@ -68,6 +84,10 @@ public:
     void paint(juce::Graphics& g) override;
     void resized() override;
     void mouseDown(const juce::MouseEvent& e) override;
+    void mouseDrag(const juce::MouseEvent& e) override;
+    void mouseUp(const juce::MouseEvent& e) override;
+    void mouseMove(const juce::MouseEvent& e) override;
+    void mouseExit(const juce::MouseEvent& e) override;
     void mouseDoubleClick(const juce::MouseEvent& e) override;
 
     // juce::DragAndDropTarget
@@ -92,6 +112,7 @@ private:
         bool                 collapsed      { false };
         bool                 rightClickable { false };
         bool                 loading        { false };
+        bool                 hasError       { false };
         std::vector<Item>    items;
         juce::Rectangle<int> headerBounds;
     };
@@ -124,6 +145,12 @@ private:
     int                  selectedId_     { 1 };
     int                  dragOverItemId_ { -1 };
     int                  editingItemId_  { -1 };
+
+    // Playlist drag-reorder state
+    int                  reorderDragId_       { -1 };  // sidebar ID being dragged
+    int                  reorderInsertBefore_ { -1 };  // insert before this index in items array (-1 = no active drag)
+    bool                 reorderActive_       { false };
+    juce::Point<int>     reorderDragStart_;
     juce::String         editingOriginalName_;
     std::unique_ptr<juce::TextEditor> inlineEditor_;
 
@@ -137,6 +164,10 @@ private:
 
     // Spinning loading indicator — driven by section.loading flags.
     float  loadingRotation_  { 0.0f };
+
+    // Error state for library sections (inaccessible folders).
+    juce::StringArray libraryErrorMessages_;
+    mutable std::vector<juce::Rectangle<float>> libraryErrorIconRects_;
 
     void timerCallback() override;
 

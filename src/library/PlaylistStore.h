@@ -38,6 +38,10 @@ public:
     // by the library view to persist drag-reordering within a playlist.
     void setPlaylistTracks(int id, std::vector<juce::String> paths);
 
+    // Reorders the playlist list to match the given sequence of playlist IDs.
+    // IDs not present in orderedIds are appended at the end.
+    void reorderPlaylists(const std::vector<int>& orderedIds);
+
     std::function<void()> onPlaylistsChanged;
 
 private:

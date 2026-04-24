@@ -90,7 +90,8 @@ public:
     std::function<void(std::vector<TrackInfo>)> onAnalyzeRequested;
 
     // Called when the user wants to edit a single track's metadata.
-    std::function<void(TrackInfo)> onEditRequested;
+    // peerList is a snapshot of all visible tracks at right-click time; peerIndex is the row.
+    std::function<void(TrackInfo, std::vector<TrackInfo>, int peerIndex)> onEditRequested;
 
     // Called when the user wants to edit multiple tracks' metadata at once
     // (all same type: all music or all podcasts).
@@ -149,6 +150,14 @@ public:
     void itemDropped  (const SourceDetails&) override;
 
     void paintOverChildren(juce::Graphics&) override;
+
+    // Fires onEditRequested / onMultiEditRequested for the current selection,
+    // as if the user had chosen "Edit Info" from the right-click menu.
+    // Does nothing if the selection is empty or contains mixed types.
+    void triggerEditInfoForSelection();
+
+    // Returns true if at least one row is selected.
+    bool hasSelection() const { return table_.getSelectedRows().size() > 0; }
 
     // juce::Component
     void resized() override;

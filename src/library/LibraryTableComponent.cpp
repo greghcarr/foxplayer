@@ -74,8 +74,9 @@ void LibraryTableComponent::buildTable()
     hdr.addColumn("Time",   colIdTime,   colWidthTime,   40, 80,  flags);
     hdr.addColumn("BPM",    colIdBpm,    colWidthBpm,    40, 80,  flags);
     hdr.addColumn("Key",    colIdKey,    colWidthKey,    40, 70,  flags);
-    hdr.addColumn("Plays",  colIdPlays,  colWidthPlays,  40, 80,  flags);
-    hdr.addColumn("Format", colIdFormat, colWidthFormat, 40, 100, flags);
+    hdr.addColumn("Plays",      colIdPlays,      colWidthPlays,      40, 80,  flags);
+    hdr.addColumn("Format",     colIdFormat,     colWidthFormat,     40, 100, flags);
+    hdr.addColumn("Date Added", colIdDateAdded,  colWidthDateAdded,  60, 160, flags);
 }
 
 juce::String LibraryTableComponent::columnStateKey(ViewMode mode)
@@ -365,11 +366,14 @@ void LibraryTableComponent::applySort()
         {
             case colIdRow:
             {
-                // Playlist view: sort by each track's position in the backing
-                // tracks_ vector (setTracks() fills it in playlist order).
-                // Album view: sort by the static trackNumber tag.
-                if (viewMode_ == ViewMode::Album)
+                // Album/Podcast view: sort by the static trackNumber tag numerically.
+                // Unnumbered tracks (0) always sort last regardless of direction.
+                // Other views: sort by insertion position in tracks_.
+                if (viewMode_ == ViewMode::Album || viewMode_ == ViewMode::Podcast)
                 {
+                    if (a->trackNumber == 0 && b->trackNumber == 0) return 0;
+                    if (a->trackNumber == 0) return 1;
+                    if (b->trackNumber == 0) return -1;
                     return (a->trackNumber < b->trackNumber) ? -1
                          : (a->trackNumber > b->trackNumber) ?  1 : 0;
                 }
@@ -394,7 +398,9 @@ void LibraryTableComponent::applySort()
             case colIdKey:    return a->musicalKey.compareIgnoreCase(b->musicalKey);
             case colIdPlays:  return (a->playCount    < b->playCount)    ? -1
                                   : (a->playCount    > b->playCount)    ?  1 : 0;
-            case colIdFormat: return a->file.getFileExtension().compareIgnoreCase(b->file.getFileExtension());
+            case colIdFormat:     return a->file.getFileExtension().compareIgnoreCase(b->file.getFileExtension());
+            case colIdDateAdded:  return (a->dateAdded < b->dateAdded) ? -1
+                                       : (a->dateAdded > b->dateAdded) ?  1 : 0;
             default:          return 0;
         }
     };
@@ -656,6 +662,11 @@ juce::String LibraryTableComponent::cellText(int row, int colId) const
                 ext = ext.substring(1);
             return ext.toLowerCase();
         }
+        case colIdDateAdded:
+        {
+            if (t.dateAdded <= 0) return {};
+            return juce::Time(t.dateAdded).toString(true, false);
+        }
         default:          return {};
     }
 }
@@ -667,6 +678,39 @@ std::vector<int> LibraryTableComponent::selectedRows() const
     for (int i = 0; i < sparse.size(); ++i)
         rows.push_back(sparse[i]);
     return rows;
+}
+
+void LibraryTableComponent::triggerEditInfoForSelection()
+{
+    const auto rows = selectedRows();
+    if (rows.empty()) return;
+
+    std::vector<TrackInfo> selectedTracks;
+    selectedTracks.reserve(rows.size());
+    for (int r : rows)
+        if (r >= 0 && r < (int)filteredTracks_.size())
+            selectedTracks.push_back(*filteredTracks_[(size_t)r]);
+    if (selectedTracks.empty()) return;
+
+    bool hasMusic = false, hasPodcast = false;
+    for (const auto& t : selectedTracks)
+        t.isPodcast ? hasPodcast = true : hasMusic = true;
+    if (hasMusic && hasPodcast) return; // mixed type — same rule as right-click
+
+    if (rows.size() == 1)
+    {
+        const int row = rows.front();
+        std::vector<TrackInfo> peerList;
+        peerList.reserve(filteredTracks_.size());
+        for (const auto* p : filteredTracks_) peerList.push_back(*p);
+        if (onEditRequested)
+            onEditRequested(selectedTracks.front(), std::move(peerList), row);
+    }
+    else
+    {
+        if (onMultiEditRequested)
+            onMultiEditRequested(selectedTracks);
+    }
 }
 
 void LibraryTableComponent::setHiddenForSelection(bool hidden)
@@ -773,9 +817,14 @@ void LibraryTableComponent::cellClicked(int row, int col, const juce::MouseEvent
         menu.addItem(1, "Show in Finder");
     }
 
+    std::vector<TrackInfo> peerList;
+    peerList.reserve(filteredTracks_.size());
+    for (const auto* p : filteredTracks_) peerList.push_back(*p);
+
     menu.showMenuAsync(juce::PopupMenu::Options{}.withTargetScreenArea(
         juce::Rectangle<int>().withPosition(e.getScreenPosition())),
-        [this, file, selectedTracks, clickedTrack, singleSelect, showUndo, showArtUndo](int result) {
+        [this, file, selectedTracks, clickedTrack, singleSelect, showUndo, showArtUndo,
+         peerList = std::move(peerList), peerRow = row](int result) {
             if (result == 1)
                 file.revealToUser();
             else if (result == 2)
@@ -785,7 +834,7 @@ void LibraryTableComponent::cellClicked(int row, int col, const juce::MouseEvent
             else if (result == 4)
                 { if (onAnalyzeRequested) onAnalyzeRequested(selectedTracks); }
             else if (result == 5) {
-                if (singleSelect) { if (onEditRequested)      onEditRequested(clickedTrack); }
+                if (singleSelect) { if (onEditRequested) onEditRequested(clickedTrack, peerList, peerRow); }
                 else              { if (onMultiEditRequested) onMultiEditRequested(selectedTracks); }
             }
             else if (result == 6)

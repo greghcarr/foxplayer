@@ -274,10 +274,13 @@ LibraryPreferencesPanel::LibraryPreferencesPanel()
 
     stylePrefButton(addButton_);
     stylePrefButton(removeButton_);
+    stylePrefButton(rescanButton_);
     addButton_.onClick    = [this] { addFolder(); };
     removeButton_.onClick = [this] { removeSelectedFolders(); };
+    rescanButton_.onClick = [this] { if (onRescanMusicFolders) onRescanMusicFolders(); };
     addAndMakeVisible(addButton_);
     addAndMakeVisible(removeButton_);
+    addAndMakeVisible(rescanButton_);
 
     podcastHeading_.setText("Podcast Folders", juce::dontSendNotification);
     podcastHeading_.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)).boldened());
@@ -290,10 +293,13 @@ LibraryPreferencesPanel::LibraryPreferencesPanel()
 
     stylePrefButton(podcastAddButton_);
     stylePrefButton(podcastRemoveButton_);
+    stylePrefButton(podcastRescanButton_);
     podcastAddButton_.onClick    = [this] { addPodcastFolder(); };
     podcastRemoveButton_.onClick = [this] { removeSelectedPodcastFolders(); };
+    podcastRescanButton_.onClick = [this] { if (onRescanPodcastFolders) onRescanPodcastFolders(); };
     addAndMakeVisible(podcastAddButton_);
     addAndMakeVisible(podcastRemoveButton_);
+    addAndMakeVisible(podcastRescanButton_);
 }
 
 void LibraryPreferencesPanel::setFolders(std::vector<juce::File> folders)
@@ -349,6 +355,8 @@ void LibraryPreferencesPanel::resized()
     addButton_.setBounds(btnRow.removeFromLeft(120));
     btnRow.removeFromLeft(8);
     removeButton_.setBounds(btnRow.removeFromLeft(140));
+    btnRow.removeFromLeft(8);
+    rescanButton_.setBounds(btnRow.removeFromLeft(140));
 
     // Podcast folders section
     area.removeFromTop(sectionGap);
@@ -360,6 +368,8 @@ void LibraryPreferencesPanel::resized()
     podcastAddButton_.setBounds(podBtnRow.removeFromLeft(120));
     podBtnRow.removeFromLeft(8);
     podcastRemoveButton_.setBounds(podBtnRow.removeFromLeft(140));
+    podBtnRow.removeFromLeft(8);
+    podcastRescanButton_.setBounds(podBtnRow.removeFromLeft(140));
 }
 
 int LibraryPreferencesPanel::getNumRows()

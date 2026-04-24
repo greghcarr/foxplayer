@@ -31,6 +31,10 @@ public:
     // Called on the message thread when the entire scan is done.
     std::function<void(int totalTracksFound)> onScanComplete;
 
+    // Infers an episode number from a podcast filename stem using the same
+    // heuristics as the scanner. Returns 0 if no number can be found.
+    static int guessEpisodeNumber(const juce::String& filenameStem);
+
 private:
     void run() override;
 

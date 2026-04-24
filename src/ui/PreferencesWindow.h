@@ -64,6 +64,8 @@ public:
 
     std::function<void(std::vector<juce::File>)> onFoldersChanged;
     std::function<void(std::vector<juce::File>)> onPodcastFoldersChanged;
+    std::function<void()>                        onRescanMusicFolders;
+    std::function<void()>                        onRescanPodcastFolders;
 
     void setFolders(std::vector<juce::File> folders);
     const std::vector<juce::File>& folders() const { return folders_; }
@@ -98,11 +100,13 @@ private:
     juce::ListBox      list_;
     juce::TextButton   addButton_    { "Add Folder" };
     juce::TextButton   removeButton_ { "Remove Folder" };
+    juce::TextButton   rescanButton_ { "Rescan Folders" };
 
     juce::Label        podcastHeading_;
     juce::ListBox      podcastList_;
     juce::TextButton   podcastAddButton_    { "Add Folder" };
     juce::TextButton   podcastRemoveButton_ { "Remove Folder" };
+    juce::TextButton   podcastRescanButton_ { "Rescan Folders" };
 
     std::vector<juce::File> folders_;
     std::vector<juce::File> podcastFolders_;

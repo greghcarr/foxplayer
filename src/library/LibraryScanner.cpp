@@ -147,14 +147,9 @@ void LibraryScanner::run()
     });
 }
 
-namespace
+// static
+int LibraryScanner::guessEpisodeNumber(const juce::String& stem)
 {
-    // Returns an episode number extracted from a podcast filename stem, or 0 if
-    // no confident guess can be made. Patterns checked (in order):
-    //   "episode <N>" or "ep <N>" keyword anywhere in the name
-    //   leading digits at the start of the stem (non-year)
-    int guessEpisodeNumber(const juce::String& stem)
-    {
         // Normalise separators to spaces and lowercase for pattern matching.
         const juce::String s = stem.toLowerCase().replaceCharacters("-_.", "   ");
 
@@ -208,8 +203,22 @@ namespace
             }
         }
 
+        // Pattern C: first 1-5 digit number anywhere in the stem.
+        for (int i = 0; i < s.length(); ++i)
+        {
+            if (!juce::CharacterFunctions::isDigit(s[i])) continue;
+            const int start = i;
+            while (i < s.length() && juce::CharacterFunctions::isDigit(s[i])) ++i;
+            const int numLen = i - start;
+            if (numLen >= 1 && numLen <= 5)
+            {
+                const int num = s.substring(start, i).getIntValue();
+                const bool isYear = (numLen == 4 && num >= 1900 && num <= 2099);
+                if (!isYear && num > 0) return num;
+            }
+        }
+
         return 0;
-    }
 }
 
 TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
@@ -333,6 +342,12 @@ TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
     {
         // Clear any stale podcast fields left over from a previous scan as podcast.
         info.podcast = {};
+    }
+
+    if (info.dateAdded == 0)
+    {
+        info.dateAdded = juce::Time::currentTimeMillis();
+        FoxpFile::save(info);
     }
 
     return info;

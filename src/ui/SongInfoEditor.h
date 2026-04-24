@@ -21,6 +21,16 @@ public:
     // Called with all edited tracks on Save (1 element for single-track mode).
     std::function<void(std::vector<TrackInfo>)> onSave;
 
+    // Called when the editor should close (Save or Cancel). Not called on Prev/Next navigation.
+    std::function<void()> onDismiss;
+
+    // Single-track mode only. Called (after onSave) when Prev/Next is clicked.
+    // delta is -1 for Prev, +1 for Next.
+    std::function<void(int delta)> onSaveAndNavigate;
+
+    // Single-track mode only. Enables/disables the Prev and Next nav buttons.
+    void setPeerNavigation(int index, int total);
+
     // SingleMusic mode only. Called when the user clicks "Apple Music Lookup".
     // Implementations should kick off a lookup for the given track and call the
     // result callback on the message thread when it completes. success=false
@@ -36,6 +46,7 @@ private:
     enum class Mode { SingleMusic, SinglePodcast, MultiMusic, MultiPodcast };
 
     void init();
+    void collectEditsIntoTracks();
     void save();
     void fillFromLookup(const TrackInfo& result);
     void lookupFailed();
@@ -73,6 +84,8 @@ private:
     juce::TextEditor keyEdit_;
 
     juce::TextButton lookupButton_;
+    juce::TextButton prevButton_   { "Previous" };
+    juce::TextButton nextButton_   { "Next" };
     juce::TextButton saveButton_   { "Save" };
     juce::TextButton cancelButton_ { "Cancel" };
 

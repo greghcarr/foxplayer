@@ -34,7 +34,8 @@ namespace FoxPlayer::Constants
     static constexpr int colIdKey    = 7;
     static constexpr int colIdPlays  = 8;
     static constexpr int colIdFormat = 9;
-    static constexpr int colIdGenre  = 10;
+    static constexpr int colIdGenre      = 10;
+    static constexpr int colIdDateAdded = 11;
 
     static constexpr int colWidthRow    = 40;
     static constexpr int colWidthTitle  = 280;
@@ -45,7 +46,8 @@ namespace FoxPlayer::Constants
     static constexpr int colWidthKey    = 50;
     static constexpr int colWidthPlays  = 55;
     static constexpr int colWidthFormat = 60;
-    static constexpr int colWidthGenre  = 120;
+    static constexpr int colWidthGenre      = 120;
+    static constexpr int colWidthDateAdded  = 100;
 
     static constexpr int rowHeight = 24;
 
@@ -66,13 +68,13 @@ namespace FoxPlayer::Constants
         static const juce::Colour background       { 0xff1a1a1a };
         static const juce::Colour headerBackground { 0xff111111 };
         static const juce::Colour tableBackground  { 0xff1e1e1e };
-        static const juce::Colour tableRowAlt      { 0xff232323 };
+        static const juce::Colour tableRowAlt      { 0xff2a2a2a };
         static const juce::Colour tableSelected    { 0xff2a5a8a };
         static const juce::Colour tableHighlight   { 0xff3a7abf };
         static const juce::Colour transportBg      { 0xff0f0f0f };
         static const juce::Colour textPrimary      { 0xffe8e8e8 };
         static const juce::Colour textSecondary    { 0xff909090 };
-        static const juce::Colour textDim          { 0xff555555 };
+        static const juce::Colour textDim          { 0xff808080 };
         static const juce::Colour accent           { 0xff4a9eff };
         static const juce::Colour playingHighlight { 0xff4a9eff };
         static const juce::Colour seekBarTrack     { 0xff333333 };

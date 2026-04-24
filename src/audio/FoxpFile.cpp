@@ -54,6 +54,9 @@ bool FoxpFile::load(TrackInfo& track)
     if (obj->hasProperty("podcast"))
         track.podcast = obj->getProperty("podcast").toString();
 
+    if (obj->hasProperty("dateAdded"))
+        track.dateAdded = static_cast<juce::int64>(static_cast<double>(obj->getProperty("dateAdded")));
+
     return true;
 }
 
@@ -92,6 +95,9 @@ bool FoxpFile::save(const TrackInfo& track)
         if (track.podcast.isNotEmpty())
             obj->setProperty("podcast", track.podcast);
     }
+
+    if (track.dateAdded > 0)
+        obj->setProperty("dateAdded", static_cast<double>(track.dateAdded));
 
     const juce::var root(obj);
     const juce::String text = juce::JSON::toString(root, false);
