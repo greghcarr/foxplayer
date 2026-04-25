@@ -18,6 +18,10 @@ public:
 
     void refresh(const PlayQueue& queue);
 
+    // Scrolls so the currently playing row is vertically centred in the
+    // visible area; clamped to the valid scroll range so no rows are hidden.
+    void centerPlayingRow();
+
     // juce::Component
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -25,9 +29,11 @@ public:
     // juce::ListBoxModel
     int  getNumRows() override;
     void paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool selected) override;
+    void listBoxItemClicked(int row, const juce::MouseEvent& e) override;
     void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override;
 
     std::function<void(int queueIndex)> onRowActivated;
+    std::function<void(int queueIndex)> onRemoveTrack;
 
 private:
     juce::ListBox list_;

@@ -59,8 +59,12 @@ MainComponent::MainComponent()
             libraryTable_.setSearchPlaceholder(sourceNameForSidebar(activeSidebarId_));
     };
 
-    // Commands
+    // Commands. MainComponent is the permanent fallback target so File/Window
+    // menu items stay enabled even when focus is on a child window (Analysis
+    // Log, Preferences, Edit Info dialog) whose parent chain doesn't lead back
+    // here.
     commandManager_.registerAllCommandsForTarget(this);
+    commandManager_.setFirstCommandTarget(this);
     addKeyListener(commandManager_.getKeyMappings());
 
     setSize(defaultWindowWidth, defaultWindowHeight);
@@ -96,6 +100,20 @@ MainComponent::MainComponent()
         saveSessionState();
     };
     addAndMakeVisible(sidebarDivider_);
+
+    // Queue resize handle: thin component at the LEFT edge of the queue panel.
+    // Dragging right shrinks the queue, dragging left grows it (dragSign = -1).
+    queueDivider_.dragSign     = -1;
+    queueDivider_.currentWidth = [this] { return queueWidth_; };
+    queueDivider_.onDragged    = [this](int proposed) {
+        // Min matches the sidebar's minimum; max caps at 40% of window width.
+        constexpr int minQueueWidth = 44;
+        const int maxQueueWidth = juce::jmax(minQueueWidth, (getWidth() * 2) / 5);
+        queueWidth_ = juce::jlimit(minQueueWidth, maxQueueWidth, proposed);
+        resized();
+        saveSessionState();
+    };
+    addChildComponent(queueDivider_);  // hidden until queue is shown
 
 
     // Empty-state prompt for music (shown when no music folders are configured).
@@ -323,6 +341,16 @@ MainComponent::MainComponent()
         transportBar_.refreshAlbumArt();
     };
 
+    libraryTable_.onSelectionChanged = [this] {
+        // User-driven selection in the active view: any selection saved for
+        // other views becomes stale and should not reappear when navigating
+        // back. Saved selection for the current view is rebuilt on the next
+        // view switch from libraryTable_.selectedFiles().
+        for (auto it = savedSelectionByView_.begin(); it != savedSelectionByView_.end();)
+            it = (it->first == activeSidebarId_) ? std::next(it)
+                                                 : savedSelectionByView_.erase(it);
+    };
+
     libraryTable_.onLibraryChanged = [this] {
         // Sync fullLibrary_ from the table (hidden state may have changed).
         fullLibrary_ = libraryTable_.allTracks();
@@ -384,6 +412,10 @@ MainComponent::MainComponent()
             queue_.shuffleAll();
         else
             queue_.unshuffleRemaining();
+        // After a shuffle/unshuffle the playing track has likely moved within
+        // the queue; centre it in the panel rather than letting the default
+        // scrollToEnsureRowIsOnscreen leave it pinned to the bottom edge.
+        queueView_.centerPlayingRow();
         saveSessionState();
     };
     transportBar_.onRepeatToggled = [this](int mode) {
@@ -639,7 +671,21 @@ MainComponent::MainComponent()
         if (analysisLogWindow_) analysisLogWindow_->log().trackStarted(t);
     };
     analysisEngine_.onTrackAnalysed = [this](TrackInfo analysed) {
-        updateTrackInLibrary(analysed);
+        // The TrackInfo emitted by AnalysisEngine is a snapshot from when
+        // analysis was queued. Title/artist/album/etc. on it may be stale if
+        // the user edited the track meanwhile. Merge ONLY the analysis fields
+        // into our live state to avoid silent reverts.
+        for (auto& t : fullLibrary_)
+        {
+            if (t.file == analysed.file)
+            {
+                t.bpm        = analysed.bpm;
+                t.musicalKey = analysed.musicalKey;
+                t.lufs       = analysed.lufs;
+                libraryTable_.updateTrack(t);
+                break;
+            }
+        }
         if (analysisLogWindow_) analysisLogWindow_->log().trackAnalysed(analysed);
     };
 
@@ -650,7 +696,9 @@ MainComponent::MainComponent()
         if (analysisLogWindow_) analysisLogWindow_->log().lookupStarted(t);
     };
     appleMusicLookup_.onLookupCompleted = [this](TrackInfo t, juce::String summary, bool isBatch) {
-        updateTrackInLibrary(t);
+        // Single lookups follow the track; batch lookups update silently so
+        // the user's selection isn't yanked from row to row as each completes.
+        updateTrackInLibrary(t, /*followTrack*/ ! isBatch);
         transportBar_.refreshAlbumArt();
         if (analysisLogWindow_) analysisLogWindow_->log().lookupCompleted(t, summary);
 
@@ -660,6 +708,16 @@ MainComponent::MainComponent()
             auto cb = std::move(editorLookupCallback_);
             editorLookupFile_ = juce::File();
             cb(summary.startsWith("Found"), t);
+
+            // After a successful editor-triggered lookup, follow the track to
+            // its new sorted position. Without this, the TableListBox would
+            // keep its row index and a different track would appear selected.
+            if (summary.startsWith("Found"))
+            {
+                juce::MessageManager::callAsync([this, file = t.file] {
+                    libraryTable_.scrollToFile(file);
+                });
+            }
         }
 
         const bool isArtOnly = artOnlyLookupFiles_.count(t.file) > 0;
@@ -742,6 +800,7 @@ MainComponent::MainComponent()
         {
             queueVisible_ = false;
             queueView_.setVisible(false);
+            queueDivider_.setVisible(false);
             updateQueueButtonIcon();
             resized();
         }
@@ -763,6 +822,10 @@ MainComponent::MainComponent()
     queueView_.onRowActivated = [this](int queueIndex) {
         if (queue_.jumpTo(queueIndex))
             playCurrentQueueItem();
+    };
+
+    queueView_.onRemoveTrack = [this](int queueIndex) {
+        queue_.removeAt(queueIndex);
     };
 
     // Sidebar callbacks
@@ -1025,7 +1088,7 @@ void MainComponent::timerCallback()
     }
 }
 
-void MainComponent::updateTrackInLibrary(const TrackInfo& updated)
+void MainComponent::updateTrackInLibrary(const TrackInfo& updated, bool followTrack)
 {
     for (auto& t : fullLibrary_)
         if (t.file == updated.file) { t = updated; break; }
@@ -1042,7 +1105,7 @@ void MainComponent::updateTrackInLibrary(const TrackInfo& updated)
     const bool inDynamicView = (activeSidebarId_ >= 2000 && activeSidebarId_ < 3000)
                              || (activeSidebarId_ >= 3000 && activeSidebarId_ < 4000)
                              || (activeSidebarId_ >= 5000 && activeSidebarId_ < 6000);
-    if (inDynamicView)
+    if (followTrack && inDynamicView)
     {
         bool trackStillHere = false;
         for (const auto& t : getTracksForSidebar(activeSidebarId_))
@@ -1109,6 +1172,8 @@ void MainComponent::updateTrackInLibrary(const TrackInfo& updated)
 
     refreshCurrentView();
     updatePlayingHighlight();
+
+    if (! followTrack) return;
 
     // Scroll the library to show the edited track in its new position.
     // Skip when an edit-info dialog is open: the navigation flow calls scrollToFile
@@ -1282,12 +1347,30 @@ void MainComponent::refreshCurrentView()
 
 void MainComponent::showSidebarItem(int sidebarId)
 {
+    // Save the outgoing view's selection by file path so it can be restored
+    // exactly when the user returns to that view; never carry indexes across
+    // views (those would point at unrelated rows in the new view).
+    if (sidebarId != activeSidebarId_)
+    {
+        auto outgoing = libraryTable_.selectedFiles();
+        if (! outgoing.empty())
+            savedSelectionByView_[activeSidebarId_] = std::move(outgoing);
+        else
+            savedSelectionByView_.erase(activeSidebarId_);
+    }
+
     activeSidebarId_ = sidebarId;
     refreshCurrentView();
     // Entering a playlist view: default-sort by "#" ascending so rows show
     // in their natural playlist order.
     if (sidebarId >= 1000 && sidebarId < 2000)
         libraryTable_.applyPlaylistDefaultSort();
+
+    auto it = savedSelectionByView_.find(sidebarId);
+    libraryTable_.setSelectedFiles(it != savedSelectionByView_.end()
+                                       ? it->second
+                                       : std::vector<juce::File>{});
+
     updatePlayingHighlight();
     saveSessionState();
 }
@@ -1733,17 +1816,34 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track,
     if (peerIndex >= 0 && (int)peerList.size() > 1)
     {
         editor->setPeerNavigation(peerIndex, (int)peerList.size());
-        editor->onSaveAndNavigate = [safeThis, closeDialog, peerList, peerIndex](int delta) {
-            const int newIndex = peerIndex + delta;
-            if (newIndex < 0 || newIndex >= (int)peerList.size()) return;
+        editor->onSaveAndNavigate = [safeThis, closeDialog](int delta) {
+            auto* self = safeThis.getComponent();
+            if (self == nullptr) return;
+
+            // Recompute peers from the current view at navigate time. An Apple
+            // Music lookup may have changed the album/artist/genre and shifted
+            // the track to a new position in the sort order — using the
+            // snapshot captured when the dialog opened would walk the wrong
+            // neighbours.
+            auto currentPeers = self->libraryTable_.visibleTracks();
+            if (currentPeers.empty()) return;
+
+            int currentIdx = -1;
+            for (int i = 0; i < (int) currentPeers.size(); ++i)
+                if (currentPeers[(size_t) i].file == self->lastEditedInfoFile_)
+                    { currentIdx = i; break; }
+
+            if (currentIdx < 0) return;  // track is no longer in this view
+
+            const int newIndex = currentIdx + delta;
+            if (newIndex < 0 || newIndex >= (int) currentPeers.size()) return;
+
             closeDialog(false); // close old dialog without hiding the overlay
-            if (auto* self = safeThis.getComponent())
-            {
-                TrackInfo trackToEdit = peerList[static_cast<size_t>(newIndex)];
-                for (const auto& t : self->fullLibrary_)
-                    if (t.file == trackToEdit.file) { trackToEdit = t; break; }
-                self->showSongInfoEditor(trackToEdit, peerList, newIndex);
-            }
+
+            TrackInfo trackToEdit = currentPeers[(size_t) newIndex];
+            for (const auto& t : self->fullLibrary_)
+                if (t.file == trackToEdit.file) { trackToEdit = t; break; }
+            self->showSongInfoEditor(trackToEdit, currentPeers, newIndex);
         };
     }
 
@@ -2071,9 +2171,19 @@ void MainComponent::resized()
     // Transport bar at the bottom
     transportBar_.setBounds(bounds.removeFromBottom(transportBarHeight));
 
-    // Queue panel on the right (only when visible)
+    // Queue panel on the right (only when visible). A thin draggable divider
+    // sits at its left edge; users drag it to resize the queue.
     if (queueVisible_)
-        queueView_.setBounds(bounds.removeFromRight(queuePanelWidth));
+    {
+        constexpr int queueDividerW = 6;
+        constexpr int minQueueWidth = 44;
+        const int maxQueueWidth = juce::jmax(minQueueWidth, (getWidth() * 2) / 5);
+        queueWidth_ = juce::jlimit(minQueueWidth, maxQueueWidth, queueWidth_);
+
+        queueView_.setBounds(bounds.removeFromRight(queueWidth_));
+        queueDivider_.setBounds(bounds.removeFromRight(queueDividerW));
+        queueDivider_.toFront(false);
+    }
 
     // Queue toggle button: fixed to the bottom-right corner of the content
     // area (just above the transport bar), regardless of whether the queue
@@ -2390,6 +2500,7 @@ void MainComponent::toggleQueue()
 {
     queueVisible_ = !queueVisible_;
     queueView_.setVisible(queueVisible_);
+    queueDivider_.setVisible(queueVisible_);
     updateQueueButtonIcon();
     resized();
 }
@@ -2654,6 +2765,7 @@ void MainComponent::saveSessionState()
         + " queue.hasCurrent=" + juce::String((int) queue_.hasCurrent()));
 
     props->setValue("sessionSidebarWidth",    sidebarWidth_);
+    props->setValue("sessionQueueWidth",      queueWidth_);
     props->setValue("sessionActiveSidebarId", activeSidebarId_);
     // For artist views the numeric id is index-based and can shift between
     // runs; persist the artist name so we can re-resolve the id on restore.
@@ -2738,6 +2850,7 @@ void MainComponent::restoreSessionState()
     // Sidebar width (the layout clamps to the valid min/max on the next
     // resized() call, so out-of-range persisted values are harmless).
     sidebarWidth_ = props->getIntValue("sessionSidebarWidth", Constants::sidebarWidth);
+    queueWidth_   = props->getIntValue("sessionQueueWidth",   Constants::queuePanelWidth);
     resized();
 
     // Sidebar view (must come before queue restore so refreshCurrentView shows

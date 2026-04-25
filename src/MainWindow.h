@@ -59,9 +59,8 @@ public:
 
     void closeButtonPressed() override
     {
-        // Hide rather than quit. Set firstCommandTarget so the Window menu
-        // stays routable even with no focused component.
-        mainComponent_->commandManager().setFirstCommandTarget(mainComponent_.get());
+        // Hide rather than quit. firstCommandTarget is permanently set to the
+        // MainComponent in its constructor, so menus stay routable here too.
         setVisible(false);
     }
 
@@ -80,9 +79,6 @@ private:
 
     void showWindow()
     {
-        // Restore normal command routing now that the window is visible.
-        mainComponent_->commandManager().setFirstCommandTarget(nullptr);
-
         const bool wasVisible = isVisible();
         if (! wasVisible)
         {

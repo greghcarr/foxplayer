@@ -159,10 +159,25 @@ public:
     // Returns true if at least one row is selected.
     bool hasSelection() const { return table_.getSelectedRows().size() > 0; }
 
+    // Returns the file paths of all currently selected rows. Used by
+    // MainComponent to remember a view's selection across view switches.
+    std::vector<juce::File> selectedFiles() const;
+
+    // Selects rows whose file paths match any in the given set, deselecting
+    // all others. Files not present in the current filtered view are ignored.
+    void setSelectedFiles(const std::vector<juce::File>& files);
+
+    // Clears all selected rows.
+    void deselectAll();
+
     // juce::Component
     void resized() override;
     void paint(juce::Graphics& g) override;
     void mouseDrag(const juce::MouseEvent& e) override;
+
+    // Fired only on user-driven selection changes; programmatic
+    // setSelectedFiles() / deselectAll() do not trigger it.
+    std::function<void()> onSelectionChanged;
 
     // juce::TableListBoxModel
     int  getNumRows() override;
@@ -173,6 +188,7 @@ public:
     void deleteKeyPressed(int lastRowSelected) override;
     void returnKeyPressed(int lastRowSelected) override;
     void backgroundClicked(const juce::MouseEvent&) override;
+    void selectedRowsChanged(int lastRowSelected) override;
     void sortOrderChanged(int newSortColumnId, bool isForwards) override;
     juce::String getCellTooltip(int row, int col) override;
     Component* refreshComponentForCell(int rowNumber, int columnId, bool isRowSelected,
@@ -196,6 +212,20 @@ private:
 
     // Returns all selected row indices as a vector.
     std::vector<int> selectedRows() const;
+
+    // Subclassed look-and-feel for the table header: re-implements
+    // drawTableHeaderColumn so the sort-direction arrow gets a thin light
+    // grey stroke around its filled triangle (default JUCE only fills it).
+    struct HeaderLnF : public juce::LookAndFeel_V4
+    {
+        void drawTableHeaderColumn(juce::Graphics& g,
+                                   juce::TableHeaderComponent& header,
+                                   const juce::String& columnName, int columnId,
+                                   int width, int height,
+                                   bool isMouseOver, bool isMouseDown,
+                                   int columnFlags) override;
+    };
+    HeaderLnF                headerLnF_;
 
     juce::TextEditor         searchBox_;
     juce::TableListBox       table_;

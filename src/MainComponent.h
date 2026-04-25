@@ -108,8 +108,10 @@ private:
     void toggleAlwaysOnTop();
     void applyAlwaysOnTop();
 
-    // Library view management
-    void updateTrackInLibrary(const TrackInfo& updated);
+    // Library view management. followTrack=false skips the auto-navigate-and-
+    // scroll-to-row behaviour, used for batch background updates (e.g. multi-
+    // track Apple Music lookups) so the user's selection isn't yanked around.
+    void updateTrackInLibrary(const TrackInfo& updated, bool followTrack = true);
     void refreshCurrentView();
     void showSidebarItem(int sidebarId);
     // Updates the library table's "now playing" row so it only highlights the
@@ -254,13 +256,17 @@ private:
     juce::Component::SafePointer<juce::DialogWindow> activeEditInfoWindow_;
     juce::File                                        lastEditedInfoFile_;
 
-    // Thin draggable component sitting at the right edge of the sidebar. Drag
-    // horizontally to resize the sidebar between "icons only" and half window.
+    // Thin draggable component sitting at the right edge of the sidebar (or
+    // the left edge of the queue panel). dragSign chooses whether dragging
+    // right grows or shrinks the panel: +1 for the sidebar (right edge of a
+    // left-anchored panel grows when dragged right), -1 for the queue (left
+    // edge of a right-anchored panel grows when dragged left).
     class SidebarDivider : public juce::Component
     {
     public:
         std::function<void(int)> onDragged;     // new proposed sidebar width
         std::function<int()>     currentWidth;
+        int                      dragSign { +1 };
 
         SidebarDivider()
         {
@@ -275,13 +281,14 @@ private:
         void mouseDrag(const juce::MouseEvent& e) override
         {
             if (onDragged)
-                onDragged(startWidth_ + e.getDistanceFromDragStartX());
+                onDragged(startWidth_ + dragSign * e.getDistanceFromDragStartX());
         }
 
     private:
         int startWidth_ { 0 };
     };
     SidebarDivider        sidebarDivider_;
+    SidebarDivider        queueDivider_;
 
     bool                   queueVisible_    { false };
     bool                   shuffleOn_       { false };
@@ -289,6 +296,10 @@ private:
     bool                   alwaysOnTop_     { false };
     int                    activeSidebarId_ { 1 };
     int                    sidebarWidth_    { Constants::sidebarWidth };
+    int                    queueWidth_      { Constants::queuePanelWidth };
+    // Per-view saved selection (by file path so it survives sort changes).
+    // Saved when leaving a view, restored when returning to it.
+    std::map<int, std::vector<juce::File>> savedSelectionByView_;
     std::vector<TrackInfo> fullLibrary_;
     // While true, scan results accumulate into scanBuffer_ instead of
     // fullLibrary_. At scan complete, fullLibrary_ is swapped with the

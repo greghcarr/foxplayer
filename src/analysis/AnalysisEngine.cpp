@@ -122,7 +122,20 @@ void AnalysisEngine::analyseOne(TrackInfo track)
     }
 
     if (changed)
+    {
+        // Refresh non-analysis fields from the on-disk .foxp before saving so
+        // we don't clobber user edits made while analysis was running.
+        // Analysis owns bpm / musicalKey / lufs; everything else stays as the
+        // user (or scanner) last left it.
+        const double      bpmOut  = track.bpm;
+        const juce::String keyOut = track.musicalKey;
+        const float       lufsOut = track.lufs;
+        FoxpFile::load(track);
+        track.bpm        = bpmOut;
+        track.musicalKey = keyOut;
+        track.lufs       = lufsOut;
         FoxpFile::save(track);
+    }
 
     juce::MessageManager::callAsync([this, t = track]() mutable {
         if (onTrackAnalysed) onTrackAnalysed(std::move(t));

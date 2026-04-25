@@ -37,6 +37,12 @@ public:
     bool retreatToPrev();
     bool jumpTo(int index);
 
+    // Removes the track at the given index. No-op if index is the currently
+    // playing track or out of range. Also strips the track from the saved
+    // original-order list when shuffle is on, so the un-shuffle restore
+    // doesn't bring it back.
+    void removeAt(int index);
+
     const std::vector<TrackInfo>& tracks() const { return tracks_; }
 
     // Returns the original (un-shuffled) track order if shuffle is on, or the

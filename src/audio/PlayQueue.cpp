@@ -107,6 +107,36 @@ bool PlayQueue::jumpTo(int newIndex)
     return true;
 }
 
+void PlayQueue::removeAt(int idx)
+{
+    if (idx < 0 || idx >= static_cast<int>(tracks_.size())) return;
+    if (idx == index_) return;  // caller guards this; never silently kill the playing track
+
+    const juce::File removedFile = tracks_[static_cast<size_t>(idx)].file;
+
+    tracks_.erase(tracks_.begin()  + idx);
+    sources_.erase(sources_.begin() + idx);
+
+    if (isShuffled_)
+    {
+        for (int i = 0; i < static_cast<int>(originalTracks_.size()); ++i)
+        {
+            if (originalTracks_[static_cast<size_t>(i)].file == removedFile)
+            {
+                originalTracks_.erase(originalTracks_.begin()  + i);
+                originalSources_.erase(originalSources_.begin() + i);
+                break;
+            }
+        }
+    }
+
+    const int oldIndex = index_;
+    if (idx < index_) --index_;
+
+    if (onQueueChanged) onQueueChanged();
+    if (oldIndex != index_ && onIndexChanged) onIndexChanged(index_);
+}
+
 void PlayQueue::shuffleRemaining()
 {
     if (isShuffled_ || !hasCurrent()) return;

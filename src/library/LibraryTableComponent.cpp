@@ -56,6 +56,7 @@ LibraryTableComponent::LibraryTableComponent()
 void LibraryTableComponent::buildTable()
 {
     auto& hdr = table_.getHeader();
+    hdr.setLookAndFeel(&headerLnF_);
     hdr.setColour(juce::TableHeaderComponent::backgroundColourId, Color::headerBackground);
     hdr.setColour(juce::TableHeaderComponent::textColourId,       Color::textSecondary);
     hdr.setColour(juce::TableHeaderComponent::outlineColourId,    Color::border);
@@ -680,6 +681,38 @@ std::vector<int> LibraryTableComponent::selectedRows() const
     return rows;
 }
 
+std::vector<juce::File> LibraryTableComponent::selectedFiles() const
+{
+    std::vector<juce::File> files;
+    for (int row : selectedRows())
+        if (row >= 0 && row < (int)filteredTracks_.size())
+            files.push_back(filteredTracks_[(size_t)row]->file);
+    return files;
+}
+
+void LibraryTableComponent::setSelectedFiles(const std::vector<juce::File>& files)
+{
+    // Build a sparse set (possibly empty) and set it in one call so the
+    // selection-changed listener only sees the final state. juce::TableListBox::
+    // deselectAllRows() always notifies, so it can't be used here without
+    // looking like a user selection change.
+    juce::SparseSet<int> rows;
+    for (int i = 0; i < (int)filteredTracks_.size(); ++i)
+    {
+        const auto& f = filteredTracks_[(size_t)i]->file;
+        for (const auto& target : files)
+        {
+            if (f == target) { rows.addRange({ i, i + 1 }); break; }
+        }
+    }
+    table_.setSelectedRows(rows, juce::dontSendNotification);
+}
+
+void LibraryTableComponent::deselectAll()
+{
+    table_.setSelectedRows({}, juce::dontSendNotification);
+}
+
 void LibraryTableComponent::triggerEditInfoForSelection()
 {
     const auto rows = selectedRows();
@@ -1140,12 +1173,60 @@ void LibraryTableComponent::backgroundClicked(const juce::MouseEvent&)
     table_.deselectAllRows();
 }
 
+void LibraryTableComponent::selectedRowsChanged(int /*lastRowSelected*/)
+{
+    if (onSelectionChanged) onSelectionChanged();
+}
+
 juce::String LibraryTableComponent::getCellTooltip(int row, int col)
 {
     juce::ignoreUnused(col);
     if (row >= 0 && row < static_cast<int>(filteredTracks_.size()))
         return filteredTracks_[static_cast<size_t>(row)]->file.getFullPathName();
     return {};
+}
+
+void LibraryTableComponent::HeaderLnF::drawTableHeaderColumn(
+    juce::Graphics& g, juce::TableHeaderComponent& header,
+    const juce::String& columnName, int /*columnId*/,
+    int width, int height, bool isMouseOver, bool isMouseDown, int columnFlags)
+{
+    const auto highlight = header.findColour(juce::TableHeaderComponent::highlightColourId);
+    if (isMouseDown)
+        g.fillAll(highlight);
+    else if (isMouseOver)
+        g.fillAll(highlight.withMultipliedAlpha(0.625f));
+
+    juce::Rectangle<int> area(width, height);
+    area.reduce(4, 0);
+
+    const juce::Font titleFont((float) height * 0.5f, juce::Font::bold);
+    g.setFont(titleFont);
+    g.setColour(header.findColour(juce::TableHeaderComponent::textColourId));
+    g.drawFittedText(columnName, area, juce::Justification::centredLeft, 1);
+
+    const bool sorted = (columnFlags & (juce::TableHeaderComponent::sortedForwards
+                                      | juce::TableHeaderComponent::sortedBackwards)) != 0;
+    if (! sorted) return;
+
+    // Place the sort arrow immediately after the title text, with a small gap.
+    constexpr int gap       = 4;
+    const int arrowSize = height / 2;
+    const int textW     = juce::jmin(titleFont.getStringWidth(columnName), area.getWidth());
+    const int arrowX    = area.getX() + textW + gap;
+    if (arrowX + arrowSize > area.getRight())
+        return;  // not enough room
+
+    juce::Path sortArrow;
+    const float tipY = (columnFlags & juce::TableHeaderComponent::sortedForwards) != 0
+                          ? -0.8f : 0.8f;
+    sortArrow.addTriangle(0.0f, 0.0f,
+                          0.5f, tipY,
+                          1.0f, 0.0f);
+
+    const auto arrowArea = juce::Rectangle<int>(arrowX, area.getY(), arrowSize, height)
+                              .reduced(2).toFloat();
+    g.fillPath(sortArrow, sortArrow.getTransformToScaleToFit(arrowArea, true));
 }
 
 } // namespace FoxPlayer
