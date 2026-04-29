@@ -33,7 +33,11 @@ bool FoxpFile::load(TrackInfo& track)
     if (obj->hasProperty("album"))       track.album       = obj->getProperty("album").toString();
     if (obj->hasProperty("genre"))       track.genre       = obj->getProperty("genre").toString();
     if (obj->hasProperty("year"))        track.year        = obj->getProperty("year").toString();
-    if (obj->hasProperty("trackNumber")) track.trackNumber = static_cast<int>(obj->getProperty("trackNumber"));
+    if (obj->hasProperty("trackNumber"))
+    {
+        track.trackNumber       = static_cast<int>(obj->getProperty("trackNumber"));
+        track.foxpHadTrackNumber = true;
+    }
 
     // Analysis results
     if (obj->hasProperty("bpm"))
@@ -71,7 +75,13 @@ bool FoxpFile::save(const TrackInfo& track)
     if (track.album.isNotEmpty())       obj->setProperty("album",       track.album);
     if (track.genre.isNotEmpty())       obj->setProperty("genre",       track.genre);
     if (track.year.isNotEmpty())        obj->setProperty("year",        track.year);
-    if (track.trackNumber > 0)          obj->setProperty("trackNumber", track.trackNumber);
+    // Podcasts: always write trackNumber (even 0) so an explicitly cleared
+    // episode number sticks across rescans. Without this, a missing property
+    // would let the scanner re-run guessEpisodeNumber and re-introduce the
+    // value the user just removed.
+    // Music: only write when non-zero, matching legacy behaviour.
+    if (track.isPodcast || track.trackNumber > 0)
+        obj->setProperty("trackNumber", track.trackNumber);
 
     // Analysis results
     if (track.bpm > 0.0)

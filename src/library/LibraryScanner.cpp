@@ -334,8 +334,11 @@ TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
         info.album  = {};
         info.artist = {};
 
-        // Infer episode number from filename when none was found in tags or foxp.
-        if (info.trackNumber == 0)
+        // Infer episode number from filename when none was found in tags or
+        // foxp. Skip when the foxp explicitly contained a trackNumber
+        // (including 0, meaning the user cleared the field for a "bonus"
+        // episode that has no episode number).
+        if (info.trackNumber == 0 && !info.foxpHadTrackNumber)
             info.trackNumber = guessEpisodeNumber(file.getFileNameWithoutExtension());
     }
     else

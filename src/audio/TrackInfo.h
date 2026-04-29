@@ -35,6 +35,12 @@ struct TrackInfo
     // --- Library metadata ---
     juce::int64  dateAdded    { 0 };     // ms since epoch; set on first scan, persisted in .foxp
 
+    // Transient (not persisted): set true by FoxpFile::load when the .foxp
+    // contained an explicit trackNumber property. Lets the podcast scanner
+    // skip its guessEpisodeNumber heuristic when the user has committed a
+    // value to disk (including 0, meaning "no episode number").
+    bool         foxpHadTrackNumber { false };
+
     bool isValid() const { return file.existsAsFile(); }
 
     juce::String formattedDuration() const
