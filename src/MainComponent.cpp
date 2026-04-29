@@ -231,6 +231,13 @@ MainComponent::MainComponent()
         queue_.appendTracks(std::move(tracks), source);
     };
 
+    libraryTable_.onPlayNextRequested = [this](std::vector<TrackInfo> tracks) {
+        PlayQueue::QueueSource source;
+        source.sidebarId = activeSidebarId_;
+        source.name      = sourceNameForSidebar(activeSidebarId_);
+        queue_.insertAfterCurrent(std::move(tracks), source);
+    };
+
     libraryTable_.onRemoveFromPlaylistRequested = [this](std::vector<TrackInfo> tracks) {
         if (activeSidebarId_ < 1000 || activeSidebarId_ >= 2000) return;
         const int storeId = activeSidebarId_ - 1000;

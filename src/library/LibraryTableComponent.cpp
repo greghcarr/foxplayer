@@ -822,7 +822,8 @@ void LibraryTableComponent::cellClicked(int row, int col, const juce::MouseEvent
     const bool canGoToPodcast = singleSelect &&  clickedTrack.isPodcast && clickedTrack.podcast.isNotEmpty();
 
     juce::PopupMenu menu;
-    menu.addItem(6, "Add to Queue");
+    menu.addItem(14, "Play Next");
+    menu.addItem(6,  "Add to Queue");
     menu.addSeparator();
     menu.addItem(5, "Edit Info",  !mixedType);
     menu.addItem(8, "Clear Info", !mixedType);
@@ -890,6 +891,8 @@ void LibraryTableComponent::cellClicked(int row, int col, const juce::MouseEvent
                 if (showArtUndo) { if (onAlbumArtUndoRequested)    onAlbumArtUndoRequested(clickedTrack); }
                 else             { if (onAlbumArtLookupRequested) onAlbumArtLookupRequested(selectedTracks); }
             }
+            else if (result == 14)
+                { if (onPlayNextRequested) onPlayNextRequested(selectedTracks); }
         });
 }
 

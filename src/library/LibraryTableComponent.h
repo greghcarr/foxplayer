@@ -103,6 +103,11 @@ public:
     // Called when the user chooses "Add to Queue" from the context menu.
     std::function<void(std::vector<TrackInfo>)> onAddToQueueRequested;
 
+    // Called when the user chooses "Play Next" from the context menu.
+    // Receivers should insert the tracks immediately after the currently
+    // playing one rather than appending to the end of the queue.
+    std::function<void(std::vector<TrackInfo>)> onPlayNextRequested;
+
     // Navigation callbacks: go to the artist/album/podcast sidebar item for a track.
     std::function<void(TrackInfo)> onGoToArtistRequested;
     std::function<void(TrackInfo)> onGoToAlbumRequested;
