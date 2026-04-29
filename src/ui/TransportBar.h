@@ -112,6 +112,12 @@ public:
     // Restore muted state without firing callbacks. Call once at startup.
     void setInitialMute(bool muted, double premuteVolume);
 
+    // Starts the 30 Hz animation timer when a track is actively playing,
+    // stops it otherwise. Called from MainComponent on every state change.
+    // Stopping the timer when paused/stopped/no-track means the transport
+    // bar does no per-frame work in those states.
+    void updateTimerState();
+
     // juce::Component
     void paint(juce::Graphics& g) override;
     void resized() override;

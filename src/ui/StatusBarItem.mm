@@ -98,6 +98,18 @@ typedef NS_ENUM(NSInteger, FoxBarState) {
 
         if (state == FoxBarPlaying)
         {
+            // Play triangle while playing — the icon reflects current state
+            // (playing) rather than the action a click would perform.
+            CGFloat h = sz * 0.55, w = h * 0.866;
+            CGFloat ox = (sz - w) * 0.5 + sz * 0.04, oy = (sz - h) * 0.5;
+            [path moveToPoint:NSMakePoint(ox,     oy)];
+            [path lineToPoint:NSMakePoint(ox + w, oy + h * 0.5)];
+            [path lineToPoint:NSMakePoint(ox,     oy + h)];
+            [path closePath];
+        }
+        else if (state == FoxBarPaused)
+        {
+            // Pause bars while paused.
             CGFloat barW = sz * 0.22, barH = sz * 0.55, gap = sz * 0.14;
             CGFloat totalW = 2.0 * barW + gap;
             CGFloat sx = (sz - totalW) * 0.5, sy = (sz - barH) * 0.5;
@@ -106,15 +118,6 @@ typedef NS_ENUM(NSInteger, FoxBarState) {
                                           xRadius:r2 yRadius:r2];
             [path appendBezierPathWithRoundedRect:NSMakeRect(sx + barW + gap, sy, barW, barH)
                                           xRadius:r2 yRadius:r2];
-        }
-        else if (state == FoxBarPaused)
-        {
-            CGFloat h = sz * 0.55, w = h * 0.866;
-            CGFloat ox = (sz - w) * 0.5 + sz * 0.04, oy = (sz - h) * 0.5;
-            [path moveToPoint:NSMakePoint(ox,     oy)];
-            [path lineToPoint:NSMakePoint(ox + w, oy + h * 0.5)];
-            [path lineToPoint:NSMakePoint(ox,     oy + h)];
-            [path closePath];
         }
         else
         {

@@ -522,7 +522,9 @@ TransportBar::TransportBar(AudioEngine& engine)
     // actual mouse activity rather than being polled at 30 Hz.
     addMouseListener(this, true);
 
-    startTimerHz(30);
+    // The animation timer is now started/stopped on demand via
+    // updateTimerState() — only running while audio is actually playing.
+    // No track is loaded at construction time so nothing to start yet.
 }
 
 TransportBar::~TransportBar()
@@ -1384,6 +1386,26 @@ void TransportBar::timerCallback()
     // mouseMove / mouseExit events. The timer's job is reduced to advancing
     // the spinning CD and refreshing the time labels.
     updateDisplay();
+}
+
+void TransportBar::updateTimerState()
+{
+    const bool shouldRun = hasTrack_ && engine_.isPlaying();
+    const bool isRunning = isTimerRunning();
+
+    if (shouldRun && ! isRunning)
+    {
+        // Reset the rotation timestamp so the first tick after a long pause
+        // doesn't compute deltaRads over the entire pause duration and snap
+        // the CD to a new angle.
+        lastUpdateMs_ = 0.0;
+        startTimerHz(30);
+    }
+    else if (! shouldRun && isRunning)
+    {
+        stopTimer();
+        lastUpdateMs_ = 0.0;
+    }
 }
 
 void TransportBar::mouseMove(const juce::MouseEvent& /*e*/)

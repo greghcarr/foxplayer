@@ -1969,6 +1969,9 @@ void MainComponent::setupAudioEngineCallbacks()
     };
 
     engine_.onStateChanged = [this] {
+        // Start/stop the transport bar's animation timer in lockstep with
+        // playback so the bar does no per-frame work while paused or stopped.
+        transportBar_.updateTimerState();
         transportBar_.repaint();
         StatusBarItem::State sbState;
         if (engine_.isPlaying())       sbState = StatusBarItem::State::Playing;
