@@ -655,6 +655,11 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                     }
                     else if (e.mods.isPopupMenu() && item.id >= 1000 && item.id < 2000)
                     {
+                        // Right-click also selects the targeted item, so the
+                        // user sees which row the menu belongs to and the
+                        // library view follows.
+                        selectId(item.id);
+
                         juce::PopupMenu menu;
                         menu.addItem(1, "Play Next");
                         menu.addItem(2, "Add to Queue");
@@ -685,6 +690,9 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                         (item.id >= 4000 && item.id < 5000) ||
                         (item.id >= 5000 && item.id < 6000)))
                     {
+                        // Right-click also selects the targeted item.
+                        selectId(item.id);
+
                         const bool isPodcast = (item.id >= 4000 && item.id < 5000);
                         juce::PopupMenu menu;
                         menu.addItem(1, "Play Next");

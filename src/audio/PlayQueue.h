@@ -22,6 +22,10 @@ public:
     void setTracks(std::vector<TrackInfo> tracks, int startIndex, QueueSource source);
     void appendTracks(std::vector<TrackInfo> tracks, QueueSource source);
     void insertAfterCurrent(std::vector<TrackInfo> tracks, QueueSource source);
+    // Inserts tracks at the given live-queue index. Index is clamped to
+    // [0, tracks().size()]. The currently playing index shifts forward when
+    // tracks are inserted at or before it.
+    void insertAt(int index, std::vector<TrackInfo> tracks, QueueSource source);
     void clear();
 
     bool hasCurrent() const;
@@ -42,6 +46,11 @@ public:
     // original-order list when shuffle is on, so the un-shuffle restore
     // doesn't bring it back.
     void removeAt(int index);
+
+    // Bulk version: removes every index in the given list (deduplicated,
+    // sorted internally). The currently playing index is skipped silently.
+    // Fires onQueueChanged once and onIndexChanged at most once.
+    void removeAt(const std::vector<int>& indices);
 
     const std::vector<TrackInfo>& tracks() const { return tracks_; }
 

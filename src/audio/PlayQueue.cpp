@@ -46,6 +46,34 @@ void PlayQueue::insertAfterCurrent(std::vector<TrackInfo> tracks, PlayQueue::Que
     if (onQueueChanged) onQueueChanged();
 }
 
+void PlayQueue::insertAt(int idx, std::vector<TrackInfo> tracks, PlayQueue::QueueSource source)
+{
+    if (tracks.empty()) return;
+    idx = juce::jlimit(0, static_cast<int>(tracks_.size()), idx);
+    const int n = static_cast<int>(tracks.size());
+
+    tracks_.insert (tracks_.begin()  + idx, tracks.begin(),  tracks.end());
+    sources_.insert(sources_.begin() + idx, tracks.size(), source);
+
+    // When shuffled, drag-dropped additions are appended to the saved natural
+    // order so a later un-shuffle still includes them.
+    if (isShuffled_)
+    {
+        for (auto& t : tracks)
+        {
+            originalTracks_.push_back(std::move(t));
+            originalSources_.push_back(source);
+        }
+    }
+
+    const int oldIndex = index_;
+    if (idx <= index_)
+        index_ += n;
+
+    if (onQueueChanged) onQueueChanged();
+    if (oldIndex != index_ && onIndexChanged) onIndexChanged(index_);
+}
+
 void PlayQueue::clear()
 {
     tracks_.clear();
@@ -132,6 +160,48 @@ void PlayQueue::removeAt(int idx)
 
     const int oldIndex = index_;
     if (idx < index_) --index_;
+
+    if (onQueueChanged) onQueueChanged();
+    if (oldIndex != index_ && onIndexChanged) onIndexChanged(index_);
+}
+
+void PlayQueue::removeAt(const std::vector<int>& indices)
+{
+    if (indices.empty()) return;
+
+    // Sort descending + dedupe so erasures don't shift later indices, and
+    // each index is processed at most once.
+    std::vector<int> sorted = indices;
+    std::sort(sorted.rbegin(), sorted.rend());
+    sorted.erase(std::unique(sorted.begin(), sorted.end()), sorted.end());
+
+    const int oldIndex = index_;
+
+    for (int idx : sorted)
+    {
+        if (idx < 0 || idx >= static_cast<int>(tracks_.size())) continue;
+        if (idx == index_) continue;
+
+        const juce::File removedFile = tracks_[static_cast<size_t>(idx)].file;
+
+        tracks_.erase(tracks_.begin()  + idx);
+        sources_.erase(sources_.begin() + idx);
+
+        if (isShuffled_)
+        {
+            for (int i = 0; i < static_cast<int>(originalTracks_.size()); ++i)
+            {
+                if (originalTracks_[static_cast<size_t>(i)].file == removedFile)
+                {
+                    originalTracks_.erase(originalTracks_.begin()  + i);
+                    originalSources_.erase(originalSources_.begin() + i);
+                    break;
+                }
+            }
+        }
+
+        if (idx < index_) --index_;
+    }
 
     if (onQueueChanged) onQueueChanged();
     if (oldIndex != index_ && onIndexChanged) onIndexChanged(index_);

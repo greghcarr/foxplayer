@@ -831,8 +831,29 @@ MainComponent::MainComponent()
             playCurrentQueueItem();
     };
 
-    queueView_.onRemoveTrack = [this](int queueIndex) {
-        queue_.removeAt(queueIndex);
+    queueView_.onRemoveTracks = [this](std::vector<int> queueIndices) {
+        queue_.removeAt(queueIndices);
+    };
+
+    queueView_.onTracksDropped = [this](juce::StringArray paths, int insertIndex) {
+        std::vector<TrackInfo> tracks;
+        tracks.reserve(static_cast<size_t>(paths.size()));
+        for (const auto& p : paths)
+        {
+            const juce::File f(p);
+            for (const auto& t : fullLibrary_)
+                if (t.file == f) { tracks.push_back(t); break; }
+        }
+        if (tracks.empty()) return;
+
+        PlayQueue::QueueSource source;
+        source.sidebarId = activeSidebarId_;
+        source.name      = sourceNameForSidebar(activeSidebarId_);
+
+        if (insertIndex < 0)
+            queue_.appendTracks(std::move(tracks), source);
+        else
+            queue_.insertAt(insertIndex, std::move(tracks), source);
     };
 
     // Sidebar callbacks
