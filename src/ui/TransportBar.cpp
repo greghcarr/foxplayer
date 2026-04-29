@@ -17,6 +17,11 @@ static constexpr float cdDataInnerRatio  = 0.43f;  // CD hub ring outer radius a
 static constexpr float cdHoleRatio       = 0.12f;  // CD spindle hole radius as fraction of disc radius
 static constexpr float infoLetterSpacing = 0.2f;   // extra px between glyphs in info text
 
+// Forward decl: defined later in this file, used inside TransportBar::paint().
+static void drawCachedGlyphs(juce::Graphics& g,
+                              const juce::GlyphArrangement& glyphs,
+                              int x, int y, int w, int h);
+
 // ----------------------------------------------------------------------------
 // TransportButton
 // ----------------------------------------------------------------------------
@@ -634,24 +639,10 @@ void TransportBar::paint(juce::Graphics& g)
     const float     infoAlpha = juce::jlimit(0.0f, 1.0f,
         (static_cast<float>(getWidth()) - fadeToW) / (fadeFromW - fadeToW));
 
-    // Measure the widest info-text line so the gradient can anchor its
-    // transparent-left edge just past the info text's right edge. That way
-    // the fade only starts to obscure the title/artist/source once the text
-    // is about to collide with the current-time label.
-    auto textWidth = [](const juce::Font& f, const juce::String& text) -> int {
-        juce::GlyphArrangement ga;
-        ga.addLineOfText(f, text, 0.0f, 0.0f);
-        return static_cast<int>(std::ceil(ga.getBoundingBox(0, -1, true).getWidth()));
-    };
-
-    // Width of text rendered via drawTextSpaced (accounts for letter-spacing gaps).
-    auto spacedWidth = [](const juce::Font& f, const juce::String& text, float sp) -> int {
-        juce::GlyphArrangement ga;
-        ga.addLineOfText(f, text, 0.0f, 0.0f);
-        for (int i = 1; i < ga.getNumGlyphs(); ++i)
-            ga.moveRangeOfGlyphs(i, ga.getNumGlyphs() - i, sp, 0.0f);
-        return static_cast<int>(std::ceil(ga.getBoundingBox(0, -1, true).getWidth()));
-    };
+    // Glyph-arrangement caching: build once per track/source change instead
+    // of re-shaping every paint via juce::ShapedText (was the dominant CPU
+    // cost after the drop-shadow fix).
+    ensureInfoTextLayout();
 
     // Title rendering depends on whether there's a real title tag or we're
     // falling back to the filename. Real title -> italic, tag text only.
@@ -668,21 +659,17 @@ void TransportBar::paint(juce::Graphics& g)
     const juce::Font sourceFont   = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f));
 
     int infoMaxTextW = 0;
-    int prefixTextW  = 0;
-    int sourceTextW  = 0;
+    int prefixTextW  = infoTextLayout_.prefixWidthSpaced;
+    int sourceTextW  = infoTextLayout_.sourceWidthSpaced;
     if (hasTrack_ && !infoAreaBounds_.isEmpty())
     {
-        infoMaxTextW = textWidth(titleFont, titleText);
+        infoMaxTextW = infoTextLayout_.titleWidthUnspaced;
         const bool noArtist = currentTrack_.artist.isEmpty();
         infoMaxTextW = juce::jmax(infoMaxTextW,
-            noArtist ? textWidth(noArtistFont, juce::String("(no artist)"))
-                     : textWidth(artistFont,   currentTrack_.artist));
+            noArtist ? infoTextLayout_.noArtistWidthUnspaced
+                     : infoTextLayout_.artistWidthUnspaced);
         if (playingFromName_.isNotEmpty())
-        {
-            prefixTextW = spacedWidth(prefixFont, juce::String("Playing from: "), infoLetterSpacing);
-            sourceTextW = spacedWidth(sourceFont, playingFromName_, infoLetterSpacing);
             infoMaxTextW = juce::jmax(infoMaxTextW, prefixTextW + sourceTextW);
-        }
     }
 
     // Gradient boundaries. Solid region spans current-time -> total-time. The
@@ -798,12 +785,12 @@ void TransportBar::paint(juce::Graphics& g)
         // Line 1: song title. Nudged up 2px so there's a touch more breathing
         // room above the artist line.
         g.setColour(Color::textPrimary.withMultipliedAlpha(infoAlpha));
-        drawTextSpaced(g, titleFont, titleText, infoLetterSpacing,
-                       infoX, infoY - 2, infoW, line1H);
+        drawCachedGlyphs(g, infoTextLayout_.titleGlyphs,
+                         infoX, infoY - 2, infoW, line1H);
 
         // Clickable title bounds (clipped to the gradient fade point).
         {
-            const int titleTextW   = spacedWidth(titleFont, titleText, infoLetterSpacing);
+            const int titleTextW   = infoTextLayout_.titleWidthSpaced;
             const int rawRight     = infoX + juce::jmin(titleTextW, infoW);
             const int clippedRight = juce::jmin(rawRight, gradStart);
             titleLinkBounds_ = (clippedRight > infoX)
@@ -835,11 +822,11 @@ void TransportBar::paint(juce::Graphics& g)
         }
         else
         {
-            drawTextSpaced(g, artistFont, line2Text, infoLetterSpacing,
-                           infoX, artist2Y, infoW, line2H);
+            drawCachedGlyphs(g, infoTextLayout_.artistGlyphs,
+                             infoX, artist2Y, infoW, line2H);
 
             // Clickable artist bounds (clipped to the gradient fade point).
-            const int artistTextW  = spacedWidth(artistFont, line2Text, infoLetterSpacing);
+            const int artistTextW  = infoTextLayout_.artistWidthSpaced;
             const int rawRight2    = infoX + juce::jmin(artistTextW, infoW);
             const int clippedRight2 = juce::jmin(rawRight2, gradStart);
             artistLinkBounds_ = (clippedRight2 > infoX)
@@ -862,13 +849,13 @@ void TransportBar::paint(juce::Graphics& g)
             const int source3Y = artist2Y + line2H + lineGap + 2;
 
             g.setColour(Color::textDim.withMultipliedAlpha(infoAlpha));
-            drawTextSpaced(g, prefixFont, "Playing from: ", infoLetterSpacing,
-                           infoX, source3Y, prefixTextW + 2, line3H);
+            drawCachedGlyphs(g, infoTextLayout_.prefixGlyphs,
+                             infoX, source3Y, prefixTextW + 2, line3H);
 
             const int linkX = infoX + prefixTextW;
             g.setColour(Color::textSecondary.withMultipliedAlpha(infoAlpha));
-            drawTextSpaced(g, sourceFont, playingFromName_, infoLetterSpacing,
-                           linkX, source3Y, infoW - prefixTextW, line3H);
+            drawCachedGlyphs(g, infoTextLayout_.sourceGlyphs,
+                             linkX, source3Y, infoW - prefixTextW, line3H);
 
             // Click hit-box: only cover the visible portion of the link.
             const int linkRight = juce::jmin(linkX + sourceTextW + 4,
@@ -1218,6 +1205,123 @@ void TransportBar::resized()
     }
 
     repaint();
+}
+
+// Builds a juce::GlyphArrangement for `text` in `font`, positioned with its
+// baseline at y = (ascent - descent) / 2 (so a translation of y + h/2 at draw
+// time produces vertically-centred text inside (x, y, w, h)). Applies the
+// same letter-spacing pass as drawTextSpaced. Returns the resulting bounding
+// width including the spacing offsets.
+static int buildSpacedGlyphs(juce::GlyphArrangement& out,
+                              const juce::Font& font,
+                              const juce::String& text,
+                              float letterSpacing)
+{
+    out.clear();
+    if (text.isEmpty()) return 0;
+
+    const float baseline = (font.getAscent() - font.getDescent()) * 0.5f;
+    out.addLineOfText(font, text, 0.0f, baseline);
+
+    if (letterSpacing != 0.0f)
+        for (int i = 1; i < out.getNumGlyphs(); ++i)
+            out.moveRangeOfGlyphs(i, out.getNumGlyphs() - i, letterSpacing, 0.0f);
+
+    return static_cast<int>(std::ceil(out.getBoundingBox(0, -1, true).getWidth()));
+}
+
+// Draws a cached glyph arrangement (built by buildSpacedGlyphs) at vertical
+// centre of (x, y, w, h), clipped to that rect. Avoids the expensive
+// re-shape (juce::ShapedText) that every paint would otherwise do.
+static void drawCachedGlyphs(juce::Graphics& g,
+                              const juce::GlyphArrangement& glyphs,
+                              int x, int y, int w, int h)
+{
+    if (glyphs.getNumGlyphs() == 0) return;
+
+    g.saveState();
+    g.reduceClipRegion(x, y, w, h);
+    g.addTransform(juce::AffineTransform::translation(static_cast<float>(x),
+                                                       static_cast<float>(y) + static_cast<float>(h) * 0.5f));
+    glyphs.draw(g);
+    g.restoreState();
+}
+
+void TransportBar::ensureInfoTextLayout()
+{
+    auto& L = infoTextLayout_;
+
+    const juce::String title           = currentTrack_.title;
+    const juce::String artist          = currentTrack_.artist;
+    const juce::String podcast         = currentTrack_.podcast;
+    const juce::String fromName        = playingFromName_;
+    const bool         isPodcast       = currentTrack_.isPodcast;
+    const bool         hasRealTitle    = title.isNotEmpty();
+
+    const juce::String displayTitle    = hasRealTitle ? title : currentTrack_.file.getFileName();
+    const juce::String line2Text       = isPodcast ? podcast : artist;
+
+    if (L.valid
+        && L.title           == title
+        && L.artist          == artist
+        && L.podcast         == podcast
+        && L.playingFromName == fromName
+        && L.isPodcast       == isPodcast
+        && L.hasRealTitle    == hasRealTitle)
+        return;  // cache hit
+
+    L.title           = title;
+    L.artist          = artist;
+    L.podcast         = podcast;
+    L.playingFromName = fromName;
+    L.isPodcast       = isPodcast;
+    L.hasRealTitle    = hasRealTitle;
+
+    const juce::Font titleFont    = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(18.0f).withStyle("Bold"));
+    const juce::Font artistFont   = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f));
+    const juce::Font noArtistFont = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f)).italicised();
+    const juce::Font prefixFont   = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f)).italicised();
+    const juce::Font sourceFont   = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f));
+
+    // Title: cache spaced version (used for both drawing and hit-box width).
+    L.titleWidthSpaced = buildSpacedGlyphs(L.titleGlyphs, titleFont, displayTitle, infoLetterSpacing);
+    {
+        juce::GlyphArrangement tmp;
+        L.titleWidthUnspaced = buildSpacedGlyphs(tmp, titleFont, displayTitle, 0.0f);
+    }
+
+    // Line 2: artist or podcast (or "(no artist)" italics for empty).
+    if (line2Text.isEmpty())
+    {
+        L.artistGlyphs.clear();
+        L.artistWidthSpaced   = 0;
+        L.artistWidthUnspaced = 0;
+        juce::GlyphArrangement tmp;
+        L.noArtistWidthUnspaced = buildSpacedGlyphs(tmp, noArtistFont, "(no artist)", 0.0f);
+    }
+    else
+    {
+        L.artistWidthSpaced = buildSpacedGlyphs(L.artistGlyphs, artistFont, line2Text, infoLetterSpacing);
+        juce::GlyphArrangement tmp;
+        L.artistWidthUnspaced  = buildSpacedGlyphs(tmp, artistFont, line2Text, 0.0f);
+        L.noArtistWidthUnspaced = 0;
+    }
+
+    // "Playing from: <source>" line.
+    if (fromName.isNotEmpty())
+    {
+        L.prefixWidthSpaced = buildSpacedGlyphs(L.prefixGlyphs, prefixFont, "Playing from: ", infoLetterSpacing);
+        L.sourceWidthSpaced = buildSpacedGlyphs(L.sourceGlyphs, sourceFont, fromName,        infoLetterSpacing);
+    }
+    else
+    {
+        L.prefixGlyphs.clear();
+        L.sourceGlyphs.clear();
+        L.prefixWidthSpaced = 0;
+        L.sourceWidthSpaced = 0;
+    }
+
+    L.valid = true;
 }
 
 void TransportBar::ensureShadowImage(juce::Rectangle<int> artBounds, bool isPodcast)

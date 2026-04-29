@@ -189,6 +189,41 @@ private:
     static constexpr int shadowMargin      = shadowRadius * 2; // padding around shape
     void ensureShadowImage(juce::Rectangle<int> artBounds, bool isPodcast);
 
+    // Cached glyph arrangements + widths for the info-text region (title,
+    // artist/podcast, "Playing from: <source>"). Without this, every paint
+    // re-shapes each line through juce::GlyphArrangement / ShapedText, which
+    // was responsible for ~10-15% of total CPU. Rebuilt only when track
+    // metadata or playing-from name changes.
+    struct InfoTextLayout
+    {
+        bool valid { false };
+
+        // Cached inputs (cache invalidates when these change).
+        juce::String title;
+        juce::String artist;
+        juce::String podcast;
+        juce::String playingFromName;
+        bool         isPodcast { false };
+        bool         hasRealTitle { false };
+
+        // Glyph arrangements at baseline (0, 0); draw with a translation
+        // transform to position them on the actual baseline at paint time.
+        juce::GlyphArrangement titleGlyphs;        // letter-spaced
+        juce::GlyphArrangement artistGlyphs;       // letter-spaced (line 2 contents: artist or podcast)
+        juce::GlyphArrangement prefixGlyphs;       // letter-spaced ("Playing from: ")
+        juce::GlyphArrangement sourceGlyphs;       // letter-spaced (the source name)
+
+        int titleWidthUnspaced   { 0 };  // for fade-anchor calculation
+        int titleWidthSpaced     { 0 };  // for hit-box
+        int artistWidthUnspaced  { 0 };
+        int artistWidthSpaced    { 0 };
+        int noArtistWidthUnspaced{ 0 };
+        int prefixWidthSpaced    { 0 };
+        int sourceWidthSpaced    { 0 };
+    };
+    InfoTextLayout infoTextLayout_;
+    void ensureInfoTextLayout();
+
     // Hover state for clickable info text, seek thumb, and volume slider (polled at 30 Hz).
     bool hoveredTitle_  { false };
     bool hoveredArtist_ { false };
