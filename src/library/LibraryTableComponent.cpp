@@ -1117,6 +1117,15 @@ void LibraryTableComponent::mouseDrag(const juce::MouseEvent& e)
         && (e.originalComponent == &hdr || hdr.isParentOf(e.originalComponent)))
         return;
 
+    // Don't intercept drags that started on either scrollbar — the user is
+    // scrolling, not dragging tracks out of the table.
+    auto& vsb = table_.getVerticalScrollBar();
+    auto& hsb = table_.getHorizontalScrollBar();
+    if (e.originalComponent != nullptr
+        && (e.originalComponent == &vsb || vsb.isParentOf(e.originalComponent)
+         || e.originalComponent == &hsb || hsb.isParentOf(e.originalComponent)))
+        return;
+
     if (e.getDistanceFromDragStart() < 8) return;
 
     const auto rows = selectedRows();
