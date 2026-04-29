@@ -1267,6 +1267,7 @@ void TransportBar::ensureInfoTextLayout()
     const juce::String line2Text       = isPodcast ? podcast : artist;
 
     if (L.valid
+        && L.file            == currentTrack_.file
         && L.title           == title
         && L.artist          == artist
         && L.podcast         == podcast
@@ -1275,6 +1276,7 @@ void TransportBar::ensureInfoTextLayout()
         && L.hasRealTitle    == hasRealTitle)
         return;  // cache hit
 
+    L.file            = currentTrack_.file;
     L.title           = title;
     L.artist          = artist;
     L.podcast         = podcast;

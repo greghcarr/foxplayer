@@ -205,7 +205,10 @@ private:
     {
         bool valid { false };
 
-        // Cached inputs (cache invalidates when these change).
+        // Cached inputs (cache invalidates when these change). file is part of
+        // the key so two tracks with empty title tags don't collide on cache —
+        // displayTitle() falls back to the filename when title is empty.
+        juce::File   file;
         juce::String title;
         juce::String artist;
         juce::String podcast;
