@@ -177,6 +177,18 @@ private:
     float                recordRotation_ { 0.0f };
     double               lastUpdateMs_   { 0.0 };  // wall-clock time of last timer tick
 
+    // Pre-rendered drop-shadow image, blitted under the album art instead of
+    // re-rasterising a box blur on every paint (it was the single largest
+    // CPU consumer in the profile). Keyed by size + shape; rebuilt only when
+    // those change (track switch, mini-player resize).
+    juce::Image          shadowImage_;
+    int                  shadowImageW_     { 0 };
+    int                  shadowImageH_     { 0 };
+    bool                 shadowImageIsCD_  { true };  // true=ellipse, false=rounded rect
+    static constexpr int shadowRadius      = 12;
+    static constexpr int shadowMargin      = shadowRadius * 2; // padding around shape
+    void ensureShadowImage(juce::Rectangle<int> artBounds, bool isPodcast);
+
     // Hover state for clickable info text, seek thumb, and volume slider (polled at 30 Hz).
     bool hoveredTitle_  { false };
     bool hoveredArtist_ { false };

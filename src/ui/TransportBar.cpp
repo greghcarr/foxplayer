@@ -278,10 +278,9 @@ static void drawSpinningRecord(juce::Graphics& g,
 
     const bool hasArt = art.isValid();
 
-    // Drop shadow (disc is circular — rotation makes no difference here).
-    juce::Path shadowCircle;
-    shadowCircle.addEllipse(discF);
-    juce::DropShadow(juce::Colours::black.withAlpha(0.85f), 12, {}).drawForPath(g, shadowCircle);
+    // Drop shadow is now pre-rendered by the caller (TransportBar::paint) and
+    // blitted from a cached Image — drawing it from scratch every paint via
+    // juce::DropShadow::drawForPath was the single largest CPU sink.
 
     g.saveState();
     g.addTransform(juce::AffineTransform::rotation(rotation, centre.x, centre.y));
@@ -343,9 +342,7 @@ static void drawPodcastArt(juce::Graphics& g,
     constexpr float cornerR = 6.0f;
     const auto boundsF = bounds.toFloat();
 
-    juce::Path shadow;
-    shadow.addRoundedRectangle(boundsF, cornerR);
-    juce::DropShadow(juce::Colours::black.withAlpha(0.85f), 12, {}).drawForPath(g, shadow);
+    // Drop shadow pre-rendered by TransportBar::paint, see ensureShadowImage().
 
     if (art.isValid())
     {
@@ -743,6 +740,14 @@ void TransportBar::paint(juce::Graphics& g)
     // Album art / CD — podcasts get a stationary rounded square, music gets the spinning CD.
     if (!albumArtBounds_.isEmpty() && hasTrack_)
     {
+        // Pre-rendered drop shadow, blitted in one cheap image draw rather
+        // than re-rasterising a box-blurred shadow each frame.
+        ensureShadowImage(albumArtBounds_, currentTrack_.isPodcast);
+        if (shadowImage_.isValid())
+            g.drawImageAt(shadowImage_,
+                          albumArtBounds_.getX() - shadowMargin,
+                          albumArtBounds_.getY() - shadowMargin);
+
         if (currentTrack_.isPodcast)
         {
             const juce::String fallback = currentTrack_.podcast.isNotEmpty()
@@ -1213,6 +1218,53 @@ void TransportBar::resized()
     }
 
     repaint();
+}
+
+void TransportBar::ensureShadowImage(juce::Rectangle<int> artBounds, bool isPodcast)
+{
+    const int w   = artBounds.getWidth();
+    const int h   = artBounds.getHeight();
+    const bool cd = ! isPodcast;
+
+    if (shadowImage_.isValid()
+        && shadowImageW_ == w
+        && shadowImageH_ == h
+        && shadowImageIsCD_ == cd)
+        return;
+
+    shadowImageW_    = w;
+    shadowImageH_    = h;
+    shadowImageIsCD_ = cd;
+
+    if (w <= 0 || h <= 0)
+    {
+        shadowImage_ = {};
+        return;
+    }
+
+    // Image has shadowMargin px of padding on every side so the blurred edges
+    // have room to fall off without being clipped.
+    const int imgW = w + shadowMargin * 2;
+    const int imgH = h + shadowMargin * 2;
+    juce::Image img(juce::Image::ARGB, imgW, imgH, true);
+
+    juce::Graphics g(img);
+
+    juce::Path shape;
+    const auto shapeBounds = juce::Rectangle<float>(
+        static_cast<float>(shadowMargin),
+        static_cast<float>(shadowMargin),
+        static_cast<float>(w),
+        static_cast<float>(h));
+    if (cd)
+        shape.addEllipse(shapeBounds);
+    else
+        shape.addRoundedRectangle(shapeBounds, 6.0f);
+
+    juce::DropShadow(juce::Colours::black.withAlpha(0.85f),
+                     shadowRadius, {}).drawForPath(g, shape);
+
+    shadowImage_ = std::move(img);
 }
 
 void TransportBar::timerCallback()
