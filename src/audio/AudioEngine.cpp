@@ -18,12 +18,15 @@ AudioEngine::AudioEngine()
     sourcePlayer_.setSource(&transportSource_);
     transportSource_.addChangeListener(this);
 
-    startTimerHz(30); // 30 Hz position polling for seek bar updates
+    // No periodic timer here: every state transition (play/pause/resume/stop/
+    // seek/track-finished) calls onStateChanged synchronously below, and the
+    // TransportBar runs its own 30 Hz timer for seek-bar visual updates while
+    // playing. A second timer here was firing redundant transportBar.repaint()
+    // and StatusBarItem state-set calls every 33 ms, even when nothing changed.
 }
 
 AudioEngine::~AudioEngine()
 {
-    stopTimer();
     transportSource_.removeChangeListener(this);
     transportSource_.setSource(nullptr);
     sourcePlayer_.setSource(nullptr);
@@ -184,12 +187,6 @@ void AudioEngine::changeListenerCallback(juce::ChangeBroadcaster* source)
         if (onTrackFinished) onTrackFinished();
         if (onStateChanged)  onStateChanged();
     }
-}
-
-void AudioEngine::timerCallback()
-{
-    if (onStateChanged && isPlaying())
-        onStateChanged(); // triggers seek bar repaint
 }
 
 } // namespace FoxPlayer

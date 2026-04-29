@@ -12,8 +12,7 @@ namespace FoxPlayer
 //
 // AudioEngine runs on the message thread except for the audio callback (getNextAudioBlock),
 // which JUCE dispatches on the audio thread internally via AudioSourcePlayer.
-class AudioEngine : private juce::ChangeListener,
-                    private juce::Timer
+class AudioEngine : private juce::ChangeListener
 {
 public:
     AudioEngine();
@@ -62,9 +61,6 @@ private:
 
     // juce::ChangeListener — fired by AudioTransportSource when state changes.
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
-
-    // juce::Timer — polls position for seek bar updates.
-    void timerCallback() override;
 
     juce::AudioDeviceManager           deviceManager_;
     juce::AudioFormatManager           formatManager_;

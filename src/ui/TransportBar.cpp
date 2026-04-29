@@ -517,6 +517,11 @@ TransportBar::TransportBar(AudioEngine& engine)
         if (onRepeatToggled) onRepeatToggled(repeatButton_.toggleState);
     };
 
+    // Listen to mouse moves on this component AND all nested children (volume
+    // slider, transport buttons). With this, refreshHoverState() runs only on
+    // actual mouse activity rather than being polled at 30 Hz.
+    addMouseListener(this, true);
+
     startTimerHz(30);
 }
 
@@ -1373,34 +1378,54 @@ void TransportBar::ensureShadowImage(juce::Rectangle<int> artBounds, bool isPodc
 
 void TransportBar::timerCallback()
 {
-    // Poll hover state for clickable info text. Runs at 30 Hz which is
-    // responsive enough and avoids mouse-listener plumbing for child components.
-    const auto mousePos = getMouseXYRelative();
-    const bool newHoveredTitle  = !titleLinkBounds_.isEmpty()  && titleLinkBounds_.contains(mousePos);
-    const bool newHoveredArtist = !artistLinkBounds_.isEmpty() && artistLinkBounds_.contains(mousePos);
-    const bool newHoveredSource = !sourceLinkBounds_.isEmpty() && sourceLinkBounds_.contains(mousePos);
-    const bool newHoveredSeek   = !draggingSeek_ && !seekBarBounds_.isEmpty()
-                                    && seekBarBounds_.expanded(0, 8).contains(mousePos);
-    const bool newHoveredVolume = volumeSlider_.getBounds().contains(mousePos);
-    if (newHoveredTitle  != hoveredTitle_  ||
-        newHoveredArtist != hoveredArtist_ ||
-        newHoveredSource != hoveredSource_ ||
-        newHoveredSeek   != hoveredSeek_   ||
-        newHoveredVolume != hoveredVolume_)
-    {
-        hoveredTitle_  = newHoveredTitle;
-        hoveredArtist_ = newHoveredArtist;
-        hoveredSource_ = newHoveredSource;
-        hoveredSeek_   = newHoveredSeek;
-        hoveredVolume_ = newHoveredVolume;
-        if (volumeSliderLnF_.hovered != newHoveredVolume)
-        {
-            volumeSliderLnF_.hovered = newHoveredVolume;
-            volumeSlider_.repaint();
-        }
-        repaint();
-    }
+    // Hover state used to be polled here at 30 Hz; it's now driven by
+    // mouseMove / mouseExit events. The timer's job is reduced to advancing
+    // the spinning CD and refreshing the time labels.
     updateDisplay();
+}
+
+void TransportBar::mouseMove(const juce::MouseEvent& /*e*/)
+{
+    refreshHoverState();
+}
+
+void TransportBar::mouseExit(const juce::MouseEvent& /*e*/)
+{
+    // Either a real exit out of the bar (mouse left the window area) or a
+    // transition to a child. Either way, refreshHoverState recomputes from the
+    // current mouse position so over-child cases re-assert their hover via the
+    // immediately following mouseEnter / mouseMove on the child.
+    refreshHoverState();
+}
+
+void TransportBar::refreshHoverState()
+{
+    const auto mousePos         = getMouseXYRelative();
+    const bool newHoveredTitle  = ! titleLinkBounds_.isEmpty()  && titleLinkBounds_.contains(mousePos);
+    const bool newHoveredArtist = ! artistLinkBounds_.isEmpty() && artistLinkBounds_.contains(mousePos);
+    const bool newHoveredSource = ! sourceLinkBounds_.isEmpty() && sourceLinkBounds_.contains(mousePos);
+    const bool newHoveredSeek   = ! draggingSeek_ && ! seekBarBounds_.isEmpty()
+                                  && seekBarBounds_.expanded(0, 8).contains(mousePos);
+    const bool newHoveredVolume = volumeSlider_.getBounds().contains(mousePos);
+
+    if (newHoveredTitle  == hoveredTitle_
+        && newHoveredArtist == hoveredArtist_
+        && newHoveredSource == hoveredSource_
+        && newHoveredSeek   == hoveredSeek_
+        && newHoveredVolume == hoveredVolume_)
+        return;
+
+    hoveredTitle_  = newHoveredTitle;
+    hoveredArtist_ = newHoveredArtist;
+    hoveredSource_ = newHoveredSource;
+    hoveredSeek_   = newHoveredSeek;
+    hoveredVolume_ = newHoveredVolume;
+    if (volumeSliderLnF_.hovered != newHoveredVolume)
+    {
+        volumeSliderLnF_.hovered = newHoveredVolume;
+        volumeSlider_.repaint();
+    }
+    repaint();
 }
 
 void TransportBar::updateDisplay()

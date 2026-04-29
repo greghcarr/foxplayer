@@ -130,7 +130,14 @@ private:
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
+    void mouseMove(const juce::MouseEvent& e) override;
+    void mouseExit(const juce::MouseEvent& e) override;
     double seekBarNormalizedX(int x) const;
+
+    // Recomputes hover state from the current mouse position and repaints if
+    // anything changed. Replaces the hover poll that used to run inside the
+    // 30 Hz timer — now driven by mouseMove / mouseExit events instead.
+    void refreshHoverState();
 
     AudioEngine& engine_;
     TrackInfo    currentTrack_;
