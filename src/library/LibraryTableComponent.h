@@ -25,6 +25,11 @@ public:
     // so it reflects whatever sidebar item the user currently has open.
     void setSearchPlaceholder(const juce::String& viewName);
 
+    // Clears any text in the search box without firing onTextChange. Used by
+    // MainComponent when the user switches sidebar views — a search query
+    // typed for one view shouldn't leak into another.
+    void clearSearch();
+
     // Current view mode. Controls whether the leftmost "#" column is present
     // at all (added/removed from the header so it doesn't even appear in the
     // column chooser menu), what value that column shows, and whether the

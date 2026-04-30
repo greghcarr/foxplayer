@@ -1385,6 +1385,11 @@ void MainComponent::showSidebarItem(int sidebarId)
             savedSelectionByView_[activeSidebarId_] = std::move(outgoing);
         else
             savedSelectionByView_.erase(activeSidebarId_);
+
+        // Clear the search box so a query typed for the previous view doesn't
+        // narrow this one. dontSendNotification keeps applyFilter from running
+        // on stale tracks; refreshCurrentView below repopulates correctly.
+        libraryTable_.clearSearch();
     }
 
     activeSidebarId_ = sidebarId;

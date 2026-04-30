@@ -528,6 +528,14 @@ void LibraryTableComponent::setSearchPlaceholder(const juce::String& viewName)
     searchBox_.repaint();
 }
 
+void LibraryTableComponent::clearSearch()
+{
+    if (searchBox_.getText().isEmpty()) return;
+    // dontSendNotification suppresses onTextChange so applyFilter doesn't run
+    // here; the caller is about to switch tracks/view and will repopulate.
+    searchBox_.setText({}, juce::dontSendNotification);
+}
+
 void LibraryTableComponent::focusSearchBox()
 {
     searchBox_.grabKeyboardFocus();
