@@ -4,7 +4,7 @@
 #include <JuceHeader.h>
 #include <functional>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Panel that shows the current play queue as a simple list.
@@ -71,4 +71,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QueueView)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

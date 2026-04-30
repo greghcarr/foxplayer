@@ -1,7 +1,7 @@
 #include "SidebarComponent.h"
 #include "Constants.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 using namespace Constants;
@@ -988,4 +988,4 @@ void SidebarComponent::itemDropped(const SourceDetails& details)
         onTracksDropped(targetId, paths);
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

@@ -1,8 +1,7 @@
 #include "TransportBar.h"
 #include "Constants.h"
-#include "Fonts.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 using namespace Constants;
@@ -318,10 +317,11 @@ static void drawSpinningRecord(juce::Graphics& g,
 
         // Text along the outer portion of the label.
         const float textRadius = R * 0.62f;
-        const auto  tf         = getFoxwhelpTypeface();
-        const juce::Font labelFont(tf);
+        const juce::Font labelFont(juce::FontOptions().withName("Helvetica Neue")
+                                                        .withHeight(R * 0.33f)
+                                                        .withStyle("Bold"));
         g.setColour(juce::Colour(0xff2c2c2c));
-        drawArcText(g, labelText, centre, textRadius, labelFont.withHeight(R * 0.33f));
+        drawArcText(g, labelText, centre, textRadius, labelFont);
 
         // Hub ring (slightly grey to distinguish from the white label).
         g.setColour(juce::Colour(0xffd8d8d8));
@@ -370,9 +370,9 @@ static void drawPodcastArt(juce::Graphics& g,
 
         if (fallbackText.isNotEmpty())
         {
-            const auto tf = getFoxwhelpTypeface();
             g.setColour(juce::Colour(0xffaaaaaa));
-            g.setFont(juce::Font(tf).withHeight(static_cast<float>(bounds.getHeight()) * 0.18f));
+            g.setFont(juce::Font(juce::FontOptions().withName("Helvetica Neue")
+                                                      .withHeight(static_cast<float>(bounds.getHeight()) * 0.18f)));
             g.drawText(fallbackText, bounds.reduced(4), juce::Justification::centred, true);
         }
     }
@@ -1605,4 +1605,4 @@ double TransportBar::seekBarNormalizedX(int x) const
     return juce::jlimit(0.0, 1.0, static_cast<double>(x - left) / width);
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

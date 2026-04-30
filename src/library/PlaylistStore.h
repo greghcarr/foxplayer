@@ -4,7 +4,7 @@
 #include <functional>
 #include <vector>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 struct Playlist
@@ -53,4 +53,4 @@ private:
     int                          nextId_ { 1 };
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

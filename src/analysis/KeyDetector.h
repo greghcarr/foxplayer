@@ -2,7 +2,7 @@
 
 #include <JuceHeader.h>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Estimates the musical key of an audio file using a chromagram correlated
@@ -23,4 +23,4 @@ public:
                                 const Settings& settings);
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

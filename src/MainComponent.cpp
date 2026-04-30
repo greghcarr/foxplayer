@@ -1,11 +1,11 @@
 #include "MainComponent.h"
 #include "Constants.h"
-#include "audio/FoxpFile.h"
+#include "audio/StylFile.h"
 #include "ui/SongInfoEditor.h"
 #include <algorithm>
 #include <set>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 using namespace Constants;
@@ -13,7 +13,7 @@ using namespace Constants;
 static constexpr int orphanCheckIntervalMs = 30'000;
 
 // Global LookAndFeel: pointer cursor on TextButton, light-red hover on "Quit".
-class FoxPlayerLnF : public juce::LookAndFeel_V4
+class StylusLnF : public juce::LookAndFeel_V4
 {
 public:
     juce::MouseCursor getMouseCursorFor(juce::Component& c) override
@@ -41,12 +41,12 @@ public:
 MainComponent::MainComponent()
     : transportBar_(engine_)
 {
-    appLnF_ = std::make_unique<FoxPlayerLnF>();
+    appLnF_ = std::make_unique<StylusLnF>();
     juce::LookAndFeel::setDefaultLookAndFeel(appLnF_.get());
 
     // ApplicationProperties for persisting settings.
     juce::PropertiesFile::Options opts;
-    opts.applicationName = "FoxPlayer";
+    opts.applicationName = "Stylus";
     opts.filenameSuffix  = ".settings";
     opts.osxLibrarySubFolder = "Application Support";
     appProperties_.setStorageParameters(opts);
@@ -175,7 +175,7 @@ MainComponent::MainComponent()
 
     libraryTable_.onClearInfoRequested = [this](std::vector<TrackInfo> tracks) {
         // Reset every editable/analysis field back to blank. The file itself
-        // stays put; only the sidecar .foxp + in-memory metadata change, and
+        // stays put; only the sidecar .styl + in-memory metadata change, and
         // the downloaded album-art sidecar (if any) is deleted too.
         for (auto& t : tracks)
         {
@@ -189,7 +189,7 @@ MainComponent::MainComponent()
             t.musicalKey  = {};
             t.playCount   = 0;
             t.lufs        = 0.0f;
-            FoxpFile::save(t);
+            StylFile::save(t);
             AppleMusicLookup::artworkSidecarFor(t.file).deleteFile();
             updateTrackInLibrary(t);
         }
@@ -315,7 +315,7 @@ MainComponent::MainComponent()
         if (it == lookupUndoSnapshots_.end()) return;
         TrackInfo snapshot = it->second;
         lookupUndoSnapshots_.erase(it);
-        FoxpFile::save(snapshot);
+        StylFile::save(snapshot);
         updateTrackInLibrary(snapshot);
     };
 
@@ -508,16 +508,16 @@ MainComponent::MainComponent()
 
         // If this scan was confirming a cached library, swap the fresh
         // results in now and refresh dependent views.
-        // Re-read every .foxp sidecar after the swap: the scan batch was built
+        // Re-read every .styl sidecar after the swap: the scan batch was built
         // before any Apple Music lookups or analyses completed during the scan
-        // run, so their .foxp writes would otherwise be silently overwritten.
+        // run, so their .styl writes would otherwise be silently overwritten.
         if (scanReplacingCachedLibrary_)
         {
             fullLibrary_ = std::move(scanBuffer_);
             scanBuffer_.clear();
             scanReplacingCachedLibrary_ = false;
             for (auto& t : fullLibrary_)
-                FoxpFile::load(t);
+                StylFile::load(t);
         }
 
         loadingIndicator_.setVisible(false);
@@ -549,7 +549,7 @@ MainComponent::MainComponent()
             DBG("LibraryCache::save threw");
         }
 
-        // Background housekeeping: rewrite foxp sidecars for any track whose
+        // Background housekeeping: rewrite sidecars for any track whose
         // isPodcast classification changed (clears stale music metadata from
         // podcast sidecars, and stale podcast fields from music sidecars), then
         // delete orphaned sidecars for audio files that no longer exist.
@@ -558,30 +558,31 @@ MainComponent::MainComponent()
         std::vector<TrackInfo> librarySnapshot = fullLibrary_;
         juce::Thread::launch([folders    = std::move(allFolders),
                               snapshot   = std::move(librarySnapshot)]() {
-            // Rewrite foxp for each track that has an existing sidecar, so
+            // Rewrite the sidecar for each track that has an existing one, so
             // stale fields from a prior classification are removed.
             for (const auto& track : snapshot)
-                if (FoxpFile::exists(track))
-                    FoxpFile::save(track);
+                if (StylFile::exists(track))
+                    StylFile::save(track);
 
-            // Delete sidecars whose audio file no longer exists.
+            // Delete orphaned sidecars whose audio file no longer exists.
             for (const auto& folder : folders)
             {
                 if (!folder.isDirectory()) continue;
 
-                juce::Array<juce::File> foxpFiles;
-                folder.findChildFiles(foxpFiles, juce::File::findFiles, true, "*.foxp");
+                juce::Array<juce::File> sidecars;
+                folder.findChildFiles(sidecars, juce::File::findFiles, true, "*.styl");
 
-                for (const auto& foxp : foxpFiles)
+                for (const auto& sc : sidecars)
                 {
-                    const juce::String name = foxp.getFileName();
-                    if (! name.startsWith(".") || ! name.endsWithIgnoreCase(".foxp"))
+                    const juce::String name = sc.getFileName();
+                    if (! name.startsWith(".") || ! name.endsWithIgnoreCase(".styl"))
                         continue;
 
+                    // Strip leading "." and trailing ".styl" to recover the audio file name.
                     const juce::String audioName = name.substring(1, name.length() - 5);
-                    const juce::File audioFile   = foxp.getParentDirectory().getChildFile(audioName);
+                    const juce::File audioFile   = sc.getParentDirectory().getChildFile(audioName);
                     if (! audioFile.existsAsFile())
-                        foxp.deleteFile();
+                        sc.deleteFile();
                 }
             }
         });
@@ -788,7 +789,7 @@ MainComponent::MainComponent()
                 .withMessage(juce::String("Apple Music lookups have failed ")
                              + juce::String(AppleMusicLookup::maxConsecutiveFailures)
                              + " times in a row, likely due to rate limiting.\n\n"
-                             "FoxPlayer has stopped retrying to avoid further errors. "
+                             "Stylus has stopped retrying to avoid further errors. "
                              "Try again later by right-clicking a track and choosing "
                              "\"Look up on Apple Music\".")
                 .withButton("OK")
@@ -1052,8 +1053,8 @@ MainComponent::~MainComponent()
     // memory at quit time.
     if (auto* props = appProperties_.getUserSettings())
     {
-        if (props->getBoolValue("debug.deleteFoxpOnShutdown", false))
-            deleteFoxpFilesInLibrary();
+        if (props->getBoolValue("debug.deleteSidecarsOnShutdown", false))
+            deleteStylFilesInLibrary();
 
         const bool ok = props->save();
         DBG("Destructor save -> " + props->getFile().getFullPathName()
@@ -1765,7 +1766,7 @@ void MainComponent::handleTracksDroppedOnPlaylist(int sidebarId,
     playlistStore_->addTracksToPlaylist(storeId, pathVec);
 }
 
-void MainComponent::deleteFoxpFilesInLibrary()
+void MainComponent::deleteStylFilesInLibrary()
 {
     std::vector<juce::File> allFolders = musicFolders_;
     allFolders.insert(allFolders.end(), podcastFolders_.begin(), podcastFolders_.end());
@@ -1773,7 +1774,7 @@ void MainComponent::deleteFoxpFilesInLibrary()
     for (const auto& folder : allFolders)
     {
         if (!folder.isDirectory()) continue;
-        for (const auto& f : folder.findChildFiles(juce::File::findFiles, true, ".*.foxp"))
+        for (const auto& f : folder.findChildFiles(juce::File::findFiles, true, ".*.styl"))
             f.deleteFile();
     }
 }
@@ -1785,7 +1786,7 @@ void MainComponent::incrementPlayCount(const juce::File& file)
         if (t.file == file)
         {
             ++t.playCount;
-            FoxpFile::save(t);
+            StylFile::save(t);
             libraryTable_.updateTrack(t);
             return;
         }
@@ -1831,7 +1832,7 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track,
 
     editor->onSave = [this](std::vector<TrackInfo> updated) {
         for (auto& t : updated) {
-            FoxpFile::save(t);
+            StylFile::save(t);
             updateTrackInLibrary(t);
         }
         LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
@@ -1913,7 +1914,7 @@ void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
 
     editor->onSave = [this](std::vector<TrackInfo> updated) {
         for (auto& t : updated) {
-            FoxpFile::save(t);
+            StylFile::save(t);
             updateTrackInLibrary(t);
         }
         LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
@@ -2350,9 +2351,6 @@ void MainComponent::setMusicFolders(std::vector<juce::File> folders, bool keepLi
         refreshSidebarAlbums();
     }
 
-    for (const auto& f : musicFolders_)
-        deleteOldStyleFoxpFiles(f);
-
     if (musicFolders_.empty())
     {
         loadingIndicator_.setVisible(false);
@@ -2379,18 +2377,6 @@ void MainComponent::setMusicFolders(std::vector<juce::File> folders, bool keepLi
     scanner_.scanFolders(musicFolders_, podcastFolders_);
 }
 
-void MainComponent::deleteOldStyleFoxpFiles(const juce::File& folder)
-{
-    juce::Array<juce::File> found;
-    folder.findChildFiles(found, juce::File::findFiles, true, "*.foxp");
-
-    for (const auto& f : found)
-    {
-        // Old-style files do not start with '.'; new-style ones do.
-        if (!f.getFileName().startsWith("."))
-            f.deleteFile();
-    }
-}
 
 void MainComponent::saveMusicFolders()
 {
@@ -2697,7 +2683,7 @@ void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandI
 
         case cmdPreferences:
             info.setInfo("Preferences...",
-                         "Open the FoxPlayer preferences window",
+                         "Open the Stylus preferences window",
                          "File", 0);
             // Disable the menu item + shortcut while the preferences window
             // is already open, so clicking it again does nothing.
@@ -2707,7 +2693,7 @@ void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandI
 
         case cmdAlwaysOnTop:
             info.setInfo("Always on Top",
-                         "Keep the FoxPlayer window above all other windows",
+                         "Keep the Stylus window above all other windows",
                          "Window", 0);
             info.setTicked(alwaysOnTop_);
             info.addDefaultKeypress('p', juce::ModifierKeys::commandModifier
@@ -2716,7 +2702,7 @@ void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandI
 
         case cmdShowPlayerWindow:
             info.setInfo("Show Player Window",
-                         "Bring the FoxPlayer window to the front",
+                         "Bring the Stylus window to the front",
                          "Window", 0);
             break;
 
@@ -3095,4 +3081,4 @@ void MainComponent::requestQuit(std::function<void()> onConfirmed)
     resized();
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

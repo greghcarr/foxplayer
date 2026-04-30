@@ -1,7 +1,7 @@
 #include "SongInfoEditor.h"
 #include "Constants.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 using namespace Constants;
@@ -536,4 +536,4 @@ void SongInfoEditor::resized()
         lookupButton_.setBounds(btnRow.removeFromLeft(120));
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

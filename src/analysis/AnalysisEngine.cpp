@@ -1,13 +1,13 @@
 #include "AnalysisEngine.h"
 #include "BpmDetector.h"
 #include "KeyDetector.h"
-#include "audio/FoxpFile.h"
+#include "audio/StylFile.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 AnalysisEngine::AnalysisEngine()
-    : juce::Thread("FoxPlayer.AnalysisEngine")
+    : juce::Thread("Stylus.AnalysisEngine")
 {
     formatManager_.registerBasicFormats();
 }
@@ -123,18 +123,18 @@ void AnalysisEngine::analyseOne(TrackInfo track)
 
     if (changed)
     {
-        // Refresh non-analysis fields from the on-disk .foxp before saving so
+        // Refresh non-analysis fields from the on-disk .styl before saving so
         // we don't clobber user edits made while analysis was running.
         // Analysis owns bpm / musicalKey / lufs; everything else stays as the
         // user (or scanner) last left it.
         const double      bpmOut  = track.bpm;
         const juce::String keyOut = track.musicalKey;
         const float       lufsOut = track.lufs;
-        FoxpFile::load(track);
+        StylFile::load(track);
         track.bpm        = bpmOut;
         track.musicalKey = keyOut;
         track.lufs       = lufsOut;
-        FoxpFile::save(track);
+        StylFile::save(track);
     }
 
     juce::MessageManager::callAsync([this, t = track]() mutable {
@@ -142,4 +142,4 @@ void AnalysisEngine::analyseOne(TrackInfo track)
     });
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

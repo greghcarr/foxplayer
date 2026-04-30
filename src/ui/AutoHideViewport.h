@@ -2,7 +2,7 @@
 
 #include <JuceHeader.h>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Viewport whose vertical scrollbar is hidden by default and briefly revealed
@@ -84,4 +84,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AutoHideViewport)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

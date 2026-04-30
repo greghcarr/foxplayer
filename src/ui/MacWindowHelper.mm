@@ -2,7 +2,7 @@
 #import <objc/runtime.h>
 #include "MacWindowHelper.h"
 
-void FoxPlayer_activateAndShowWindow(void* nativeHandle)
+void Stylus_activateAndShowWindow(void* nativeHandle)
 {
     NSView*   view   = (__bridge NSView*)nativeHandle;
     NSWindow* window = view.window;
@@ -22,7 +22,7 @@ void FoxPlayer_activateAndShowWindow(void* nativeHandle)
     window.collectionBehavior = old;
 }
 
-void FoxPlayer_activateExistingWindow(void* nativeHandle)
+void Stylus_activateExistingWindow(void* nativeHandle)
 {
     NSView*   view   = (__bridge NSView*)nativeHandle;
     NSWindow* window = view.window;
@@ -44,7 +44,7 @@ void FoxPlayer_activateExistingWindow(void* nativeHandle)
 // Two mechanisms are combined:
 //   1. ObjC method replacement on JUCE's app delegate to intercept
 //      applicationShouldHandleReopen:hasVisibleWindows:. Covers the Dock click
-//      while FoxPlayer is already the active app. Also prevents JUCE's default
+//      while Stylus is already the active app. Also prevents JUCE's default
 //      behaviour of calling systemRequestedQuit() (which would quit the app).
 //   2. NSApplicationDidBecomeActiveNotification fallback for the case where the
 //      user switched to another app and then returned via Cmd+Tab or Dock.
@@ -53,13 +53,13 @@ void FoxPlayer_activateExistingWindow(void* nativeHandle)
 // Owns the callback block with a `copy` property so non-ARC block lifetime is
 // handled correctly, a plain `static void (^)() = ^{...}` stores a stack
 // block that becomes a dangling pointer once the enclosing function returns.
-@interface FoxPlayerReopenHandler : NSObject
+@interface StylusReopenHandler : NSObject
 @property (nonatomic, copy) void (^onReopen)(void);
 - (void)fireIfNoVisibleWindows;
 - (void)appDidBecomeActive:(NSNotification*)note;
 @end
 
-@implementation FoxPlayerReopenHandler
+@implementation StylusReopenHandler
 - (void)fireIfNoVisibleWindows
 {
     Class sbClass = NSClassFromString(@"NSStatusBarWindow");
@@ -76,12 +76,12 @@ void FoxPlayer_activateExistingWindow(void* nativeHandle)
 }
 @end
 
-static FoxPlayerReopenHandler* gHandler = nil;
+static StylusReopenHandler* gHandler = nil;
 static BOOL gSwizzleApplied = NO;
 
 // C function installed as the implementation of
 // applicationShouldHandleReopen:hasVisibleWindows: on JUCE's delegate class.
-static BOOL FoxPlayer_applicationShouldHandleReopen(id, SEL, NSApplication*, BOOL)
+static BOOL Stylus_applicationShouldHandleReopen(id, SEL, NSApplication*, BOOL)
 {
     // Dock click is an explicit user action, always show the window.
     if (gHandler && gHandler.onReopen)
@@ -89,7 +89,7 @@ static BOOL FoxPlayer_applicationShouldHandleReopen(id, SEL, NSApplication*, BOO
     return YES;
 }
 
-void FoxPlayer_setDockReopenCallback(std::function<void()> callback)
+void Stylus_setDockReopenCallback(std::function<void()> callback)
 {
     // Tear down any previous handler.
     if (gHandler)
@@ -103,7 +103,7 @@ void FoxPlayer_setDockReopenCallback(std::function<void()> callback)
 
     if (!callback) return;
 
-    gHandler = [[FoxPlayerReopenHandler alloc] init];
+    gHandler = [[StylusReopenHandler alloc] init];
     // Copy the std::function into the block so the block owns it independently.
     gHandler.onReopen = ^{ callback(); };
 
@@ -113,7 +113,7 @@ void FoxPlayer_setDockReopenCallback(std::function<void()> callback)
         gSwizzleApplied = YES;
         Class cls = [NSApp.delegate class];
         SEL   sel = @selector(applicationShouldHandleReopen:hasVisibleWindows:);
-        IMP   imp = (IMP)FoxPlayer_applicationShouldHandleReopen;
+        IMP   imp = (IMP)Stylus_applicationShouldHandleReopen;
         // "c@:@c", BOOL return, id self, SEL _cmd, NSApplication*, BOOL
         if (class_respondsToSelector(cls, sel)) {
             Method m = class_getInstanceMethod(cls, sel);

@@ -1,6 +1,6 @@
 #include "LibraryCache.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 static constexpr int cacheVersion = 2;
@@ -12,7 +12,7 @@ juce::File LibraryCache::cacheFile()
    #if JUCE_MAC
     dir = dir.getChildFile("Application Support");
    #endif
-    return dir.getChildFile("FoxPlayer.libcache.json");
+    return dir.getChildFile("Stylus.libcache.json");
 }
 
 bool LibraryCache::save(const std::vector<TrackInfo>& tracks,
@@ -147,4 +147,4 @@ bool LibraryCache::tryLoad(std::vector<TrackInfo>& outTracks,
     return true;
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

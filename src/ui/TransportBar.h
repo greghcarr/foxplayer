@@ -6,7 +6,7 @@
 #include <JuceHeader.h>
 #include <functional>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Circular transport control button with a vector-drawn icon.
@@ -267,4 +267,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TransportBar)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

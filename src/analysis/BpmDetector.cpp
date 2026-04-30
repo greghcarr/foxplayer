@@ -3,7 +3,7 @@
 #include <vector>
 #include <numeric>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 double BpmDetector::detect(const juce::File& audioFile,
@@ -139,4 +139,4 @@ double BpmDetector::detect(const juce::File& audioFile,
     return std::round(result * 10.0) / 10.0;
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

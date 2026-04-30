@@ -4,7 +4,7 @@
 #include <functional>
 #include <vector>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 class SidebarComponent : public juce::Component,
@@ -180,4 +180,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SidebarComponent)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

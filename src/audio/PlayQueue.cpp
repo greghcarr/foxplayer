@@ -1,6 +1,6 @@
 #include "PlayQueue.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 void PlayQueue::setTracks(std::vector<TrackInfo> tracks, int startIndex, PlayQueue::QueueSource source)
@@ -311,4 +311,4 @@ void PlayQueue::unshuffleRemaining()
     if (onIndexChanged) onIndexChanged(index_);
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

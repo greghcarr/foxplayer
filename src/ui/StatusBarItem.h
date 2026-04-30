@@ -3,11 +3,11 @@
 #include <functional>
 #include <memory>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // macOS menu-bar status item.
-// Left-click shows the app window. Right-click shows "Show App" / "Quit FoxPlayer".
+// Left-click shows the app window. Right-click shows "Show App" / "Quit Stylus".
 class StatusBarItem
 {
 public:
@@ -29,4 +29,4 @@ private:
     StatusBarItem& operator=(const StatusBarItem&) = delete;
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

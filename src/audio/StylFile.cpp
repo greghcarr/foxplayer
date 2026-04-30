@@ -1,21 +1,21 @@
-#include "FoxpFile.h"
+#include "StylFile.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
-static constexpr int foxpVersion = 1;
+static constexpr int stylVersion = 1;
 
-juce::File FoxpFile::sidecarFor(const juce::File& audioFile)
+juce::File StylFile::sidecarFor(const juce::File& audioFile)
 {
     const juce::File parent = audioFile.getParentDirectory();
-    const juce::String hidden = "." + audioFile.getFileName() + ".foxp";
+    const juce::String hidden = "." + audioFile.getFileName() + ".styl";
     return parent.getChildFile(hidden);
 }
 
-bool FoxpFile::load(TrackInfo& track)
+bool StylFile::load(TrackInfo& track)
 {
     const juce::File sidecar = sidecarFor(track.file);
-    if (!sidecar.existsAsFile())
+    if (! sidecar.existsAsFile())
         return false;
 
     const juce::String text = sidecar.loadFileAsString();
@@ -36,7 +36,7 @@ bool FoxpFile::load(TrackInfo& track)
     if (obj->hasProperty("trackNumber"))
     {
         track.trackNumber       = static_cast<int>(obj->getProperty("trackNumber"));
-        track.foxpHadTrackNumber = true;
+        track.stylHadTrackNumber = true;
     }
 
     // Analysis results
@@ -64,10 +64,10 @@ bool FoxpFile::load(TrackInfo& track)
     return true;
 }
 
-bool FoxpFile::save(const TrackInfo& track)
+bool StylFile::save(const TrackInfo& track)
 {
     auto* obj = new juce::DynamicObject();
-    obj->setProperty("version", foxpVersion);
+    obj->setProperty("version", stylVersion);
 
     // User-editable metadata overrides (only written if non-default)
     if (track.title.isNotEmpty())       obj->setProperty("title",       track.title);
@@ -116,9 +116,9 @@ bool FoxpFile::save(const TrackInfo& track)
     return sidecar.replaceWithText(text);
 }
 
-bool FoxpFile::exists(const TrackInfo& track)
+bool StylFile::exists(const TrackInfo& track)
 {
     return sidecarFor(track.file).existsAsFile();
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

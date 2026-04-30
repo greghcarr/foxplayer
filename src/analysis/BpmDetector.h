@@ -2,7 +2,7 @@
 
 #include <JuceHeader.h>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Estimates the BPM of an audio file using envelope autocorrelation.
@@ -32,4 +32,4 @@ public:
                          const Settings& settings);
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

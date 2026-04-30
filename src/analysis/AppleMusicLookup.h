@@ -7,7 +7,7 @@
 #include <atomic>
 #include <map>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Background worker that queries the public iTunes Search API for each enqueued
@@ -28,7 +28,7 @@ public:
     void enqueueAll(const std::vector<TrackInfo>& tracks, bool overwrite);
 
     // Art-only variants: query iTunes and download cover art sidecar only.
-    // Metadata fields in the TrackInfo are left untouched and no .foxp is written.
+    // Metadata fields in the TrackInfo are left untouched and no .styl is written.
     void enqueueArtOnly(const TrackInfo& track);
     void enqueueAllArtOnly(const std::vector<TrackInfo>& tracks);
 
@@ -49,7 +49,7 @@ public:
     std::function<void()> onLookupSuspended;
 
     // Sidecar JPEG path that AlbumArtExtractor checks for downloaded art.
-    // Mirrors the `.foxp` naming convention so the file stays hidden and
+    // Mirrors the `.styl` naming convention so the file stays hidden and
     // sits next to the audio.
     static juce::File artworkSidecarFor(const juce::File& audioFile);
 
@@ -88,4 +88,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AppleMusicLookup)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

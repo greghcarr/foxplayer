@@ -2,7 +2,7 @@
 
 #include <JuceHeader.h>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Paints the app icon (loaded from the embedded PNG) centred on a transparent
@@ -83,4 +83,4 @@ public:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SplashWindow)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

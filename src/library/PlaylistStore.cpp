@@ -1,6 +1,6 @@
 #include "PlaylistStore.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 PlaylistStore::PlaylistStore(juce::ApplicationProperties& props)
@@ -165,4 +165,4 @@ void PlaylistStore::reorderPlaylists(const std::vector<int>& orderedIds)
     if (onPlaylistsChanged) onPlaylistsChanged();
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

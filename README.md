@@ -1,4 +1,4 @@
-# FoxPlayer
+# Stylus
 
 A personal music and podcast player for macOS, built with C++17 and JUCE 8.
 
@@ -27,7 +27,7 @@ cmake --build build --parallel
 ## Launch
 
 ```bash
-open build/FoxPlayer_artefacts/Debug/FoxPlayer.app
+open build/Stylus_artefacts/Debug/Stylus.app
 ```
 
 Or double-click the `.app` in Finder after building.
@@ -82,14 +82,14 @@ Or double-click the `.app` in Finder after building.
 - "Look up Album Art" fetches and embeds cover art, with undo
 - Batch Apple Music lookups (multi-select) update silently in the background, single lookups follow the track to its new position
 - Network failures are auto-retried after a delay, with a circuit-breaker after consecutive failures
-- Metadata persists in hidden `.foxp` JSON sidecar files alongside each audio file
+- Metadata persists in hidden `.styl` JSON sidecar files alongside each audio file
 - Tab through fields auto-selects all text in the focused field
 - Edit Info Next / Previous re-reads the current sorted order at click time, so a lookup that re-sorts the row still navigates to the correct neighbour
 
 ### Analysis
 - On-demand BPM and musical key detection via right-click
 - Analysis log window with queued / running / completed state per track
-- Background analysis only writes BPM / key / LUFS to disk (it re-loads the foxp first), so concurrent user edits are never clobbered
+- Background analysis only writes BPM / key / LUFS to disk (it re-loads the styl first), so concurrent user edits are never clobbered
 
 ### Audio
 - Output device selection in Preferences (follows system default automatically)
@@ -136,17 +136,17 @@ Open with **Cmd-,** or via the File menu.
 - **Audio**: output device (defaults to system default), buffer size
 - **Library**: add, remove, or rescan music and podcast folders independently
 - **Misc**: Ask before quitting toggle
-- **Debug**: developer toggles (e.g. nuke `.foxp` sidecars)
+- **Debug**: developer toggles (e.g. nuke `.styl` sidecars)
 
 ## Window Behaviour
 
-- **Closing the window** hides it instead of quitting (App-style). Cmd-Q (or "Quit FoxPlayer" from the app menu) actually quits.
+- **Closing the window** hides it instead of quitting (App-style). Cmd-Q (or "Quit Stylus" from the app menu) actually quits.
 - **Clicking the Dock icon** while a window is hidden re-shows it on the display under the mouse cursor.
 - **Clicking the Dock icon** while the window is visible on another macOS Space switches to that Space rather than dragging the window to the active Space.
 
 ## Session Persistence
 
-FoxPlayer remembers between launches:
+Stylus remembers between launches:
 
 - Music and podcast folder selections
 - Active sidebar view

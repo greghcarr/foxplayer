@@ -5,7 +5,7 @@
 #include <memory>
 #include <vector>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // ---- Audio panel -------------------------------------------------------------
@@ -147,7 +147,7 @@ public:
 private:
     juce::ApplicationProperties& props_;
 
-    juce::ToggleButton deleteFoxpToggle_;
+    juce::ToggleButton deleteSidecarsToggle_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DebugPreferencesPanel)
 };
@@ -232,4 +232,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PreferencesWindow)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

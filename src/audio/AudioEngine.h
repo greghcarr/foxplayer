@@ -4,7 +4,7 @@
 #include <JuceHeader.h>
 #include <functional>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Owns the full audio pipeline:
@@ -77,4 +77,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioEngine)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

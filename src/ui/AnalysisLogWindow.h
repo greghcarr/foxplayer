@@ -4,7 +4,7 @@
 #include <JuceHeader.h>
 #include <vector>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Table showing each enqueued/running/finished analysis with BPM + key results.
@@ -74,4 +74,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AnalysisLogWindow)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

@@ -1,7 +1,7 @@
 #include "QueueView.h"
 #include "Constants.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 using namespace Constants;
@@ -260,4 +260,4 @@ void QueueView::itemDropped(const SourceDetails& details)
     if (onTracksDropped) onTracksDropped(paths, idx);
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

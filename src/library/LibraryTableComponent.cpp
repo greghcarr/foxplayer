@@ -1,8 +1,8 @@
 #include "LibraryTableComponent.h"
 #include "Constants.h"
-#include "audio/FoxpFile.h"
+#include "audio/StylFile.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 using namespace Constants;
@@ -767,7 +767,7 @@ void LibraryTableComponent::setHiddenForSelection(bool hidden)
         if (track->hidden != hidden)
         {
             track->hidden = hidden;
-            FoxpFile::save(*track);
+            StylFile::save(*track);
             changed = true;
         }
     }
@@ -1044,7 +1044,7 @@ void LibraryTableComponent::commitCellEdit()
 
     if (changed)
     {
-        FoxpFile::save(*track);
+        StylFile::save(*track);
         if (onInlineEditCommitted) onInlineEditCommitted(*track);
     }
 }
@@ -1249,4 +1249,4 @@ void LibraryTableComponent::HeaderLnF::drawTableHeaderColumn(
     g.fillPath(sortArrow, sortArrow.getTransformToScaleToFit(arrowArea, true));
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

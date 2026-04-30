@@ -1,24 +1,24 @@
 #import <Cocoa/Cocoa.h>
 #include "StatusBarItem.h"
 
-using FoxPlayer::StatusBarItem;
+using Stylus::StatusBarItem;
 
-typedef NS_ENUM(NSInteger, FoxBarState) {
-    FoxBarStopped = 0,
-    FoxBarPlaying,
-    FoxBarPaused
+typedef NS_ENUM(NSInteger, StylusBarState) {
+    StylusBarStopped = 0,
+    StylusBarPlaying,
+    StylusBarPaused
 };
 
 // ---------------------------------------------------------------------------
-// FoxStatusBarController
+// StylusStatusBarController
 // ---------------------------------------------------------------------------
-@interface FoxStatusBarController : NSObject
+@interface StylusStatusBarController : NSObject
 @property (nonatomic, strong) NSStatusItem* statusItem;
 - (instancetype)initWithOwner:(StatusBarItem*)owner;
-- (void)setState:(FoxBarState)state;
+- (void)setState:(StylusBarState)state;
 @end
 
-@implementation FoxStatusBarController
+@implementation StylusStatusBarController
 {
     StatusBarItem* _owner;
 }
@@ -44,7 +44,7 @@ typedef NS_ENUM(NSInteger, FoxBarState) {
 {
     self.statusItem = [NSStatusBar.systemStatusBar
                        statusItemWithLength:NSSquareStatusItemLength];
-    self.statusItem.button.image  = [self iconForState:FoxBarStopped];
+    self.statusItem.button.image  = [self iconForState:StylusBarStopped];
     self.statusItem.button.target = self;
     self.statusItem.button.action = @selector(buttonClicked:);
     [self.statusItem.button sendActionOn:NSEventMaskLeftMouseUp | NSEventMaskRightMouseUp];
@@ -60,14 +60,14 @@ typedef NS_ENUM(NSInteger, FoxBarState) {
 {
     NSMenu* menu = [[NSMenu alloc] init];
 
-    NSMenuItem* showItem = [[NSMenuItem alloc] initWithTitle:@"Show FoxPlayer"
+    NSMenuItem* showItem = [[NSMenuItem alloc] initWithTitle:@"Show Stylus"
                                                       action:@selector(menuShowApp:)
                                                keyEquivalent:@""];
     showItem.target = self;
     [menu addItem:showItem];
     [menu addItem:[NSMenuItem separatorItem]];
 
-    NSMenuItem* quitItem = [[NSMenuItem alloc] initWithTitle:@"Quit FoxPlayer"
+    NSMenuItem* quitItem = [[NSMenuItem alloc] initWithTitle:@"Quit Stylus"
                                                       action:@selector(menuQuit:)
                                                keyEquivalent:@""];
     quitItem.target = self;
@@ -82,12 +82,12 @@ typedef NS_ENUM(NSInteger, FoxBarState) {
 - (void)menuShowApp:(id)sender { if (_owner && _owner->onShowApp) _owner->onShowApp(); }
 - (void)menuQuit:(id)sender    { if (_owner && _owner->onQuit)    _owner->onQuit(); }
 
-- (void)setState:(FoxBarState)state
+- (void)setState:(StylusBarState)state
 {
     self.statusItem.button.image = [self iconForState:state];
 }
 
-- (NSImage*)iconForState:(FoxBarState)state
+- (NSImage*)iconForState:(StylusBarState)state
 {
     const CGFloat sz = 18.0;
     NSImage* img = [NSImage imageWithSize:NSMakeSize(sz, sz)
@@ -96,7 +96,7 @@ typedef NS_ENUM(NSInteger, FoxBarState) {
         [[NSColor blackColor] setFill];
         NSBezierPath* path = [NSBezierPath bezierPath];
 
-        if (state == FoxBarPlaying)
+        if (state == StylusBarPlaying)
         {
             // Play triangle while playing, the icon reflects current state
             // (playing) rather than the action a click would perform.
@@ -107,7 +107,7 @@ typedef NS_ENUM(NSInteger, FoxBarState) {
             [path lineToPoint:NSMakePoint(ox,     oy + h)];
             [path closePath];
         }
-        else if (state == FoxBarPaused)
+        else if (state == StylusBarPaused)
         {
             // Pause bars while paused.
             CGFloat barW = sz * 0.22, barH = sz * 0.55, gap = sz * 0.14;
@@ -138,7 +138,7 @@ typedef NS_ENUM(NSInteger, FoxBarState) {
 // ---------------------------------------------------------------------------
 // C++ StatusBarItem
 // ---------------------------------------------------------------------------
-namespace FoxPlayer
+namespace Stylus
 {
 
 struct StatusBarItem::Impl
@@ -147,8 +147,8 @@ struct StatusBarItem::Impl
 
     explicit Impl(StatusBarItem* owner)
     {
-        FoxStatusBarController* ctrl =
-            [[FoxStatusBarController alloc] initWithOwner:owner];
+        StylusStatusBarController* ctrl =
+            [[StylusStatusBarController alloc] initWithOwner:owner];
         controller = CFBridgingRetain(ctrl);
     }
 
@@ -157,9 +157,9 @@ struct StatusBarItem::Impl
         if (controller) { CFBridgingRelease(controller); controller = nullptr; }
     }
 
-    FoxStatusBarController* ctrl() const
+    StylusStatusBarController* ctrl() const
     {
-        return (__bridge FoxStatusBarController*)controller;
+        return (__bridge StylusStatusBarController*)controller;
     }
 };
 
@@ -170,10 +170,10 @@ StatusBarItem::~StatusBarItem() = default;
 
 void StatusBarItem::setState(State state)
 {
-    FoxBarState s = (state == State::Playing) ? FoxBarPlaying :
-                    (state == State::Paused)  ? FoxBarPaused  :
-                                                FoxBarStopped;
+    StylusBarState s = (state == State::Playing) ? StylusBarPlaying :
+                    (state == State::Paused)  ? StylusBarPaused  :
+                                                StylusBarStopped;
     [impl_->ctrl() setState:s];
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

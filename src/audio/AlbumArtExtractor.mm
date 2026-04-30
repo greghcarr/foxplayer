@@ -6,7 +6,7 @@
 #include <cstring>
 
 extern "C"
-unsigned char* FoxPlayer_extractEmbeddedArtwork(const char* utf8Path, size_t* outSize)
+unsigned char* Stylus_extractEmbeddedArtwork(const char* utf8Path, size_t* outSize)
 {
     *outSize = 0;
 

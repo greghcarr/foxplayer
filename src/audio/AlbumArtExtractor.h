@@ -3,7 +3,7 @@
 #include "TrackInfo.h"
 #include <JuceHeader.h>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 class AlbumArtExtractor
@@ -15,4 +15,4 @@ public:
     static juce::Image extractFromFile(const juce::File& file);
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

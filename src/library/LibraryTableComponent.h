@@ -5,7 +5,7 @@
 #include <functional>
 #include <vector>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 class LibraryTableComponent : public juce::Component,
@@ -85,7 +85,7 @@ public:
     std::function<void(int rowIndex)> onRowActivated;
 
     // Called after the user commits an in-place cell edit (Enter or focus-loss).
-    // The updated TrackInfo has the new value already saved to the foxp sidecar.
+    // The updated TrackInfo has the new value already saved to the styl sidecar.
     std::function<void(const TrackInfo&)> onInlineEditCommitted;
 
     // Called when the hidden state of one or more tracks changes.
@@ -275,4 +275,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryTableComponent)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

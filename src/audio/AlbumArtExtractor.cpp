@@ -3,16 +3,16 @@
 
 // Declared in AlbumArtExtractor.mm, no JUCE types cross the boundary.
 extern "C"
-unsigned char* FoxPlayer_extractEmbeddedArtwork(const char* utf8Path, size_t* outSize);
+unsigned char* Stylus_extractEmbeddedArtwork(const char* utf8Path, size_t* outSize);
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 juce::Image AlbumArtExtractor::extractFromFile(const juce::File& file)
 {
     // Try embedded artwork via AVFoundation.
     size_t size = 0;
-    unsigned char* raw = FoxPlayer_extractEmbeddedArtwork(
+    unsigned char* raw = Stylus_extractEmbeddedArtwork(
         file.getFullPathName().toRawUTF8(), &size);
 
     if (raw && size > 0)
@@ -29,12 +29,14 @@ juce::Image AlbumArtExtractor::extractFromFile(const juce::File& file)
     }
 
     // Per-track sidecar art written by the Apple Music lookup task.
-    const juce::File parent = file.getParentDirectory();
-    const juce::File artSidecar = parent.getChildFile("." + file.getFileName() + ".foxp-art.jpg");
-    if (artSidecar.existsAsFile())
     {
-        auto img = juce::ImageFileFormat::loadFrom(artSidecar);
-        if (img.isValid()) return img;
+        const juce::File parent = file.getParentDirectory();
+        const juce::File art    = parent.getChildFile("." + file.getFileName() + ".styl-art.jpg");
+        if (art.existsAsFile())
+        {
+            auto img = juce::ImageFileFormat::loadFrom(art);
+            if (img.isValid()) return img;
+        }
     }
 
     // Fall back to common cover art filenames in the same directory.
@@ -59,4 +61,4 @@ juce::Image AlbumArtExtractor::extractFromFile(const juce::File& file)
     return {};
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

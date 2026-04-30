@@ -1,11 +1,11 @@
 #include "AppleMusicLookup.h"
-#include "audio/FoxpFile.h"
+#include "audio/StylFile.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 AppleMusicLookup::AppleMusicLookup()
-    : juce::Thread("FoxPlayer.AppleMusicLookup")
+    : juce::Thread("Stylus.AppleMusicLookup")
 {
 }
 
@@ -17,7 +17,7 @@ AppleMusicLookup::~AppleMusicLookup()
 juce::File AppleMusicLookup::artworkSidecarFor(const juce::File& audioFile)
 {
     const juce::File parent = audioFile.getParentDirectory();
-    const juce::String hidden = "." + audioFile.getFileName() + ".foxp-art.jpg";
+    const juce::String hidden = "." + audioFile.getFileName() + ".styl-art.jpg";
     return parent.getChildFile(hidden);
 }
 
@@ -401,7 +401,7 @@ void AppleMusicLookup::processOne(Job job)
     }
 
     if (changed && ! artOnly)
-        FoxpFile::save(track);
+        StylFile::save(track);
 
     // A successful match resets the consecutive-failure counter.
     consecutiveNetworkFailures_ = 0;
@@ -427,4 +427,4 @@ void AppleMusicLookup::processOne(Job job)
     });
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

@@ -3,10 +3,10 @@
 #include "Constants.h"
 #include "ui/Splash.h"
 
-class FoxPlayerApplication : public juce::JUCEApplication
+class StylusApplication : public juce::JUCEApplication
 {
 public:
-    const juce::String getApplicationName()    override { return "FoxPlayer"; }
+    const juce::String getApplicationName()    override { return "Stylus"; }
     const juce::String getApplicationVersion() override { return "0.1.0"; }
     bool moreThanOneInstanceAllowed()          override { return false; }
 
@@ -14,7 +14,7 @@ public:
     {
         // App-wide scrollbar styling: gray thumb, transparent track/background.
         auto& laf = juce::LookAndFeel::getDefaultLookAndFeel();
-        laf.setColour(juce::ScrollBar::thumbColourId,      FoxPlayer::Constants::Color::scrollbarThumb);
+        laf.setColour(juce::ScrollBar::thumbColourId,      Stylus::Constants::Color::scrollbarThumb);
         laf.setColour(juce::ScrollBar::trackColourId,      juce::Colours::transparentBlack);
         laf.setColour(juce::ScrollBar::backgroundColourId, juce::Colours::transparentBlack);
 
@@ -23,13 +23,13 @@ public:
         // explicit typeface falls through to this default.
         laf.setDefaultSansSerifTypefaceName("Helvetica Neue");
 
-        // Splash: transparent window, white Foxwhelp title with thick black outline.
-        splashWindow_ = std::make_unique<FoxPlayer::SplashWindow>();
+        // Splash: transparent borderless window showing the embedded app icon.
+        splashWindow_ = std::make_unique<Stylus::SplashWindow>();
 
         // Defer main window creation one message loop iteration so the splash
         // actually gets a paint cycle before MainComponent's constructor runs.
         juce::Timer::callAfterDelay(60, [this]() {
-            mainWindow_ = std::make_unique<FoxPlayer::MainWindow>(juce::String());
+            mainWindow_ = std::make_unique<Stylus::MainWindow>(juce::String());
         });
 
         juce::Timer::callAfterDelay(2500, [this]() {
@@ -58,8 +58,8 @@ public:
     void anotherInstanceStarted(const juce::String& /*commandLine*/) override {}
 
 private:
-    std::unique_ptr<FoxPlayer::MainWindow>   mainWindow_;
-    std::unique_ptr<FoxPlayer::SplashWindow> splashWindow_;
+    std::unique_ptr<Stylus::MainWindow>   mainWindow_;
+    std::unique_ptr<Stylus::SplashWindow> splashWindow_;
 };
 
-START_JUCE_APPLICATION(FoxPlayerApplication)
+START_JUCE_APPLICATION(StylusApplication)

@@ -2,7 +2,7 @@
 
 #include <JuceHeader.h>
 
-namespace FoxPlayer::Constants
+namespace Stylus::Constants
 {
     // Window
     static constexpr int defaultWindowWidth  = 1100;

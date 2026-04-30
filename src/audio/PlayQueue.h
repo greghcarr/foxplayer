@@ -5,7 +5,7 @@
 #include <vector>
 #include <functional>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 class PlayQueue
@@ -85,4 +85,4 @@ private:
     std::vector<QueueSource> originalSources_;
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

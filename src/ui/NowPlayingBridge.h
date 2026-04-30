@@ -3,11 +3,11 @@
 #include <functional>
 #include <string>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Registers with macOS MPRemoteCommandCenter so that the system media keys
-// (Fn+F7 previous, Fn+F8 play/pause, Fn+F9 next) control FoxPlayer.
+// (Fn+F7 previous, Fn+F8 play/pause, Fn+F9 next) control Stylus.
 // Also keeps MPNowPlayingInfoCenter updated so Control Center shows the
 // correct track and position.
 class NowPlayingBridge
@@ -39,4 +39,4 @@ private:
     NowPlayingBridge& operator=(const NowPlayingBridge&) = delete;
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

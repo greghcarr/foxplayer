@@ -1,6 +1,6 @@
 #include "AudioEngine.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 AudioEngine::AudioEngine()
@@ -189,4 +189,4 @@ void AudioEngine::changeListenerCallback(juce::ChangeBroadcaster* source)
     }
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

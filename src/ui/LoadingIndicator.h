@@ -3,7 +3,7 @@
 #include "Constants.h"
 #include <JuceHeader.h>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Small component that draws a rotating arc next to a caption. Used to signal
@@ -85,4 +85,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LoadingIndicator)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

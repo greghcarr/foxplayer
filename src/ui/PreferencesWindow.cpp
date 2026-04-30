@@ -1,7 +1,7 @@
 #include "PreferencesWindow.h"
 #include "Constants.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 using namespace Constants;
@@ -535,27 +535,27 @@ void MiscPreferencesPanel::resized()
 // DebugPreferencesPanel
 // ============================================================================
 
-static constexpr const char* kDeleteFoxpKey = "debug.deleteFoxpOnShutdown";
+static constexpr const char* kDeleteSidecarsKey = "debug.deleteSidecarsOnShutdown";
 
 DebugPreferencesPanel::DebugPreferencesPanel(juce::ApplicationProperties& props)
     : props_(props)
 {
     const bool current = [&] {
         if (auto* s = props_.getUserSettings())
-            return s->getBoolValue(kDeleteFoxpKey, false);
+            return s->getBoolValue(kDeleteSidecarsKey, false);
         return false;
     }();
 
-    deleteFoxpToggle_.setButtonText("Delete all .foxp files in Library on shutdown");
-    deleteFoxpToggle_.setToggleState(current, juce::dontSendNotification);
-    deleteFoxpToggle_.setColour(juce::ToggleButton::textColourId,       Color::textPrimary);
-    deleteFoxpToggle_.setColour(juce::ToggleButton::tickColourId,       Color::accent);
-    deleteFoxpToggle_.setColour(juce::ToggleButton::tickDisabledColourId, Color::textSecondary);
-    deleteFoxpToggle_.onClick = [this] {
+    deleteSidecarsToggle_.setButtonText("Delete all sidecar files in Library on shutdown");
+    deleteSidecarsToggle_.setToggleState(current, juce::dontSendNotification);
+    deleteSidecarsToggle_.setColour(juce::ToggleButton::textColourId,       Color::textPrimary);
+    deleteSidecarsToggle_.setColour(juce::ToggleButton::tickColourId,       Color::accent);
+    deleteSidecarsToggle_.setColour(juce::ToggleButton::tickDisabledColourId, Color::textSecondary);
+    deleteSidecarsToggle_.onClick = [this] {
         if (auto* s = props_.getUserSettings())
-            s->setValue(kDeleteFoxpKey, deleteFoxpToggle_.getToggleState());
+            s->setValue(kDeleteSidecarsKey, deleteSidecarsToggle_.getToggleState());
     };
-    addAndMakeVisible(deleteFoxpToggle_);
+    addAndMakeVisible(deleteSidecarsToggle_);
 }
 
 void DebugPreferencesPanel::paint(juce::Graphics& g)
@@ -565,7 +565,7 @@ void DebugPreferencesPanel::paint(juce::Graphics& g)
 
 void DebugPreferencesPanel::resized()
 {
-    deleteFoxpToggle_.setBounds(getLocalBounds().reduced(24).removeFromTop(32));
+    deleteSidecarsToggle_.setBounds(getLocalBounds().reduced(24).removeFromTop(32));
 }
 
 // ============================================================================
@@ -713,4 +713,4 @@ void PreferencesWindow::showLibraryCategory()
 }
 
 
-} // namespace FoxPlayer
+} // namespace Stylus

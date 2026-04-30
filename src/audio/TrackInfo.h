@@ -2,7 +2,7 @@
 
 #include <JuceHeader.h>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 struct TrackInfo
@@ -17,7 +17,7 @@ struct TrackInfo
     int          trackNumber  { 0 };
     double       durationSecs { 0.0 };
 
-    // --- Analysis results (populated from .foxp or by analysis engine) ---
+    // --- Analysis results (populated from .styl or by analysis engine) ---
     double       bpm          { 0.0 };   // 0 = not yet analysed
     juce::String musicalKey;             // e.g. "Am", "C#", "" = not analysed
     float        lufs         { 0.0f };  // integrated loudness, 0 = not analysed
@@ -27,19 +27,19 @@ struct TrackInfo
     juce::String podcast;               // podcast/show name (replaces artist in podcast views)
 
     // --- User flags ---
-    bool         hidden       { false }; // excluded from library view; persisted in .foxp
+    bool         hidden       { false }; // excluded from library view; persisted in .styl
 
     // --- Play statistics ---
     int          playCount    { 0 };     // incremented each time the track starts playing
 
     // --- Library metadata ---
-    juce::int64  dateAdded    { 0 };     // ms since epoch; set on first scan, persisted in .foxp
+    juce::int64  dateAdded    { 0 };     // ms since epoch; set on first scan, persisted in .styl
 
-    // Transient (not persisted): set true by FoxpFile::load when the .foxp
+    // Transient (not persisted): set true by StylFile::load when the .styl
     // contained an explicit trackNumber property. Lets the podcast scanner
     // skip its guessEpisodeNumber heuristic when the user has committed a
     // value to disk (including 0, meaning "no episode number").
-    bool         foxpHadTrackNumber { false };
+    bool         stylHadTrackNumber { false };
 
     bool isValid() const { return file.existsAsFile(); }
 
@@ -59,4 +59,4 @@ struct TrackInfo
     }
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

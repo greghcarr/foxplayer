@@ -4,7 +4,7 @@
 #include <JuceHeader.h>
 #include <vector>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Disk cache for the scanned library so subsequent launches can populate
@@ -28,4 +28,4 @@ public:
                         std::vector<juce::File>& outPodcastFolders);
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

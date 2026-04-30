@@ -23,7 +23,7 @@
 #include <map>
 #include <set>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 class MainComponent : public juce::Component,
@@ -100,7 +100,6 @@ private:
     void showEmptyLibraryPrompt(bool show);
     void showPodcastPrompt(bool show);
     void showPreferencesLibrary();
-    void deleteOldStyleFoxpFiles(const juce::File& folder);
     void showSongInfoEditor(const TrackInfo& track, std::vector<TrackInfo> peerList, int peerIndex);
     void showMultiInfoEditor(const std::vector<TrackInfo>& tracks);
     void toggleAnalysisLog();
@@ -142,7 +141,7 @@ private:
     // Applies a new podcast folder list (analogous to setMusicFolders).
     void setPodcastFolders(std::vector<juce::File> folders);
     void incrementPlayCount(const juce::File& file);
-    void deleteFoxpFilesInLibrary();
+    void deleteStylFilesInLibrary();
 
     // Drag-and-drop: add tracks to a playlist, with duplicate warning for single tracks.
     void handleTracksDroppedOnPlaylist(int sidebarId, const juce::StringArray& paths);
@@ -375,4 +374,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

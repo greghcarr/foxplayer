@@ -5,7 +5,7 @@
 #include "ui/MacWindowHelper.h"
 #include <JuceHeader.h>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 class MainWindow : public juce::DocumentWindow
@@ -31,7 +31,7 @@ public:
 #endif
         setVisible(true);
 
-        // macOS app menu extras: Preferences sits at the top of the FoxPlayer
+        // macOS app menu extras: Preferences sits at the top of the Stylus
         // menu, just above the automatic "Services" item and its divider.
         juce::PopupMenu appleMenuExtras;
         appleMenuExtras.addCommandItem(&mainComponent_->commandManager(),
@@ -41,19 +41,19 @@ public:
         // Wire up the macOS native menu bar.
         juce::MenuBarModel::setMacMainMenu(mainComponent_.get(),
                                            &appleMenuExtras,
-                                           "Hide FoxPlayer");
+                                           "Hide Stylus");
 
         // Both the Window-menu command and the Dock icon click call showWindow().
         mainComponent_->onShowWindowRequested = [this]() { showWindow(); };
 
         // Clicking the Dock icon while all windows are hidden fires
         // NSApplicationDidBecomeActiveNotification. Re-show the window.
-        FoxPlayer_setDockReopenCallback([this]() { showWindow(); });
+        Stylus_setDockReopenCallback([this]() { showWindow(); });
     }
 
     ~MainWindow() override
     {
-        FoxPlayer_setDockReopenCallback(nullptr);
+        Stylus_setDockReopenCallback(nullptr);
         juce::MenuBarModel::setMacMainMenu(nullptr);
     }
 
@@ -64,12 +64,12 @@ public:
         setVisible(false);
     }
 
-    // "FoxPlayer" stays in the title bar at every window size for now.
+    // "Stylus" stays in the title bar at every window size for now.
     void resized() override
     {
         juce::DocumentWindow::resized();
-        if (getName() != "FoxPlayer")
-            setName("FoxPlayer");
+        if (getName() != "Stylus")
+            setName("Stylus");
     }
 
     MainComponent* getMainComponent() const { return mainComponent_.get(); }
@@ -99,18 +99,18 @@ private:
         }
 
         // Native activation. When the window was already visible on another
-        // Space, FoxPlayer_activateExistingWindow leaves it in place so macOS
+        // Space, Stylus_activateExistingWindow leaves it in place so macOS
         // switches Spaces to it instead of dragging it to the current Space.
         if (auto* peer = getPeer())
         {
             if (wasVisible)
-                FoxPlayer_activateExistingWindow(peer->getNativeHandle());
+                Stylus_activateExistingWindow(peer->getNativeHandle());
             else
-                FoxPlayer_activateAndShowWindow(peer->getNativeHandle());
+                Stylus_activateAndShowWindow(peer->getNativeHandle());
         }
     }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainWindow)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

@@ -4,12 +4,12 @@
 #import <ApplicationServices/ApplicationServices.h>
 #include "NowPlayingBridge.h"
 
-using FoxPlayer::NowPlayingBridge;
+using Stylus::NowPlayingBridge;
 
 // ---------------------------------------------------------------------------
 // ObjC controller
 // ---------------------------------------------------------------------------
-@interface FoxNowPlayingController : NSObject
+@interface StylusNowPlayingController : NSObject
 @property (nonatomic, strong) id toggleTarget;
 @property (nonatomic, strong) id nextTarget;
 @property (nonatomic, strong) id prevTarget;
@@ -25,7 +25,7 @@ using FoxPlayer::NowPlayingBridge;
 // CGEventTap callback, fires at the CoreGraphics level, before any NSApp
 // or MPRemoteCommandCenter handler sees the event. Returning NULL consumes it.
 // ---------------------------------------------------------------------------
-static CGEventRef foxMediaKeyTapCallback(CGEventTapProxy,
+static CGEventRef stylusMediaKeyTapCallback(CGEventTapProxy,
                                           CGEventType    type,
                                           CGEventRef     event,
                                           void*          refcon)
@@ -34,12 +34,12 @@ static CGEventRef foxMediaKeyTapCallback(CGEventTapProxy,
         return event;
 
     NSEvent* ev = [NSEvent eventWithCGEvent:event];
-    FoxNowPlayingController* ctrl = (__bridge FoxNowPlayingController*)refcon;
+    StylusNowPlayingController* ctrl = (__bridge StylusNowPlayingController*)refcon;
     if ([ctrl handleMediaKeyEvent:ev]) return NULL; // consumed
     return event;
 }
 
-@implementation FoxNowPlayingController
+@implementation StylusNowPlayingController
 {
     NowPlayingBridge*  _owner;
     double             _duration;
@@ -130,7 +130,7 @@ static CGEventRef foxMediaKeyTapCallback(CGEventTapProxy,
         kCGHeadInsertEventTap,
         kCGEventTapOptionDefault,
         CGEventMaskBit(NSEventTypeSystemDefined),
-        foxMediaKeyTapCallback,
+        stylusMediaKeyTapCallback,
         (__bridge void*)self);
 
     if (!tap) return; // Permission granted but tap still failed, fall back gracefully.
@@ -192,7 +192,7 @@ static CGEventRef foxMediaKeyTapCallback(CGEventTapProxy,
 
     // Local monitor: backup for when CGEventTap isn't active. Consuming the
     // event (returning nil) prevents MPRemoteCommandCenter from also firing.
-    __unsafe_unretained FoxNowPlayingController* bself = self;
+    __unsafe_unretained StylusNowPlayingController* bself = self;
     self.localMonitor = [NSEvent
         addLocalMonitorForEventsMatchingMask:NSEventMaskSystemDefined
         handler:^NSEvent*(NSEvent* ev) {
@@ -275,13 +275,13 @@ static CGEventRef foxMediaKeyTapCallback(CGEventTapProxy,
 // ---------------------------------------------------------------------------
 // C++ NowPlayingBridge
 // ---------------------------------------------------------------------------
-namespace FoxPlayer
+namespace Stylus
 {
 
 NowPlayingBridge::NowPlayingBridge()
 {
-    FoxNowPlayingController* ctrl =
-        [[FoxNowPlayingController alloc] initWithOwner:this];
+    StylusNowPlayingController* ctrl =
+        [[StylusNowPlayingController alloc] initWithOwner:this];
     impl_ = (void*)CFBridgingRetain(ctrl);
 }
 
@@ -294,20 +294,20 @@ void NowPlayingBridge::setTrackInfo(const std::string& title,
                                     const std::string& artist,
                                     double             dur)
 {
-    auto* c = (__bridge FoxNowPlayingController*)impl_;
+    auto* c = (__bridge StylusNowPlayingController*)impl_;
     [c setTrackTitle:@(title.c_str()) artist:@(artist.c_str()) duration:dur];
 }
 
 void NowPlayingBridge::setPlaybackState(bool isPlaying, double pos)
 {
-    auto* c = (__bridge FoxNowPlayingController*)impl_;
+    auto* c = (__bridge StylusNowPlayingController*)impl_;
     [c setPlaybackState:isPlaying ? YES : NO position:pos];
 }
 
 void NowPlayingBridge::clearNowPlaying()
 {
-    auto* c = (__bridge FoxNowPlayingController*)impl_;
+    auto* c = (__bridge StylusNowPlayingController*)impl_;
     [c clearNowPlaying];
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

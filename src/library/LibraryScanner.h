@@ -5,7 +5,7 @@
 #include <functional>
 #include <vector>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Scans a folder recursively on a background thread, emitting batches of TrackInfo
@@ -50,4 +50,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryScanner)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

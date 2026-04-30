@@ -5,11 +5,11 @@
 #include <functional>
 #include <deque>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Accepts TrackInfo items into a queue and analyses them one at a time on a
-// background thread (BPM + key). Results are saved to .foxp and reported back
+// background thread (BPM + key). Results are saved to .styl and reported back
 // to the message thread via onTrackAnalysed.
 class AnalysisEngine : private juce::Thread
 {
@@ -17,10 +17,10 @@ public:
     AnalysisEngine();
     ~AnalysisEngine() override;
 
-    // Enqueues a track for analysis. Skips if already analysed (.foxp exists with results).
+    // Enqueues a track for analysis. Skips if already analysed (.styl exists with results).
     void enqueue(const TrackInfo& track);
 
-    // Enqueues a whole library; tracks with existing .foxp data are skipped.
+    // Enqueues a whole library; tracks with existing .styl data are skipped.
     void enqueueAll(const std::vector<TrackInfo>& tracks);
 
     void cancelAll();
@@ -42,4 +42,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AnalysisEngine)
 };
 
-} // namespace FoxPlayer
+} // namespace Stylus

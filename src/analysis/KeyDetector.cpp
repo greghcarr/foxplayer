@@ -5,7 +5,7 @@
 #include <numeric>
 #include <algorithm>
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 // Krumhansl-Schmuckler key profiles (major and minor).
@@ -142,4 +142,4 @@ juce::String KeyDetector::detect(const juce::File& audioFile,
     return juce::String(kNoteNames[bestKey]) + (bestMinor ? "m" : "");
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

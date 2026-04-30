@@ -1,12 +1,12 @@
 #include "LibraryScanner.h"
-#include "audio/FoxpFile.h"
+#include "audio/StylFile.h"
 #include "Constants.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 LibraryScanner::LibraryScanner()
-    : juce::Thread("FoxPlayer.LibraryScanner")
+    : juce::Thread("Stylus.LibraryScanner")
 {
 }
 
@@ -306,7 +306,7 @@ TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
 
     // Infer album and artist from folder names when tags and filename parsing
     // leave them empty. Parent folder = album, grandparent folder = artist,
-    // both only when still inside the music root. FoxpFile::load() below can
+    // both only when still inside the music root. StylFile::load() below can
     // still override these with user-edited values.
     if (!isPodcast && root.isDirectory())
     {
@@ -322,13 +322,13 @@ TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
 
     // Load any previously saved user data from the sidecar. Applied before the
     // podcast-specific block so that the canonical podcast field clearing below
-    // always wins over stale music metadata in the foxp.
-    FoxpFile::load(info);
+    // always wins over stale music metadata in the styl.
+    StylFile::load(info);
 
     if (isPodcast)
     {
-        // Derive show name from foxp-stored podcast field, then album tag, then
-        // parent folder name. The foxp may have a user-edited show name we want
+        // Derive show name from styl-stored podcast field, then album tag, then
+        // parent folder name. The styl may have a user-edited show name we want
         // to preserve; otherwise fall back to audio-tag album or the folder.
         if (info.podcast.isEmpty())
         {
@@ -342,10 +342,10 @@ TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
         info.artist = {};
 
         // Infer episode number from filename when none was found in tags or
-        // foxp. Skip when the foxp explicitly contained a trackNumber
+        // styl. Skip when the styl explicitly contained a trackNumber
         // (including 0, meaning the user cleared the field for a "bonus"
         // episode that has no episode number).
-        if (info.trackNumber == 0 && !info.foxpHadTrackNumber)
+        if (info.trackNumber == 0 && !info.stylHadTrackNumber)
             info.trackNumber = guessEpisodeNumber(file.getFileNameWithoutExtension());
     }
     else
@@ -357,10 +357,10 @@ TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
     if (info.dateAdded == 0)
     {
         info.dateAdded = juce::Time::currentTimeMillis();
-        FoxpFile::save(info);
+        StylFile::save(info);
     }
 
     return info;
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus

@@ -23,7 +23,7 @@ CORNER_RADIUS = 185
 
 # ---- Palette -----------------------------------------------------------------
 BG_SQUIRCLE = (196, 196, 196)   # 0xc4c4c4 - transport-button silver
-FG          = ( 15,  15,  15)   # FoxPlayer black
+FG          = ( 15,  15,  15)   # Stylus black
 
 # ---- Canvas ------------------------------------------------------------------
 img = Image.new("RGBA", (W, H), (0, 0, 0, 0))

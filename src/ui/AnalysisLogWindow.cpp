@@ -1,7 +1,7 @@
 #include "AnalysisLogWindow.h"
 #include "Constants.h"
 
-namespace FoxPlayer
+namespace Stylus
 {
 
 using namespace Constants;
@@ -262,4 +262,4 @@ AnalysisLogComponent& AnalysisLogWindow::log()
     return *logComponent_;
 }
 
-} // namespace FoxPlayer
+} // namespace Stylus
