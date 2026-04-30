@@ -1476,7 +1476,8 @@ void TransportBar::updateDisplay()
 
     const double elapsed = engine_.elapsedSeconds();
     const double total   = engine_.durationSeconds();
-    elapsedLabel_.setText(formatSeconds(elapsed), juce::dontSendNotification);
+    if (!draggingSeek_)
+        elapsedLabel_.setText(formatSeconds(elapsed), juce::dontSendNotification);
     totalLabel_.setText(formatSeconds(total),     juce::dontSendNotification);
 
     if (!draggingSeek_)
@@ -1542,6 +1543,8 @@ void TransportBar::mouseDown(const juce::MouseEvent& e)
     {
         draggingSeek_ = true;
         seekDragPos_  = seekBarNormalizedX(e.x);
+        elapsedLabel_.setText(formatSeconds(seekDragPos_ * engine_.durationSeconds()),
+                              juce::dontSendNotification);
         repaint();
         return;
     }
@@ -1557,6 +1560,8 @@ void TransportBar::mouseDrag(const juce::MouseEvent& e)
 {
     if (!draggingSeek_) return;
     seekDragPos_ = seekBarNormalizedX(e.x);
+    elapsedLabel_.setText(formatSeconds(seekDragPos_ * engine_.durationSeconds()),
+                          juce::dontSendNotification);
     repaint();
 }
 
