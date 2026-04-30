@@ -174,6 +174,47 @@ namespace
         return score;
     }
 
+    // Returns true if `existing` and `apiValue` look like the same string
+    // after stripping case and non-alphanumeric characters. Used as a guard
+    // against an overwrite=true lookup replacing a user-edited title / artist
+    // / album with something that clearly refers to a different track. A loose
+    // match (e.g. "Hello World" vs "Hello, World!") still gets the API value
+    // so users benefit from canonical casing / accents / punctuation.
+    bool isLooseStringMatch(const juce::String& existing,
+                            const juce::String& apiValue)
+    {
+        if (existing.isEmpty() || apiValue.isEmpty()) return false;
+
+        auto normalize = [](const juce::String& s) -> juce::String {
+            juce::String out;
+            out.preallocateBytes(static_cast<size_t>(s.length()));
+            for (auto cp = s.getCharPointer(); ! cp.isEmpty(); ++cp)
+            {
+                const auto c = *cp;
+                if (juce::CharacterFunctions::isLetterOrDigit(c))
+                    out += juce::String::charToString(juce::CharacterFunctions::toLowerCase(c));
+            }
+            return out;
+        };
+
+        const juce::String e = normalize(existing);
+        const juce::String a = normalize(apiValue);
+        if (e.isEmpty() || a.isEmpty()) return false;
+        if (e == a) return true;
+
+        // Substring relationship counts as a match only when the shorter side
+        // is at least 60% of the longer side — "Beatles" vs "The Beatles"
+        // matches; "Track 1" vs "Track 12 Bonus Mix Live" does not.
+        if (e.contains(a) || a.contains(e))
+        {
+            const int minLen = juce::jmin(e.length(), a.length());
+            const int maxLen = juce::jmax(e.length(), a.length());
+            return (minLen * 5) >= (maxLen * 3);
+        }
+
+        return false;
+    }
+
     juce::var pickBestMatch(const juce::Array<juce::var>& results,
                             const TrackInfo& track,
                             const juce::String& hintAlbum)
@@ -284,12 +325,20 @@ void AppleMusicLookup::processOne(Job job)
     if (! artOnly)
     {
         // Fill in text metadata. With overwrite=false only blank fields are
-        // populated; with overwrite=true any matching Apple Music value replaces
-        // the existing content.
+        // populated. With overwrite=true the field is replaced unless the
+        // user clearly typed something different — in that case the API
+        // value is treated as a probable mismatch and skipped, preserving
+        // the user-entered data.
         auto applyString = [&](juce::String& field, const juce::String& value) {
             if (value.isEmpty()) return;
             if (! overwrite && ! field.isEmpty()) return;
             if (field == value) return;
+
+            // Even with overwrite on, refuse to clobber a user value that
+            // doesn't loosely match the API result (likely a wrong match).
+            if (overwrite && field.isNotEmpty() && ! isLooseStringMatch(field, value))
+                return;
+
             field   = value;
             changed = true;
         };
@@ -299,7 +348,10 @@ void AppleMusicLookup::processOne(Job job)
         applyString(track.genre,  matchObj->getProperty("primaryGenreName").toString());
         applyString(track.title,  matchObj->getProperty("trackName").toString());
 
-        if (overwrite || track.year.isEmpty())
+        // Year and track number: only overwrite when the existing value is
+        // empty/zero. The user might have a remaster year or custom episode
+        // number that the API doesn't know about; don't second-guess it.
+        if (track.year.isEmpty())
         {
             const juce::String releaseDate = matchObj->getProperty("releaseDate").toString();
             if (releaseDate.length() >= 4)
@@ -313,7 +365,7 @@ void AppleMusicLookup::processOne(Job job)
             }
         }
 
-        if ((overwrite || track.trackNumber == 0) && matchObj->hasProperty("trackNumber"))
+        if (track.trackNumber == 0 && matchObj->hasProperty("trackNumber"))
         {
             const int n = static_cast<int>(matchObj->getProperty("trackNumber"));
             if (n > 0 && n != track.trackNumber)
