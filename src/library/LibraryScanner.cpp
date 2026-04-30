@@ -126,6 +126,13 @@ void LibraryScanner::run()
             if (onBatchReady) onBatchReady(std::move(b));
         });
         batch.clear();
+
+        // Yield the CPU between batches: scans were saturating a core during
+        // startup. Trades a slower scan for a more responsive system; the
+        // message thread also gets cleaner windows in which to apply each
+        // batch's UI updates.
+        if (Constants::scannerInterBatchPauseMs > 0)
+            wait(Constants::scannerInterBatchPauseMs);
     };
 
     auto emit = [&](const juce::File& file, bool asPodcast, const juce::File& root = {}) {
