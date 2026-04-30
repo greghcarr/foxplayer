@@ -1,4 +1,4 @@
-// Pure Objective-C++ — no JUCE headers. Returns a malloc'd buffer of raw image
+// Pure Objective-C++, no JUCE headers. Returns a malloc'd buffer of raw image
 // bytes (JPEG or PNG). Caller must free(). Returns nullptr if nothing is found.
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>

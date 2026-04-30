@@ -31,7 +31,7 @@ public:
     // Returns true if the playlist already contains the given file path.
     bool containsTrack(int id, const juce::String& path) const;
 
-    // Appends paths to the playlist (no duplicate filtering — callers decide).
+    // Appends paths to the playlist (no duplicate filtering, callers decide).
     void addTracksToPlaylist(int id, const std::vector<juce::String>& paths);
 
     // Replaces the playlist's track list with the given ordered paths. Used

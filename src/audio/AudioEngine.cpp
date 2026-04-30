@@ -5,7 +5,7 @@ namespace FoxPlayer
 
 AudioEngine::AudioEngine()
 {
-    // Register all built-in decoders plus CoreAudioFormat (macOS — handles MP3, AAC, ALAC, AIFF, WAV).
+    // Register all built-in decoders plus CoreAudioFormat (macOS, handles MP3, AAC, ALAC, AIFF, WAV).
     formatManager_.registerBasicFormats(); // includes CoreAudioFormat on macOS
 
     // Initialise audio device using system defaults.
@@ -162,7 +162,7 @@ void AudioEngine::loadTrack(const TrackInfo& track)
                                reader->sampleRate);
     trackLoaded_ = true;
     loading_ = false;
-    DBG("AudioEngine::loadTrack — done");
+    DBG("AudioEngine::loadTrack, done");
 }
 
 void AudioEngine::unloadCurrentReader()

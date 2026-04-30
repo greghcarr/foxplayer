@@ -9,7 +9,7 @@ void FoxPlayer_activateAndShowWindow(void* nsWindowHandle);
 // Activates the app and brings the window to front on whichever Space it
 // currently lives on, causing macOS to switch to that Space rather than moving
 // the window. Used when the window is already visible and the user clicks the
-// Dock icon — we want to go to the window, not bring the window to us.
+// Dock icon, we want to go to the window, not bring the window to us.
 void FoxPlayer_activateExistingWindow(void* nsWindowHandle);
 
 // Registers a callback fired when the user clicks the Dock icon while no

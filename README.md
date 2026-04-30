@@ -106,15 +106,15 @@ Or double-click the `.app` in Finder after building.
 
 Right-clicking one or more tracks in the library shows:
 
-- **Edit Info** — open the metadata editor (also Cmd-R)
-- **Look up on Apple Music** — auto-fill metadata, with undo
-- **Look up Album Art** — fetch and embed cover art, with undo
-- **Look up on Podcast Index** — fetch podcast episode metadata (podcasts only)
-- **Add to Queue** — append to the current play queue
-- **Go to Artist / Album / Genre / Podcast** — jump to the track's sidebar view
-- **Analyze** — queue BPM and key detection
-- **Hide / Show** — toggle track visibility in the library
-- **Remove from Playlist** — remove selected tracks (playlist view only)
+- **Edit Info**: open the metadata editor (also Cmd-R)
+- **Look up on Apple Music**: auto-fill metadata, with undo
+- **Look up Album Art**: fetch and embed cover art, with undo
+- **Look up on Podcast Index**: fetch podcast episode metadata (podcasts only)
+- **Add to Queue**: append to the current play queue
+- **Go to Artist / Album / Genre / Podcast**: jump to the track's sidebar view
+- **Analyze**: queue BPM and key detection
+- **Hide / Show**: toggle track visibility in the library
+- **Remove from Playlist**: remove selected tracks (playlist view only)
 
 ## Keyboard Shortcuts
 

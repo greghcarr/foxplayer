@@ -162,7 +162,7 @@ private:
     std::unique_ptr<juce::Drawable> albumIconDrawable_;
     std::unique_ptr<juce::Drawable> genreIconDrawable_;
 
-    // Spinning loading indicator — driven by section.loading flags.
+    // Spinning loading indicator, driven by section.loading flags.
     float  loadingRotation_  { 0.0f };
 
     // Error state for library sections (inaccessible folders).

@@ -203,7 +203,7 @@ namespace
         if (e == a) return true;
 
         // Substring relationship counts as a match only when the shorter side
-        // is at least 60% of the longer side — "Beatles" vs "The Beatles"
+        // is at least 60% of the longer side, "Beatles" vs "The Beatles"
         // matches; "Track 1" vs "Track 12 Bonus Mix Live" does not.
         if (e.contains(a) || a.contains(e))
         {
@@ -326,7 +326,7 @@ void AppleMusicLookup::processOne(Job job)
     {
         // Fill in text metadata. With overwrite=false only blank fields are
         // populated. With overwrite=true the field is replaced unless the
-        // user clearly typed something different — in that case the API
+        // user clearly typed something different, in that case the API
         // value is treated as a probable mismatch and skipped, preserving
         // the user-entered data.
         auto applyString = [&](juce::String& field, const juce::String& value) {

@@ -1,7 +1,7 @@
 #include "AlbumArtExtractor.h"
 #include <cstdlib>
 
-// Declared in AlbumArtExtractor.mm — no JUCE types cross the boundary.
+// Declared in AlbumArtExtractor.mm, no JUCE types cross the boundary.
 extern "C"
 unsigned char* FoxPlayer_extractEmbeddedArtwork(const char* utf8Path, size_t* outSize);
 

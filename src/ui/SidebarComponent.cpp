@@ -488,7 +488,7 @@ void SidebarComponent::paint(juce::Graphics& g)
         }
     }
 
-    // Sticky overlay — only needed once we've scrolled past the LIBRARY header
+    // Sticky overlay, only needed once we've scrolled past the LIBRARY header
     int scrollY, libStickyH, activeSectionIdx;
     getStickyZone(scrollY, libStickyH, activeSectionIdx);
 
@@ -528,7 +528,7 @@ void SidebarComponent::paint(juce::Graphics& g)
 
     // Re-draw section headers entering from below the ACTIVE-SECTION part of the sticky
     // zone (i.e. approaching from below activeTop), so they slide OVER the active header
-    // rather than under it. Headers passing through the Library zone are excluded — they
+    // rather than under it. Headers passing through the Library zone are excluded, they
     // should disappear behind it, not float above it.
     int visualStickyBottom = scrollY + totalStickyH;
     for (int i = 1; i < (int)sections_.size(); ++i)

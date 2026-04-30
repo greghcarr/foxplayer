@@ -51,7 +51,7 @@ void FoxPlayer_activateExistingWindow(void* nativeHandle)
 // ---------------------------------------------------------------------------
 
 // Owns the callback block with a `copy` property so non-ARC block lifetime is
-// handled correctly — a plain `static void (^)() = ^{...}` stores a stack
+// handled correctly, a plain `static void (^)() = ^{...}` stores a stack
 // block that becomes a dangling pointer once the enclosing function returns.
 @interface FoxPlayerReopenHandler : NSObject
 @property (nonatomic, copy) void (^onReopen)(void);
@@ -83,7 +83,7 @@ static BOOL gSwizzleApplied = NO;
 // applicationShouldHandleReopen:hasVisibleWindows: on JUCE's delegate class.
 static BOOL FoxPlayer_applicationShouldHandleReopen(id, SEL, NSApplication*, BOOL)
 {
-    // Dock click is an explicit user action — always show the window.
+    // Dock click is an explicit user action, always show the window.
     if (gHandler && gHandler.onReopen)
         gHandler.onReopen();
     return YES;
@@ -114,7 +114,7 @@ void FoxPlayer_setDockReopenCallback(std::function<void()> callback)
         Class cls = [NSApp.delegate class];
         SEL   sel = @selector(applicationShouldHandleReopen:hasVisibleWindows:);
         IMP   imp = (IMP)FoxPlayer_applicationShouldHandleReopen;
-        // "c@:@c" — BOOL return, id self, SEL _cmd, NSApplication*, BOOL
+        // "c@:@c", BOOL return, id self, SEL _cmd, NSApplication*, BOOL
         if (class_respondsToSelector(cls, sel)) {
             Method m = class_getInstanceMethod(cls, sel);
             if (m != nil)

@@ -142,7 +142,7 @@ private:
 
     // Recomputes hover state from the current mouse position and repaints if
     // anything changed. Replaces the hover poll that used to run inside the
-    // 30 Hz timer — now driven by mouseMove / mouseExit events instead.
+    // 30 Hz timer, now driven by mouseMove / mouseExit events instead.
     void refreshHoverState();
 
     AudioEngine& engine_;
@@ -212,7 +212,7 @@ private:
         bool valid { false };
 
         // Cached inputs (cache invalidates when these change). file is part of
-        // the key so two tracks with empty title tags don't collide on cache —
+        // the key so two tracks with empty title tags don't collide on cache ,
         // displayTitle() falls back to the filename when title is empty.
         juce::File   file;
         juce::String title;

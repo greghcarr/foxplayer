@@ -43,7 +43,7 @@ void TransportButton::paint(juce::Graphics& g)
     juce::Colour iconColor;
     if (isMod)
     {
-        // Floating icon — no circle background.
+        // Floating icon, no circle background.
         if (icon == Icon::Pin)
             iconColor = (toggleState == 0) ? juce::Colour(0xff606060) : juce::Colour(0xffcc3333);
         else
@@ -284,7 +284,7 @@ static void drawSpinningRecord(juce::Graphics& g,
     const bool hasArt = art.isValid();
 
     // Drop shadow is now pre-rendered by the caller (TransportBar::paint) and
-    // blitted from a cached Image — drawing it from scratch every paint via
+    // blitted from a cached Image, drawing it from scratch every paint via
     // juce::DropShadow::drawForPath was the single largest CPU sink.
 
     g.saveState();
@@ -523,7 +523,7 @@ TransportBar::TransportBar(AudioEngine& engine)
     addMouseListener(this, true);
 
     // The animation timer is now started/stopped on demand via
-    // updateTimerState() — only running while audio is actually playing.
+    // updateTimerState(), only running while audio is actually playing.
     // No track is loaded at construction time so nothing to start yet.
 }
 
@@ -731,7 +731,7 @@ void TransportBar::paint(juce::Graphics& g)
         gradValid = leftFadeWidth > 0.0f;
     }
 
-    // Album art / CD — podcasts get a stationary rounded square, music gets the spinning CD.
+    // Album art / CD, podcasts get a stationary rounded square, music gets the spinning CD.
     if (!albumArtBounds_.isEmpty() && hasTrack_)
     {
         // Pre-rendered drop shadow, blitted in one cheap image draw rather
@@ -849,7 +849,7 @@ void TransportBar::paint(juce::Graphics& g)
             }
         }
 
-        // Line 3: "Playing from: [source]" — both prefix and link in textDim,
+        // Line 3: "Playing from: [source]", both prefix and link in textDim,
         // underline appears on hover only. Nudged down 2px for separation.
         if (playingFromName_.isNotEmpty())
         {

@@ -59,7 +59,7 @@ private:
     void loadTrack(const TrackInfo& track);
     void unloadCurrentReader();
 
-    // juce::ChangeListener — fired by AudioTransportSource when state changes.
+    // juce::ChangeListener, fired by AudioTransportSource when state changes.
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
 
     juce::AudioDeviceManager           deviceManager_;

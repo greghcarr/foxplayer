@@ -22,7 +22,7 @@ using FoxPlayer::NowPlayingBridge;
 @end
 
 // ---------------------------------------------------------------------------
-// CGEventTap callback — fires at the CoreGraphics level, before any NSApp
+// CGEventTap callback, fires at the CoreGraphics level, before any NSApp
 // or MPRemoteCommandCenter handler sees the event. Returning NULL consumes it.
 // ---------------------------------------------------------------------------
 static CGEventRef foxMediaKeyTapCallback(CGEventTapProxy,
@@ -82,7 +82,7 @@ static CGEventRef foxMediaKeyTapCallback(CGEventTapProxy,
 }
 
 // ---------------------------------------------------------------------------
-// Media key event parsing — shared by CGEventTap and local NSEvent monitor
+// Media key event parsing, shared by CGEventTap and local NSEvent monitor
 // ---------------------------------------------------------------------------
 
 - (BOOL)handleMediaKeyEvent:(NSEvent*)ev
@@ -113,7 +113,7 @@ static CGEventRef foxMediaKeyTapCallback(CGEventTapProxy,
 }
 
 // ---------------------------------------------------------------------------
-// CGEventTap — intercepts media keys globally before any other app sees them.
+// CGEventTap, intercepts media keys globally before any other app sees them.
 // Requires Accessibility permission; silently skips setup if not granted.
 // macOS will show the Accessibility prompt the first time we call
 // AXIsProcessTrustedWithOptions, pointing the user to System Settings.
@@ -133,7 +133,7 @@ static CGEventRef foxMediaKeyTapCallback(CGEventTapProxy,
         foxMediaKeyTapCallback,
         (__bridge void*)self);
 
-    if (!tap) return; // Permission granted but tap still failed — fall back gracefully.
+    if (!tap) return; // Permission granted but tap still failed, fall back gracefully.
 
     _eventTap  = tap;
     _tapSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0);

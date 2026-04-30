@@ -27,7 +27,7 @@ public:
     // Call when playback stops with no track loaded.
     void clearNowPlaying();
 
-    // Callbacks — all fire on the main thread.
+    // Callbacks, all fire on the main thread.
     std::function<void()> onPlayPause;
     std::function<void()> onPrevious;
     std::function<void()> onNext;

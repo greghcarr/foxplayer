@@ -72,7 +72,7 @@ private:
     juce::CriticalSection  queueLock_;
 
     // Tracks which album name has been resolved most often for each directory.
-    // Only read/written on the background thread — no lock required.
+    // Only read/written on the background thread, no lock required.
     // Key: canonical directory path. Value: album name -> resolution count.
     std::map<juce::String, std::map<juce::String, int>> resolvedAlbums_;
 

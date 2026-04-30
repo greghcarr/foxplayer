@@ -736,7 +736,7 @@ void LibraryTableComponent::triggerEditInfoForSelection()
     bool hasMusic = false, hasPodcast = false;
     for (const auto& t : selectedTracks)
         t.isPodcast ? hasPodcast = true : hasMusic = true;
-    if (hasMusic && hasPodcast) return; // mixed type — same rule as right-click
+    if (hasMusic && hasPodcast) return; // mixed type, same rule as right-click
 
     if (rows.size() == 1)
     {
@@ -1125,7 +1125,7 @@ void LibraryTableComponent::mouseDrag(const juce::MouseEvent& e)
         && (e.originalComponent == &hdr || hdr.isParentOf(e.originalComponent)))
         return;
 
-    // Don't intercept drags that started on either scrollbar — the user is
+    // Don't intercept drags that started on either scrollbar, the user is
     // scrolling, not dragging tracks out of the table.
     auto& vsb = table_.getVerticalScrollBar();
     auto& hsb = table_.getHorizontalScrollBar();

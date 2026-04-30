@@ -98,7 +98,7 @@ typedef NS_ENUM(NSInteger, FoxBarState) {
 
         if (state == FoxBarPlaying)
         {
-            // Play triangle while playing — the icon reflects current state
+            // Play triangle while playing, the icon reflects current state
             // (playing) rather than the action a click would perform.
             CGFloat h = sz * 0.55, w = h * 0.866;
             CGFloat ox = (sz - w) * 0.5 + sz * 0.04, oy = (sz - h) * 0.5;

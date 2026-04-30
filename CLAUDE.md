@@ -1,4 +1,4 @@
-# FoxPlayer — Architecture Reference
+# FoxPlayer: Architecture Reference
 
 ## Overview
 C++17/JUCE 8.0.4 audio player for macOS. Current state: library browser with multi-folder support, on-disk library cache, playback with media keys + Now Playing + system tray, resizable play queue with right-click remove and shuffle-aware ordering, sidebar with Library / Artists / Albums / Genres / Playlists / Podcasts, drag-to-reorder playlists, album art display, BPM / key analysis, Apple Music + album-art lookups (with undo + retries), per-track play count + date-added, mini-player resize mode, always-on-top, per-view selection memory.
@@ -15,61 +15,61 @@ Requires: CMake 3.22+, Xcode CLT. JUCE 8.0.4 is fetched automatically via FetchC
 ## File Layout
 ```
 src/
-  Main.cpp                      — JUCEApplication entry point
-  MainWindow.h                  — DocumentWindow shell
-  MainComponent.h/.cpp          — Top-level layout, wires all subsystems together
-  Constants.h                   — All magic numbers, colors, column IDs
+  Main.cpp                     : JUCEApplication entry point
+  MainWindow.h                 : DocumentWindow shell
+  MainComponent.h/.cpp         : Top-level layout, wires all subsystems together
+  Constants.h                  : All magic numbers, colors, column IDs
   audio/
-    TrackInfo.h                 — Plain struct: file + metadata + duration + playCount
-    PlayQueue.h/.cpp            — Ordered track list + current index; advance/prev/jump
-    AudioEngine.h/.cpp          — Full audio pipeline; owns DeviceManager/TransportSource
-    FoxpFile.h/.cpp             — Read/write .foxp JSON sidecar files (dot-prefixed, hidden)
-    AlbumArtExtractor.h         — JUCE-side: calls ObjC bridge, falls back to folder art
-    AlbumArtExtractor.cpp       — JUCE-side implementation (no ObjC here)
-    AlbumArtExtractor.mm        — Pure ObjC++: AVFoundation album art extraction (no JUCE types)
+    TrackInfo.h                : Plain struct: file + metadata + duration + playCount
+    PlayQueue.h/.cpp           : Ordered track list + current index; advance/prev/jump
+    AudioEngine.h/.cpp         : Full audio pipeline; owns DeviceManager/TransportSource
+    FoxpFile.h/.cpp            : Read/write .foxp JSON sidecar files (dot-prefixed, hidden)
+    AlbumArtExtractor.h        : JUCE-side: calls ObjC bridge, falls back to folder art
+    AlbumArtExtractor.cpp      : JUCE-side implementation (no ObjC here)
+    AlbumArtExtractor.mm       : Pure ObjC++: AVFoundation album art extraction (no JUCE types)
   analysis/
-    BpmDetector.h/.cpp          — BPM detection
-    KeyDetector.h/.cpp          — Musical key detection
-    AnalysisEngine.h/.cpp       — Queue-based analysis; fires onTrackAnalysed callback
-    AppleMusicLookup.h/.cpp     — Background iTunes Search API queries; retry + suspend logic
+    BpmDetector.h/.cpp         : BPM detection
+    KeyDetector.h/.cpp         : Musical key detection
+    AnalysisEngine.h/.cpp      : Queue-based analysis; fires onTrackAnalysed callback
+    AppleMusicLookup.h/.cpp    : Background iTunes Search API queries; retry + suspend logic
   library/
-    LibraryScanner.h/.cpp       — Background thread: recursive scan + metadata extraction
-    LibraryCache.h/.cpp         — On-disk cache of fullLibrary_ keyed by folder list, so app
+    LibraryScanner.h/.cpp      : Background thread: recursive scan + metadata extraction
+    LibraryCache.h/.cpp        : On-disk cache of fullLibrary_ keyed by folder list, so app
                                    starts with the previous library visible while a fresh scan runs
-    LibraryTableComponent.h/.cpp — TableListBox showing the library; drag source for DnD
-    PlaylistStore.h/.cpp        — Persists playlists to ApplicationProperties as JSON
+    LibraryTableComponent.h/.cpp: TableListBox showing the library; drag source for DnD
+    PlaylistStore.h/.cpp       : Persists playlists to ApplicationProperties as JSON
   ui/
-    TransportBar.h/.cpp         — Bottom bar: album art, play/pause, seek, volume, queue toggle
-    QueueView.h/.cpp            — Right-side panel showing current play queue, draggable left edge
-    SidebarComponent.h/.cpp     — Left sidebar: Music + Playlists; DragAndDropTarget
-    SongInfoEditor.h/.cpp       — Modal dialog for editing track metadata
-    AnalysisLogWindow.h/.cpp    — Standalone window logging queued/running/finished analyses
-    AutoHideViewport.h          — Viewport that fades its vertical scrollbar after idle
-    LoadingIndicator.h          — Centred spinner overlay shown during a fresh library scan
-    Splash.h                    — Transparent borderless splash, shows the embedded app icon
-    PreferencesWindow.h/.cpp    — Tabbed Preferences window (Audio, Library, Misc, Debug); Cmd-,
-    Fonts.h                     — Lazy shared accessor for the embedded Foxwhelp typeface
-    MacWindowHelper.h/.mm       — Native NSWindow activation; Dock-reopen swizzle + appDidBecomeActive
-    NowPlayingBridge.h/.mm      — MPNowPlayingInfoCenter + MPRemoteCommandCenter (media keys, lock screen)
-    StatusBarItem.h/.mm         — macOS menu-bar status item with quick controls
+    TransportBar.h/.cpp        : Bottom bar: album art, play/pause, seek, volume, queue toggle
+    QueueView.h/.cpp           : Right-side panel showing current play queue, draggable left edge
+    SidebarComponent.h/.cpp    : Left sidebar: Music + Playlists; DragAndDropTarget
+    SongInfoEditor.h/.cpp      : Modal dialog for editing track metadata
+    AnalysisLogWindow.h/.cpp   : Standalone window logging queued/running/finished analyses
+    AutoHideViewport.h         : Viewport that fades its vertical scrollbar after idle
+    LoadingIndicator.h         : Centred spinner overlay shown during a fresh library scan
+    Splash.h                   : Transparent borderless splash, shows the embedded app icon
+    PreferencesWindow.h/.cpp   : Tabbed Preferences window (Audio, Library, Misc, Debug); Cmd-,
+    Fonts.h                    : Lazy shared accessor for the embedded Foxwhelp typeface
+    MacWindowHelper.h/.mm      : Native NSWindow activation; Dock-reopen swizzle + appDidBecomeActive
+    NowPlayingBridge.h/.mm     : MPNowPlayingInfoCenter + MPRemoteCommandCenter (media keys, lock screen)
+    StatusBarItem.h/.mm        : macOS menu-bar status item with quick controls
 
 resources/
-  icons/                        — Phosphor fill-weight SVGs, curated to ~255 icons
+  icons/                       : Phosphor fill-weight SVGs, curated to ~255 icons
                                    (transport, audio, playback, lists, folders, UI chrome,
                                    carets, arrows, dots). Add to binary-data in CMakeLists.txt
                                    to reference from code as BinaryData::<name>fill_svg.
   fonts/
-    Foxwhelp-Regular.ttf        — Custom display font, embedded
-  app-icon.png                  — Generated by make_app_icon.py; embedded for splash, fed
+    Foxwhelp-Regular.ttf       : Custom display font, embedded
+  app-icon.png                 : Generated by make_app_icon.py; embedded for splash, fed
                                    into juceaide for the macOS .icns
-  make_app_icon.py              — Regenerates app-icon.png (play triangle on silver squircle
+  make_app_icon.py             : Regenerates app-icon.png (play triangle on silver squircle
                                    with the Apple drop-shadow/highlight template)
 ```
 
 ## Key Patterns
 
 ### Format registration
-`registerBasicFormats()` already includes CoreAudioFormat on macOS — do not call `registerFormat(new CoreAudioFormat(), ...)` separately or JUCE will assert on the duplicate.
+`registerBasicFormats()` already includes CoreAudioFormat on macOS: do not call `registerFormat(new CoreAudioFormat(), ...)` separately or JUCE will assert on the duplicate.
 
 ### Audio pipeline
 ```
@@ -79,7 +79,7 @@ AudioDeviceManager
         -> AudioFormatReaderSource (swapped per track)
            -> AudioFormatReader (CoreAudioFormat: MP3/AAC/ALAC/AIFF/WAV)
 ```
-All owned by `AudioEngine`. Never call `transportSource_` from an audio thread callback — JUCE handles thread safety internally.
+All owned by `AudioEngine`. Never call `transportSource_` from an audio thread callback: JUCE handles thread safety internally.
 
 ### Track-end detection
 `AudioEngine` registers as a `ChangeListener` on `AudioTransportSource`. On change, if `!isPlaying() && !paused_` the track has finished naturally. `onTrackFinished` callback is fired on the message thread.
@@ -88,7 +88,7 @@ All owned by `AudioEngine`. Never call `transportSource_` from an audio thread c
 When a library row is activated, all tracks from that row to the end of the current visible (filtered) order become the new queue. `PlayQueue` stores `std::vector<TrackInfo>` + `int currentIndex`.
 
 ### Library data ownership
-`fullLibrary_` in `MainComponent` is the single source of truth for all scanned tracks. `LibraryTableComponent` holds a filtered view (pointers into a local copy). When switching sidebar items, `MainComponent` calls `libraryTable_.setTracks(subset)` — it never reads back from the table as the authoritative source, except via `allTracks()` when `onLibraryChanged` fires (hidden state change).
+`fullLibrary_` in `MainComponent` is the single source of truth for all scanned tracks. `LibraryTableComponent` holds a filtered view (pointers into a local copy). When switching sidebar items, `MainComponent` calls `libraryTable_.setTracks(subset)`: it never reads back from the table as the authoritative source, except via `allTracks()` when `onLibraryChanged` fires (hidden state change).
 
 ### Sidebar IDs
 - `1` = Library (all non-podcast tracks)
@@ -121,7 +121,7 @@ Old-style (non-dot-prefixed) `.foxp` files are deleted on `loadMusicFolder()`.
 ### Analysis safety: don't clobber user edits
 `AnalysisEngine` runs on a background thread. It receives a `TrackInfo` snapshot at queue time and emits the same struct back with `bpm` / `musicalKey` / `lufs` filled in. Two protections keep concurrent user edits from being overwritten:
 - **Disk side**: before `FoxpFile::save(track)`, the engine calls `FoxpFile::load(track)` to refresh title/artist/album/etc. from the latest on-disk state, then re-applies the just-computed bpm/key/lufs. Without this, a foxp written by the user mid-analysis would be silently reverted.
-- **In-memory side**: `analysisEngine_.onTrackAnalysed` in `MainComponent` finds the track in `fullLibrary_` by file path and merges *only* `bpm`, `musicalKey`, `lufs`. It does **not** call `updateTrackInLibrary(analysed)` (which would copy the full snapshot whole) — that's reserved for paths that legitimately want to overwrite metadata fields, like Apple Music lookups.
+- **In-memory side**: `analysisEngine_.onTrackAnalysed` in `MainComponent` finds the track in `fullLibrary_` by file path and merges *only* `bpm`, `musicalKey`, `lufs`. It does **not** call `updateTrackInLibrary(analysed)` (which would copy the full snapshot whole): that's reserved for paths that legitimately want to overwrite metadata fields, like Apple Music lookups.
 
 ### Apple Music lookups (single vs batch)
 `AppleMusicLookup` runs on its own thread and dispatches results back via `onLookupCompleted(track, status, isBatch)`. The flag flips behaviour in two places:
@@ -130,7 +130,7 @@ Old-style (non-dot-prefixed) `.foxp` files are deleted on `loadMusicFolder()`.
 Network errors are auto-retried after a 30 s delay (collected into `pendingRetryLookups_`). After `maxConsecutiveFailures` consecutive failures, the engine self-suspends and shows a single alert.
 
 ### Library cache on disk
-`LibraryCache` writes `fullLibrary_` to a JSON file in `ApplicationProperties` under a key derived from the music + podcast folder list. On launch, `setMusicFolders(folders, /*keepLibrary=*/ true)` reads it before the scan, so the user sees their library immediately. The fresh scan still runs — its results accumulate into `scanBuffer_` (because `scanReplacingCachedLibrary_` is true), and at scan complete the buffer atomically replaces `fullLibrary_`. The `LIBRARY` sidebar row shows a small spinner during the background scan; the centred `LoadingIndicator` only appears when there's no cached library yet.
+`LibraryCache` writes `fullLibrary_` to a JSON file in `ApplicationProperties` under a key derived from the music + podcast folder list. On launch, `setMusicFolders(folders, /*keepLibrary=*/ true)` reads it before the scan, so the user sees their library immediately. The fresh scan still runs: its results accumulate into `scanBuffer_` (because `scanReplacingCachedLibrary_` is true), and at scan complete the buffer atomically replaces `fullLibrary_`. The `LIBRARY` sidebar row shows a small spinner during the background scan; the centred `LoadingIndicator` only appears when there's no cached library yet.
 
 ### Per-view selection memory
 `MainComponent::savedSelectionByView_` is `std::map<int, std::vector<juce::File>>` keyed by sidebar id. `showSidebarItem(id)` saves the outgoing view's `libraryTable_.selectedFiles()` before changing `activeSidebarId_`, then restores the new view's saved selection (empty vector = nothing selected). `LibraryTableComponent::onSelectionChanged` fires only on user-driven changes; programmatic restoration uses `setSelectedRows(rows, dontSendNotification)` so it doesn't trip the "user touched a row" path. When that callback does fire, `MainComponent` clears every other view's saved selection (so coming back to view A after selecting in view B no longer restores A's stale selection).
@@ -140,7 +140,7 @@ Network errors are auto-retried after a 30 s delay (collected into `pendingRetry
 - `shuffleAll()`: move current track to index 0, Fisher-Yates shuffle every other track, save originals. This is what the shuffle button calls (and what session restore re-applies).
 - `shuffleRemaining()`: shuffle only what's after the current index. Used internally only.
 - `unshuffleRemaining()`: restore `originalTracks_` whole, place the playing track at its original index.
-`appendTracks()` appends to both `tracks_` and `originalTracks_` when shuffled, so disabling shuffle later restores the appended tracks too. `removeAt(idx)` strips from both lists by file-path match. `removeAt` no-ops on the currently playing index — the right-click "Remove from Queue" menu disables that row.
+`appendTracks()` appends to both `tracks_` and `originalTracks_` when shuffled, so disabling shuffle later restores the appended tracks too. `removeAt(idx)` strips from both lists by file-path match. `removeAt` no-ops on the currently playing index: the right-click "Remove from Queue" menu disables that row.
 
 ### Queue panel resize divider
 A second `SidebarDivider` (with `dragSign = -1`) sits at the queue panel's left edge. Min width matches the sidebar's minimum (44 px); max width is 40% of `getWidth()`. Width persists in `sessionQueueWidth`. The divider is `addChildComponent`-ed (initially hidden) and its visibility tracks `queueVisible_`.
@@ -153,19 +153,19 @@ A second `SidebarDivider` (with `dragSign = -1`) sits at the queue panel's left 
 
 ### Editor lookup: re-anchor selection after success
 When an Apple Music lookup is triggered from inside the Edit Info dialog, the lookup completion path:
-1. Calls `updateTrackInLibrary(t, /*followTrack*/ true)` — re-sorts the table.
+1. Calls `updateTrackInLibrary(t, /*followTrack*/ true)`: re-sorts the table.
 2. Fires the editor's pending callback so the dialog's fields refresh.
 3. Async-dispatches `libraryTable_.scrollToFile(t.file)` so the underlying view re-selects the looked-up track by file path. Without this, JUCE's TableListBox would keep the old row index and a *different* track (whatever now sits at that index) would appear selected once the sort shifted things.
 
 ### Dock icon behaviour (macOS)
 `MacWindowHelper.mm` swizzles `applicationShouldHandleReopen:hasVisibleWindows:` on the JUCE app delegate so a Dock click never quits the app. Two activation helpers:
 - `FoxPlayer_activateAndShowWindow`: temporarily sets `NSWindowCollectionBehaviorMoveToActiveSpace`, used when re-showing a hidden window so it appears on the user's current Space.
-- `FoxPlayer_activateExistingWindow`: just `[NSApp activate] + makeKeyAndOrderFront:`, no Move-to-active-Space. Used when the window is already visible — macOS switches to the window's Space rather than dragging the window to the user.
+- `FoxPlayer_activateExistingWindow`: just `[NSApp activate] + makeKeyAndOrderFront:`, no Move-to-active-Space. Used when the window is already visible: macOS switches to the window's Space rather than dragging the window to the user.
 
 `MainWindow::showWindow()` branches on `isVisible()` to pick between them; the hidden case also re-centres on whichever display the mouse is on.
 
 ### Native menus stay routable
-`commandManager_.setFirstCommandTarget(this)` is set once in `MainComponent`'s constructor and never cleared. The "first" command target is JUCE's fallback when nothing in the focused-component chain claims a command — installing it permanently means File / Window menu items stay enabled even when focus is on a child window (Analysis Log, Preferences, Edit Info dialog) whose parent chain doesn't lead back to MainComponent.
+`commandManager_.setFirstCommandTarget(this)` is set once in `MainComponent`'s constructor and never cleared. The "first" command target is JUCE's fallback when nothing in the focused-component chain claims a command: installing it permanently means File / Window menu items stay enabled even when focus is on a child window (Analysis Log, Preferences, Edit Info dialog) whose parent chain doesn't lead back to MainComponent.
 
 ### Now Playing + media keys + status bar
 `NowPlayingBridge.mm` populates `MPNowPlayingInfoCenter` (track name, artist, album, art, elapsed) and registers `MPRemoteCommandCenter` handlers for play / pause / next / previous / togglePlayPause / changePlaybackPosition. The handlers post back to the `nowPlaying_` object's `std::function` callbacks, which `MainComponent` wires to the same logic the on-screen transport buttons use. Media keys, the macOS lock screen, AirPods controls all flow through this.
@@ -175,10 +175,10 @@ When an Apple Music lookup is triggered from inside the Edit Info dialog, the lo
 ### Header sort arrow placement
 `LibraryTableComponent::HeaderLnF` overrides `LookAndFeel_V4::drawTableHeaderColumn` so the sort arrow sits immediately after the column title (with a 4 px gap), suppressed if there's not enough room, instead of pinned at the cell's right edge. Background highlights and column text rendering match the V4 default otherwise.
 
-### AlbumArtExtractor — ObjC/JUCE split
+### AlbumArtExtractor: ObjC/JUCE split
 AVFoundation and JUCE cannot share a translation unit: CarbonCore's `Point`/`Component` clash with JUCE's. Solution:
-- `AlbumArtExtractor.mm` — pure ObjC++, no JUCE headers, exposes `extern "C" unsigned char* FoxPlayer_extractEmbeddedArtwork(const char*, size_t*)`
-- `AlbumArtExtractor.cpp` — pure C++/JUCE, calls the C bridge, creates `juce::Image`, falls back to cover.jpg/folder.jpg/artwork.jpg in the same directory
+- `AlbumArtExtractor.mm`: pure ObjC++, no JUCE headers, exposes `extern "C" unsigned char* FoxPlayer_extractEmbeddedArtwork(const char*, size_t*)`
+- `AlbumArtExtractor.cpp`: pure C++/JUCE, calls the C bridge, creates `juce::Image`, falls back to cover.jpg/folder.jpg/artwork.jpg in the same directory
 
 ### Drag-and-drop (library → playlist)
 `MainComponent` inherits `juce::DragAndDropContainer`. `LibraryTableComponent` adds itself as a mouse listener on its internal `table_` and calls `startDragging()` with `\n`-separated file paths when a drag gesture exceeds the threshold. `SidebarComponent` implements `juce::DragAndDropTarget`; only playlist items (id >= 1000) are valid drop targets. On drop, `onTracksDropped` fires on `MainComponent`, which checks for duplicates and shows an `AlertWindow` for single-track drops.
@@ -190,15 +190,15 @@ JUCE interprets `const char*` as Latin-1. Always wrap UTF-8 emoji/non-ASCII with
 `JUCE_USE_MIDI_INPUTS=0` and `JUCE_USE_MIDI_OUTPUTS=0` are set in CMakeLists.txt to prevent CoreMIDI assertions at startup.
 
 ## Conventions
-- All tunable values (colors, sizes, column IDs) live in `Constants.h` — never inline.
+- All tunable values (colors, sizes, column IDs) live in `Constants.h`: never inline.
 - `juce::ignoreUnused()` for intentionally unused parameters (no `-Wunused` warnings).
-- Callbacks are `std::function<>` members — assign directly, never subclass for simple notifications.
-- No `new`/`delete` for owned resources — use `std::unique_ptr` or JUCE's `std::make_unique`.
-- Geometry is manual bounds math via `juce::Rectangle` — no physics.
+- Callbacks are `std::function<>` members: assign directly, never subclass for simple notifications.
+- No `new`/`delete` for owned resources: use `std::unique_ptr` or JUCE's `std::make_unique`.
+- Geometry is manual bounds math via `juce::Rectangle`: no physics.
 - Hidden files/folders (any path segment starting with `.`) are skipped during library scanning.
 
 ### Splash screen
-`SplashWindow` is a transparent borderless `juce::DocumentWindow` shown immediately in `JUCEApplication::initialise()`, then dismissed via `juce::Timer::callAfterDelay`. Content is just the embedded `BinaryData::appicon_png` drawn centred via `drawImageWithin(... onlyReduceInSize)` — no background rectangle since the icon already carries its own squircle + shadow. `MainWindow` creation is deferred ~60 ms so the splash gets a paint cycle before `MainComponent`'s heavy constructor blocks the message thread.
+`SplashWindow` is a transparent borderless `juce::DocumentWindow` shown immediately in `JUCEApplication::initialise()`, then dismissed via `juce::Timer::callAfterDelay`. Content is just the embedded `BinaryData::appicon_png` drawn centred via `drawImageWithin(... onlyReduceInSize)`: no background rectangle since the icon already carries its own squircle + shadow. `MainWindow` creation is deferred ~60 ms so the splash gets a paint cycle before `MainComponent`'s heavy constructor blocks the message thread.
 
 ### Preferences window
 `PreferencesWindow` is owned by `MainComponent`, created hidden, and shown via **Cmd-,** (File menu → "Preferences..."). Sidebar on the left lists categories (Audio, Library, Misc, Debug); right-hand panel hosts the current category. `AudioPreferencesPanel` wraps an output-device `ComboBox` plus a buffer-size `ComboBox`:
@@ -241,5 +241,5 @@ A second `TransportButton` lives at the right edge of the transport bar, mirrori
 2. If it needs a new audio format, register it in `AudioEngine` constructor.
 3. If it stores per-track data, add a field to `TrackInfo` and update `FoxpFile::load()`/`save()`.
 4. If it needs periodic UI updates, use `juce::Timer` (not a background thread for UI).
-5. If it modifies playlist contents, go through `PlaylistStore` — never mutate `Playlist::trackPaths` directly.
+5. If it modifies playlist contents, go through `PlaylistStore`: never mutate `Playlist::trackPaths` directly.
 6. If it needs an icon, check `resources/icons/` first; if missing, drop the SVG in there AND add it to the `juce_add_binary_data` block in `CMakeLists.txt`, then reconfigure CMake (`cmake -B build`) so the BinaryData header regenerates.

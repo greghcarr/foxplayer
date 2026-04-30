@@ -26,7 +26,7 @@ public:
     void setSearchPlaceholder(const juce::String& viewName);
 
     // Clears any text in the search box without firing onTextChange. Used by
-    // MainComponent when the user switches sidebar views — a search query
+    // MainComponent when the user switches sidebar views, a search query
     // typed for one view shouldn't leak into another.
     void clearSearch();
 

@@ -662,7 +662,7 @@ MainComponent::MainComponent()
         };
     }
 
-    // Rescan buttons. Both trigger the same keepLibrary rescan — the scanner
+    // Rescan buttons. Both trigger the same keepLibrary rescan, the scanner
     // processes music and podcast folders in a single pass.
     if (auto* libPanel = preferencesWindow_->libraryPanel())
     {
@@ -1084,7 +1084,7 @@ void MainComponent::checkFolderAccessibility()
 
     sidebar_.setLibraryErrors(errors);
 
-    // A folder that was missing and is now accessible — trigger a rescan.
+    // A folder that was missing and is now accessible, trigger a rescan.
     if (wasError && !isError)
         setMusicFolders(musicFolders_, /*keepLibrary=*/true);
 }
@@ -1855,7 +1855,7 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track,
 
             // Recompute peers from the current view at navigate time. An Apple
             // Music lookup may have changed the album/artist/genre and shifted
-            // the track to a new position in the sort order — using the
+            // the track to a new position in the sort order, using the
             // snapshot captured when the dialog opened would walk the wrong
             // neighbours.
             auto currentPeers = self->libraryTable_.visibleTracks();

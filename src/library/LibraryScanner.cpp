@@ -167,7 +167,7 @@ int LibraryScanner::guessEpisodeNumber(const juce::String& stem)
             return s.substring(start, i).getIntValue();
         };
 
-        // Pattern A: "episode <N>" or "ep <N>" — keyword followed by digits.
+        // Pattern A: "episode <N>" or "ep <N>", keyword followed by digits.
         for (const auto* kw : { "episode", "ep" })
         {
             const juce::String keyword(kw);

@@ -124,7 +124,7 @@ int QueueView::getNumRows()
     if (listH <= 0) return numItems;
     // Pad with ghost rows so the alternating stripe pattern extends into the
     // empty space below the last real item, but cap at the number of complete
-    // rows that fit in the visible area — going one over would push content
+    // rows that fit in the visible area, going one over would push content
     // height past the viewport and let the user scroll an empty queue.
     return juce::jmax(numItems, listH / rowHeight);
 }
@@ -133,7 +133,7 @@ void QueueView::paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool 
 {
     if (row < 0) return;
 
-    // Ghost rows below the last item — stripe pattern only, no content.
+    // Ghost rows below the last item, stripe pattern only, no content.
     if (row >= static_cast<int>(items_.size()))
     {
         if (row % 2 != 0)

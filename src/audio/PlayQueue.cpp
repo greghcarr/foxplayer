@@ -284,7 +284,7 @@ void PlayQueue::unshuffleRemaining()
     isShuffled_ = false;
 
     // Find where the current track sits in the original order, then keep only
-    // that track and the ones that follow it — tracks that came before it in
+    // that track and the ones that follow it, tracks that came before it in
     // the original order are already "in the past" and shouldn't reappear.
     int originalIdx = -1;
     if (currentFile.getFullPathName().isNotEmpty())
