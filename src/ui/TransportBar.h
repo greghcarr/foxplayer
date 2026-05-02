@@ -34,6 +34,11 @@ public:
     void mouseEnter(const juce::MouseEvent&) override;
     void mouseExit(const juce::MouseEvent&) override;
 
+    // Briefly displays the pressed visual without firing onClick. Used so
+    // keyboard shortcuts and media keys mirror the click-feedback the user
+    // would see if they had pressed the button with the mouse.
+    void flashPressed();
+
 private:
     bool hovered_ { false };
     bool pressed_  { false };
@@ -112,6 +117,13 @@ public:
     // Restore muted state without firing callbacks. Call once at startup.
     void setInitialMute(bool muted, double premuteVolume);
 
+    // Plays the click-feedback flash on a transport button without firing its
+    // onClick. Used by MainComponent when a keyboard shortcut or media key
+    // performs the action so the on-screen button reacts visibly.
+    void flashPlayPause() { playPauseButton_.flashPressed(); }
+    void flashPrev()      { prevButton_.flashPressed(); }
+    void flashNext()      { nextButton_.flashPressed(); }
+
     // Starts the 30 Hz animation timer when a track is actively playing,
     // stops it otherwise. Called from MainComponent on every state change.
     // Stopping the timer when paused/stopped/no-track means the transport
@@ -131,6 +143,14 @@ private:
     void refreshVolumeAlpha();
 
     juce::String formatSeconds(double secs) const;
+
+    // Kicks off background album-art extraction for currentTrack_, then drops
+    // the result onto the message thread. Stale results (older than the most
+    // recent request, or for a file that no longer matches the current track)
+    // are dropped so a slow lookup can't overwrite art for a newer track.
+    void loadAlbumArtAsync();
+    void applyLoadedAlbumArt(int loadId, const juce::File& file, juce::Image img);
+    int  albumArtLoadId_ { 0 };
 
     // Seek bar interaction
     void mouseDown(const juce::MouseEvent& e) override;

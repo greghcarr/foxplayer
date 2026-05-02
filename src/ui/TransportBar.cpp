@@ -153,6 +153,22 @@ void TransportButton::mouseUp(const juce::MouseEvent& e)
         onClick();
 }
 
+void TransportButton::flashPressed()
+{
+    if (!isEnabled()) return;
+    pressed_ = true;
+    repaint();
+    juce::Timer::callAfterDelay(240,
+        [safe = juce::Component::SafePointer<TransportButton>(this)]
+        {
+            if (auto* b = safe.getComponent())
+            {
+                b->pressed_ = false;
+                b->repaint();
+            }
+        });
+}
+
 void TransportButton::mouseEnter(const juce::MouseEvent&)
 {
     hovered_ = true;
@@ -537,7 +553,8 @@ void TransportBar::setCurrentTrack(const TrackInfo& track)
 {
     currentTrack_ = track;
     hasTrack_ = true;
-    albumArt_ = AlbumArtExtractor::extractFromFile(track.file);
+    albumArt_ = {};
+    loadAlbumArtAsync();
 
     compactScrollStartMs_ = juce::Time::getMillisecondCounter();
     resized();
@@ -554,7 +571,32 @@ void TransportBar::updateCurrentTrackInfo(const TrackInfo& updated)
 void TransportBar::refreshAlbumArt()
 {
     if (!hasTrack_) return;
-    albumArt_ = AlbumArtExtractor::extractFromFile(currentTrack_.file);
+    loadAlbumArtAsync();
+}
+
+void TransportBar::loadAlbumArtAsync()
+{
+    const int  thisId = ++albumArtLoadId_;
+    const auto file   = currentTrack_.file;
+
+    juce::Thread::launch(
+        [thisId, file, safe = juce::Component::SafePointer<TransportBar>(this)]
+        {
+            auto img = AlbumArtExtractor::extractFromFile(file);
+            juce::MessageManager::callAsync(
+                [thisId, file, img = std::move(img), safe]() mutable
+                {
+                    if (auto* bar = safe.getComponent())
+                        bar->applyLoadedAlbumArt(thisId, file, std::move(img));
+                });
+        });
+}
+
+void TransportBar::applyLoadedAlbumArt(int loadId, const juce::File& file, juce::Image img)
+{
+    if (loadId != albumArtLoadId_) return;
+    if (! hasTrack_ || currentTrack_.file != file) return;
+    albumArt_ = std::move(img);
     repaint();
 }
 
@@ -618,6 +660,7 @@ void TransportBar::setPlayingFrom(const juce::String& sourceName, int sourceSide
 
 void TransportBar::clearTrack()
 {
+    ++albumArtLoadId_;
     hasTrack_  = false;
     albumArt_  = {};
     playingFromName_ = {};
@@ -1405,6 +1448,13 @@ void TransportBar::updateTimerState()
     {
         stopTimer();
         lastUpdateMs_ = 0.0;
+    }
+
+    if (hasTrack_)
+    {
+        playPauseButton_.icon = engine_.isPlaying() ? TransportButton::Icon::Pause
+                                                    : TransportButton::Icon::Play;
+        playPauseButton_.repaint();
     }
 }
 

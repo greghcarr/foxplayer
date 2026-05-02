@@ -1990,9 +1990,9 @@ void MainComponent::setupAudioEngineCallbacks()
         if (engine_.isPlaying())     engine_.pause();
         else if (engine_.isPaused()) engine_.resume();
     };
-    nowPlaying_.onPlayPause  = togglePlayPause;
-    nowPlaying_.onPrevious   = [this] { playPrev(); };
-    nowPlaying_.onNext       = [this] { playNext(); };
+    nowPlaying_.onPlayPause  = [this, togglePlayPause] { transportBar_.flashPlayPause(); togglePlayPause(); };
+    nowPlaying_.onPrevious   = [this] { transportBar_.flashPrev(); playPrev(); };
+    nowPlaying_.onNext       = [this] { transportBar_.flashNext(); playNext(); };
     statusBarItem_.onShowApp = [this] { if (onShowWindowRequested) onShowWindowRequested(); };
     statusBarItem_.onQuit    = [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); };
 }
@@ -2296,6 +2296,7 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
 {
     if (key == juce::KeyPress(juce::KeyPress::spaceKey))
     {
+        transportBar_.flashPlayPause();
         if (engine_.isPlaying())       engine_.pause();
         else if (engine_.isPaused())   engine_.resume();
         return true;
