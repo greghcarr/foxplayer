@@ -1,10 +1,10 @@
 #include "TransportBar.h"
-#include "Constants.h"
+#include "UIConstants.h"
 
 namespace Stylus
 {
 
-using namespace Constants;
+using namespace UIConstants;
 
 static constexpr int   modBtnD    = 28;   // hit area for shuffle/repeat floating icons
 static constexpr int   skipBtnD   = 38;   // diameter of prev/next circles
@@ -1113,7 +1113,7 @@ void TransportBar::resized()
     // info text, seek bar, and shuffle/repeat buttons - leaving just the
     // three core transport buttons and the volume strip. Lets the user shrink
     // the window into a compact controller.
-    const bool mini = getWidth() < Constants::miniModeWidth;
+    const bool mini = getWidth() < UIConstants::miniModeWidth;
 
     auto bounds = getLocalBounds().reduced(pad, 0);
 
@@ -1240,7 +1240,7 @@ void TransportBar::resized()
     // the window is at or below the compact fade-in range (slightly above
     // mini-mode), so the paint-time alpha can crossfade it in/out smoothly.
     constexpr int compactFadeInMargin = 25;
-    if (getWidth() < Constants::miniModeWidth + compactFadeInMargin)
+    if (getWidth() < UIConstants::miniModeWidth + compactFadeInMargin)
     {
         constexpr int compactH = 20;
         const int compactY = btnCenterY - playBtnD / 2 - compactH - 3;

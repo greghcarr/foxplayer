@@ -1,6 +1,6 @@
 #include <JuceHeader.h>
 #include "MainWindow.h"
-#include "Constants.h"
+#include "UIConstants.h"
 #include "ui/Splash.h"
 
 class StylusApplication : public juce::JUCEApplication
@@ -14,7 +14,7 @@ public:
     {
         // App-wide scrollbar styling: gray thumb, transparent track/background.
         auto& laf = juce::LookAndFeel::getDefaultLookAndFeel();
-        laf.setColour(juce::ScrollBar::thumbColourId,      Stylus::Constants::Color::scrollbarThumb);
+        laf.setColour(juce::ScrollBar::thumbColourId,      Stylus::UIConstants::Color::scrollbarThumb);
         laf.setColour(juce::ScrollBar::trackColourId,      juce::Colours::transparentBlack);
         laf.setColour(juce::ScrollBar::backgroundColourId, juce::Colours::transparentBlack);
 

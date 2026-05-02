@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Constants.h"
+#include "UIConstants.h"
 #include <JuceHeader.h>
 
 namespace Stylus
@@ -45,7 +45,7 @@ public:
         const float cyF = static_cast<float>(cy);
 
         // Full faint ring
-        g.setColour(Constants::Color::textDim);
+        g.setColour(UIConstants::Color::textDim);
         g.drawEllipse(cx - r, cyF - r, r * 2.0f, r * 2.0f, 2.0f);
 
         // Rotating accent arc: ~280 degrees sweep
@@ -56,14 +56,14 @@ public:
                           rotation_,
                           rotation_ + sweep,
                           true);
-        g.setColour(Constants::Color::accent);
+        g.setColour(UIConstants::Color::accent);
         g.strokePath(arc, juce::PathStrokeType(2.0f,
                                                juce::PathStrokeType::curved,
                                                juce::PathStrokeType::rounded));
 
         // Caption
         g.setFont(font);
-        g.setColour(Constants::Color::textSecondary);
+        g.setColour(UIConstants::Color::textSecondary);
         g.drawText(caption_,
                    startX + spinnerD + gap, 0,
                    textW + 4, getHeight(),

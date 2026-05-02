@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Constants.h"
+#include "UIConstants.h"
 #include "audio/AudioEngine.h"
 #include "audio/PlayQueue.h"
 #include "analysis/AnalysisEngine.h"
@@ -294,8 +294,8 @@ private:
     int                    repeatMode_      { 0 };   // 0=off, 1=repeat-all, 2=repeat-one
     bool                   alwaysOnTop_     { false };
     int                    activeSidebarId_ { 1 };
-    int                    sidebarWidth_    { Constants::sidebarWidth };
-    int                    queueWidth_      { Constants::queuePanelWidth };
+    int                    sidebarWidth_    { UIConstants::sidebarWidth };
+    int                    queueWidth_      { UIConstants::queuePanelWidth };
     // Per-view saved selection (by file path so it survives sort changes).
     // Saved when leaving a view, restored when returning to it.
     std::map<int, std::vector<juce::File>> savedSelectionByView_;

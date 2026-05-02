@@ -1,10 +1,10 @@
 #include "SidebarComponent.h"
-#include "Constants.h"
+#include "UIConstants.h"
 
 namespace Stylus
 {
 
-using namespace Constants;
+using namespace UIConstants;
 
 namespace
 {
@@ -378,7 +378,7 @@ void SidebarComponent::drawSectionItem(juce::Graphics& g,
     }
 
     const int labelX = iconX + iconDim + iconGap;
-    const bool isDim = (item.id == Constants::noGenreId);
+    const bool isDim = (item.id == UIConstants::noGenreId);
     g.setColour(selected ? Color::textPrimary
                 : isDim  ? Color::textDim
                          : Color::textSecondary);

@@ -1,11 +1,11 @@
 #include "LibraryTableComponent.h"
-#include "Constants.h"
+#include "UIConstants.h"
 #include "audio/StylFile.h"
 
 namespace Stylus
 {
 
-using namespace Constants;
+using namespace UIConstants;
 
 static constexpr int searchBarHeight = 30;
 

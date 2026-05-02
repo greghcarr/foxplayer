@@ -1,10 +1,10 @@
 #include "SongInfoEditor.h"
-#include "Constants.h"
+#include "UIConstants.h"
 
 namespace Stylus
 {
 
-using namespace Constants;
+using namespace UIConstants;
 
 static const juce::String kLookupLabel =
     juce::String("Apple Music ") + juce::String(juce::CharPointer_UTF8("\xf0\x9f\x94\x8d"));

@@ -1,5 +1,5 @@
 #include "MainComponent.h"
-#include "Constants.h"
+#include "UIConstants.h"
 #include "audio/StylFile.h"
 #include "ui/SongInfoEditor.h"
 #include <algorithm>
@@ -8,7 +8,7 @@
 namespace Stylus
 {
 
-using namespace Constants;
+using namespace UIConstants;
 
 static constexpr int orphanCheckIntervalMs = 30'000;
 
@@ -1157,7 +1157,7 @@ void MainComponent::updateTrackInLibrary(const TrackInfo& updated, bool followTr
             else if (activeSidebarId_ >= 5000 && activeSidebarId_ < 6000)
             {
                 if (updated.genre.isEmpty())
-                    newId = Constants::noGenreId;
+                    newId = UIConstants::noGenreId;
                 else
                     for (const auto& [id, name] : genreIdToName_)
                         if (name == updated.genre) { newId = id; break; }
@@ -1457,7 +1457,7 @@ std::vector<TrackInfo> MainComponent::getTracksForSidebar(int sidebarId) const
     }
     else if (sidebarId >= 5000 && sidebarId < 6000)
     {
-        if (sidebarId == Constants::noGenreId)
+        if (sidebarId == UIConstants::noGenreId)
         {
             for (const auto& t : fullLibrary_)
                 if (!t.isPodcast && t.genre.isEmpty()) result.push_back(t);
@@ -1708,14 +1708,14 @@ void MainComponent::refreshSidebarGenres()
 
     if (hasNoGenre)
     {
-        genreIdToName_[Constants::noGenreId] = {};
-        items.push_back({ Constants::noGenreId, "(no genre)" });
+        genreIdToName_[UIConstants::noGenreId] = {};
+        items.push_back({ UIConstants::noGenreId, "(no genre)" });
     }
 
     int id = 5000;
     for (const auto& name : sorted)
     {
-        if (id >= Constants::noGenreId) break;   // leave 5999 reserved
+        if (id >= UIConstants::noGenreId) break;   // leave 5999 reserved
         genreIdToName_[id] = name;
         items.push_back({ id, name });
         ++id;
@@ -2008,13 +2008,13 @@ MainComponent::PrefsLockOverlay::PrefsLockOverlay()
     setInterceptsMouseClicks(true, true);
 
     message_.setFont(juce::Font(juce::FontOptions().withHeight(18.0f)).boldened());
-    message_.setColour(juce::Label::textColourId, Constants::Color::textPrimary);
+    message_.setColour(juce::Label::textColourId, UIConstants::Color::textPrimary);
     message_.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(message_);
 
     auto styleButton = [](juce::TextButton& b) {
         b.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
-        b.setColour(juce::TextButton::textColourOffId, Constants::Color::textPrimary);
+        b.setColour(juce::TextButton::textColourOffId, UIConstants::Color::textPrimary);
     };
     styleButton(openBtn_);
     styleButton(closeBtn_);
@@ -2045,10 +2045,10 @@ void MainComponent::PrefsLockOverlay::paint(juce::Graphics& g)
                                                  groupH + padY * 2)
                           .toFloat();
 
-    g.setColour(Constants::Color::background);
+    g.setColour(UIConstants::Color::background);
     g.fillRoundedRectangle(panel, 8.0f);
 
-    g.setColour(Constants::Color::border);
+    g.setColour(UIConstants::Color::border);
     g.drawRoundedRectangle(panel.reduced(0.5f), 8.0f, 1.0f);
 }
 
@@ -2081,13 +2081,13 @@ MainComponent::EditInfoLockOverlay::EditInfoLockOverlay()
     setInterceptsMouseClicks(true, true);
 
     message_.setFont(juce::Font(juce::FontOptions().withHeight(18.0f)).boldened());
-    message_.setColour(juce::Label::textColourId, Constants::Color::textPrimary);
+    message_.setColour(juce::Label::textColourId, UIConstants::Color::textPrimary);
     message_.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(message_);
 
     auto styleButton = [](juce::TextButton& b) {
         b.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
-        b.setColour(juce::TextButton::textColourOffId, Constants::Color::textPrimary);
+        b.setColour(juce::TextButton::textColourOffId, UIConstants::Color::textPrimary);
     };
     styleButton(openBtn_);
     styleButton(closeBtn_);
@@ -2116,10 +2116,10 @@ void MainComponent::EditInfoLockOverlay::paint(juce::Graphics& g)
                                                  groupH + padY * 2)
                           .toFloat();
 
-    g.setColour(Constants::Color::background);
+    g.setColour(UIConstants::Color::background);
     g.fillRoundedRectangle(panel, 8.0f);
 
-    g.setColour(Constants::Color::border);
+    g.setColour(UIConstants::Color::border);
     g.drawRoundedRectangle(panel.reduced(0.5f), 8.0f, 1.0f);
 }
 
@@ -2152,12 +2152,12 @@ MainComponent::QuitLockOverlay::QuitLockOverlay()
     setInterceptsMouseClicks(true, true);
 
     message_.setFont(juce::Font(juce::FontOptions().withHeight(18.0f)).boldened());
-    message_.setColour(juce::Label::textColourId, Constants::Color::textPrimary);
+    message_.setColour(juce::Label::textColourId, UIConstants::Color::textPrimary);
     message_.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(message_);
 
     cancelBtn_.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
-    cancelBtn_.setColour(juce::TextButton::textColourOffId, Constants::Color::textPrimary);
+    cancelBtn_.setColour(juce::TextButton::textColourOffId, UIConstants::Color::textPrimary);
     cancelBtn_.onClick = [this] { if (onCancelQuit) onCancelQuit(); };
     addAndMakeVisible(cancelBtn_);
 }
@@ -2180,9 +2180,9 @@ void MainComponent::QuitLockOverlay::paint(juce::Graphics& g)
                                                  groupH + padY * 2)
                           .toFloat();
 
-    g.setColour(Constants::Color::background);
+    g.setColour(UIConstants::Color::background);
     g.fillRoundedRectangle(panel, 8.0f);
-    g.setColour(Constants::Color::border);
+    g.setColour(UIConstants::Color::border);
     g.drawRoundedRectangle(panel.reduced(0.5f), 8.0f, 1.0f);
 }
 
@@ -2441,7 +2441,7 @@ juce::String MainComponent::sourceNameForSidebar(int sidebarId) const
         return (artist.isNotEmpty() ? artist : juce::String("Unknown Artist"))
              + " - " + album;
     }
-    if (sidebarId == Constants::noGenreId)
+    if (sidebarId == UIConstants::noGenreId)
         return "(no genre)";
     if (sidebarId >= 5000 && sidebarId < 6000)
     {
@@ -2872,8 +2872,8 @@ void MainComponent::restoreSessionState()
 
     // Sidebar width (the layout clamps to the valid min/max on the next
     // resized() call, so out-of-range persisted values are harmless).
-    sidebarWidth_ = props->getIntValue("sessionSidebarWidth", Constants::sidebarWidth);
-    queueWidth_   = props->getIntValue("sessionQueueWidth",   Constants::queuePanelWidth);
+    sidebarWidth_ = props->getIntValue("sessionSidebarWidth", UIConstants::sidebarWidth);
+    queueWidth_   = props->getIntValue("sessionQueueWidth",   UIConstants::queuePanelWidth);
     resized();
 
     // Sidebar view (must come before queue restore so refreshCurrentView shows

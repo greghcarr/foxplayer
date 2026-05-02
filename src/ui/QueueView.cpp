@@ -1,10 +1,10 @@
 #include "QueueView.h"
-#include "Constants.h"
+#include "UIConstants.h"
 
 namespace Stylus
 {
 
-using namespace Constants;
+using namespace UIConstants;
 
 QueueView::QueueView()
 {

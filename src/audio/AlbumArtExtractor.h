@@ -1,7 +1,8 @@
 #pragma once
 
 #include "TrackInfo.h"
-#include <JuceHeader.h>
+#include "JuceCore.h"
+#include <juce_graphics/juce_graphics.h>
 
 namespace Stylus
 {

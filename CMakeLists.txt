@@ -14,6 +14,36 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
+# StylusCore: portable analysis + library + audio-data layer.
+# Links only the GUI-free JUCE modules, so it can be reused on iOS as a
+# static library underneath a SwiftUI app. No source in this target may
+# depend on juce_graphics or juce_gui_basics.
+add_library(StylusCore STATIC
+    src/audio/PlayQueue.cpp
+    src/audio/StylFile.cpp
+    src/audio/AlbumArtExtractor.mm
+    src/analysis/BpmDetector.cpp
+    src/analysis/KeyDetector.cpp
+    src/analysis/AnalysisEngine.cpp
+    src/analysis/AppleMusicLookup.cpp
+    src/library/LibraryScanner.cpp
+    src/library/LibraryCache.cpp
+    src/library/PlaylistStore.cpp
+)
+
+target_include_directories(StylusCore PUBLIC src)
+
+target_link_libraries(StylusCore
+    PUBLIC
+        juce::juce_core
+        juce::juce_data_structures
+        juce::juce_audio_basics
+        juce::juce_audio_formats
+        juce::juce_dsp
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+)
+
 juce_add_gui_app(Stylus
     PRODUCT_NAME        "Stylus"
     BUNDLE_ID           com.greghcarr.stylus
@@ -27,22 +57,12 @@ juce_generate_juce_header(Stylus)
 target_sources(Stylus PRIVATE
     src/Main.cpp
     src/MainComponent.cpp
-    src/audio/PlayQueue.cpp
     src/audio/AudioEngine.cpp
-    src/audio/StylFile.cpp
-    src/audio/AlbumArtExtractor.mm
     src/audio/AlbumArtExtractor.cpp
     src/ui/StatusBarItem.mm
     src/ui/MacWindowHelper.mm
     src/ui/NowPlayingBridge.mm
-    src/analysis/BpmDetector.cpp
-    src/analysis/KeyDetector.cpp
-    src/analysis/AnalysisEngine.cpp
-    src/analysis/AppleMusicLookup.cpp
-    src/library/LibraryScanner.cpp
-    src/library/LibraryCache.cpp
     src/library/LibraryTableComponent.cpp
-    src/library/PlaylistStore.cpp
     src/ui/TransportBar.cpp
     src/ui/QueueView.cpp
     src/ui/SongInfoEditor.cpp
@@ -115,16 +135,14 @@ juce_add_binary_data(StylusIcons
 
 target_link_libraries(Stylus
     PRIVATE
+        StylusCore
         StylusIcons
         "-framework AVFoundation"
         "-framework MediaPlayer"
         "-framework IOKit"
-        juce::juce_audio_basics
         juce::juce_audio_devices
-        juce::juce_audio_formats
         juce::juce_audio_utils
         juce::juce_dsp
-        juce::juce_core
         juce::juce_graphics
         juce::juce_gui_basics
         juce::juce_gui_extra

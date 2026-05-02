@@ -1,7 +1,7 @@
 #pragma once
 
 #include "TrackInfo.h"
-#include <JuceHeader.h>
+#include "JuceCore.h"
 #include <vector>
 #include <functional>
 

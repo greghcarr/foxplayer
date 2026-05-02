@@ -1,7 +1,7 @@
 #pragma once
 
 #include "MainComponent.h"
-#include "Constants.h"
+#include "UIConstants.h"
 #include "ui/MacWindowHelper.h"
 #include <JuceHeader.h>
 
@@ -25,7 +25,7 @@ public:
         setFullScreen(true);
 #else
         setResizable(true, true);
-        setResizeLimits(Constants::minWindowWidth, Constants::minWindowHeight,
+        setResizeLimits(UIConstants::minWindowWidth, UIConstants::minWindowHeight,
                         4000, 3000);
         centreWithSize(getWidth(), getHeight());
 #endif
