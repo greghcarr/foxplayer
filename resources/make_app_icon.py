@@ -118,9 +118,12 @@ def make_ios_icon() -> Image.Image:
     # do the rounding when the icon is rendered on the home screen.
     img = Image.new("RGBA", (W, H), BG_SILVER + (255,))
 
-    # Play triangle scaled to the full canvas. Same proportional size as the
-    # macOS variant relative to the visible silver area.
-    tri = render_play_triangle(height_ratio=0.46)
+    # Play triangle sized to look the same as the macOS variant once iOS
+    # applies its squircle mask. macOS's triangle is 0.56 * 824 px (56 % of
+    # the squircle width); on iOS the visible silver fills the full 1024 px
+    # canvas at the centre line, so 0.56 of canvas keeps the same
+    # triangle-to-visible-silver ratio.
+    tri = render_play_triangle(height_ratio=0.56)
     img = Image.alpha_composite(img, tri)
 
     # Soft top highlight to match the macOS variant's lit-from-above feel.
