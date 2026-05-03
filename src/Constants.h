@@ -8,11 +8,13 @@
 namespace Stylus::Constants
 {
     // Scanner
-    static constexpr int scannerBatchSize = 50;
+    // Smaller batches = smoother per-track progress reporting, at the cost of
+    // slightly more main-thread dispatch overhead per scan. The previous 50
+    // value made the iOS progress bar appear to "stick" between batches.
+    static constexpr int scannerBatchSize = 10;
     // Sleep this many ms after each emitted batch so the scanner thread
     // breathes instead of saturating a core. Trades total scan time for
-    // lower CPU; 60 ms per 50 files = roughly a third of the CPU during
-    // a scan, at the cost of scans taking ~3x as long.
+    // lower CPU.
     static constexpr int scannerInterBatchPauseMs = 60;
 
     // Supported audio file extensions (lowercase)
