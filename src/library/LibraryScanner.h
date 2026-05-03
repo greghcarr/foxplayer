@@ -38,10 +38,19 @@ public:
 private:
     void run() override;
 
-    TrackInfo buildTrackInfo(const juce::File& file,
-                             juce::AudioFormatManager& fmgr,
-                             bool isPodcast,
-                             const juce::File& root = {}) const;
+    static TrackInfo buildTrackInfo(const juce::File& file,
+                                     juce::AudioFormatManager& fmgr,
+                                     bool isPodcast,
+                                     const juce::File& root = {});
+
+    // Wraps buildTrackInfo on a detached worker thread with a 15 s per-file
+    // timeout, so a malformed or otherwise-stuck file in JUCE's metadata
+    // reader can't stall the whole scan. On timeout returns a stub
+    // TrackInfo with file + isPodcast set; the track still appears in the
+    // library, with its filename as the displayed title.
+    static TrackInfo buildTrackInfoWithTimeout(const juce::File& file,
+                                                bool isPodcast,
+                                                const juce::File& root = {});
 
     std::vector<juce::File> musicRoots_;
     std::vector<juce::File> podcastRoots_;

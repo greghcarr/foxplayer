@@ -2,8 +2,19 @@
 #include "audio/StylFile.h"
 #include "Constants.h"
 
+#include <chrono>
+#include <future>
+#include <memory>
+#include <thread>
+
 namespace Stylus
 {
+
+namespace
+{
+    constexpr int kPerFileTimeoutMs = 15000;
+}
+
 
 LibraryScanner::LibraryScanner()
     : juce::Thread("Stylus.LibraryScanner")
@@ -113,9 +124,6 @@ void LibraryScanner::run()
     std::sort(musicFilesWithRoot.begin(), musicFilesWithRoot.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
 
-    juce::AudioFormatManager fmgr;
-    fmgr.registerBasicFormats();
-
     std::vector<TrackInfo> batch;
     batch.reserve(static_cast<size_t>(Constants::scannerBatchSize));
     int total = 0;
@@ -137,7 +145,7 @@ void LibraryScanner::run()
 
     auto emit = [&](const juce::File& file, bool asPodcast, const juce::File& root = {}) {
         if (threadShouldExit()) return;
-        batch.push_back(buildTrackInfo(file, fmgr, asPodcast, root));
+        batch.push_back(buildTrackInfoWithTimeout(file, asPodcast, root));
         ++total;
         if (static_cast<int>(batch.size()) >= Constants::scannerBatchSize)
             flush();
@@ -228,10 +236,48 @@ int LibraryScanner::guessEpisodeNumber(const juce::String& stem)
         return 0;
 }
 
+TrackInfo LibraryScanner::buildTrackInfoWithTimeout(const juce::File& file,
+                                                     bool isPodcast,
+                                                     const juce::File& root)
+{
+    auto p = std::make_shared<std::promise<TrackInfo>>();
+    auto fut = p->get_future();
+
+    // Detached worker so the scan thread can move on if this file hangs in
+    // JUCE's metadata reader. The worker creates its own AudioFormatManager
+    // since juce::AudioFormatManager isn't documented as thread-safe.
+    std::thread worker([file, isPodcast, root, p]() {
+        try {
+            juce::AudioFormatManager fmgr;
+            fmgr.registerBasicFormats();
+            p->set_value(buildTrackInfo(file, fmgr, isPodcast, root));
+        } catch (...) {
+            try { p->set_exception(std::current_exception()); } catch (...) {}
+        }
+    });
+    worker.detach();
+
+    if (fut.wait_for(std::chrono::milliseconds(kPerFileTimeoutMs))
+        == std::future_status::ready)
+    {
+        return fut.get();
+    }
+
+    juce::Logger::writeToLog("LibraryScanner: TIMEOUT reading "
+                              + file.getFullPathName());
+
+    TrackInfo stub;
+    stub.file = file;
+    stub.isPodcast = isPodcast;
+    if (isPodcast)
+        stub.podcast = file.getParentDirectory().getFileName();
+    return stub;
+}
+
 TrackInfo LibraryScanner::buildTrackInfo(const juce::File& file,
                                           juce::AudioFormatManager& fmgr,
                                           bool isPodcast,
-                                          const juce::File& root) const
+                                          const juce::File& root)
 {
     TrackInfo info;
     info.file = file;
