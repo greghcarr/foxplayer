@@ -340,6 +340,20 @@ Each phase ends with a runnable build on a real device or the simulator. Don't m
 - iOS-side: rescan on app foreground to pick up files dropped during a sync session
 - Optional: auto-sync on device connect (Preferences toggle)
 
+**Phase X: CarPlay (aspirational, conditional)**
+
+The "X" rather than a sequential number signals this is conditional on Apple's gatekeeping. Even with everything else shipped, Phase X may never happen.
+
+- Gated on Apple's **CarPlay Audio Apps entitlement**. Requires the paid Apple Developer Program plus an explicit application and approval from Apple, which is not guaranteed. Until the entitlement is granted, no CarPlay code can run in an actual vehicle (the simulator can preview the UI without it, but installs to real cars will fail to surface the app).
+- Add a `CarPlay` scene to `Info.plist` via `UIApplicationSceneManifest`.
+- Implement a `CPTemplateApplicationSceneDelegate` exposing:
+  - `CPNowPlayingTemplate` for the playing view (transport, art, queue access).
+  - `CPListTemplate` hierarchies for browse (Library / Artists / Albums / Playlists), drilled via `pushTemplate(_:animated:)`.
+  - `CPSearchTemplate` for voice / text search (driver-friendly typing is intentionally limited; voice covers most of it).
+- Reuse `LibraryStore`, `ArtworkCache`, `AudioPlayer`, and the Phase 3 Now Playing wiring as-is. `MPNowPlayingInfoCenter` already drives CarPlay once the entitlement is active, so phone-screen playback / lock-screen / CarPlay all share one truth.
+- iOS app UI is unchanged; CarPlay UI is parallel.
+- Distance constraint per Apple's CarPlay HIG: list rows must be reachable while driving (large hit targets, no fine-grained metadata in cells). Treat the iOS row's BPM / key surfacing as iOS-only; on CarPlay the row is just title + artist + duration.
+
 ## 11. Mac-side cable sync engine (Phase 9 architecture)
 
 iOS cannot expose app sandbox containers to a Mac directly. The sanctioned path is the iOS app's Documents folder, exposed via the `UIFileSharingEnabled` + `LSSupportsOpeningDocumentsInPlace` flags (already part of the iOS plan, section 7). With those flags on, Apple's **AFC** (Apple File Conduit) protocol — running over `usbmuxd`, the same daemon Finder and iTunes use — gives the Mac read/write access to that folder. This is what makes "cable sync" possible.
