@@ -333,7 +333,7 @@ static void drawSpinningRecord(juce::Graphics& g,
 
         // Text along the outer portion of the label.
         const float textRadius = R * 0.62f;
-        const juce::Font labelFont(juce::FontOptions().withName("Helvetica Neue")
+        const juce::Font labelFont(juce::FontOptions()
                                                         .withHeight(R * 0.33f)
                                                         .withStyle("Bold"));
         g.setColour(juce::Colour(0xff2c2c2c));
@@ -387,7 +387,7 @@ static void drawPodcastArt(juce::Graphics& g,
         if (fallbackText.isNotEmpty())
         {
             g.setColour(juce::Colour(0xffaaaaaa));
-            g.setFont(juce::Font(juce::FontOptions().withName("Helvetica Neue")
+            g.setFont(juce::Font(juce::FontOptions()
                                                       .withHeight(static_cast<float>(bounds.getHeight()) * 0.18f)));
             g.drawText(fallbackText, bounds.reduced(4), juce::Justification::centred, true);
         }
@@ -702,11 +702,11 @@ void TransportBar::paint(juce::Graphics& g)
                                            ? currentTrack_.title
                                            : currentTrack_.file.getFileName();
 
-    const juce::Font titleFont    = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(18.0f).withStyle("Bold"));
-    const juce::Font artistFont   = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f));
-    const juce::Font noArtistFont = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f)).italicised();
-    const juce::Font prefixFont   = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f)).italicised();
-    const juce::Font sourceFont   = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f));
+    const juce::Font titleFont    = juce::Font(juce::FontOptions().withHeight(18.0f).withStyle("Bold"));
+    const juce::Font artistFont   = juce::Font(juce::FontOptions().withHeight(16.0f));
+    const juce::Font noArtistFont = juce::Font(juce::FontOptions().withHeight(16.0f)).italicised();
+    const juce::Font prefixFont   = juce::Font(juce::FontOptions().withHeight(16.0f)).italicised();
+    const juce::Font sourceFont   = juce::Font(juce::FontOptions().withHeight(16.0f));
 
     int infoMaxTextW = 0;
     int prefixTextW  = infoTextLayout_.prefixWidthSpaced;
@@ -1329,11 +1329,11 @@ void TransportBar::ensureInfoTextLayout()
     L.isPodcast       = isPodcast;
     L.hasRealTitle    = hasRealTitle;
 
-    const juce::Font titleFont    = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(18.0f).withStyle("Bold"));
-    const juce::Font artistFont   = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f));
-    const juce::Font noArtistFont = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f)).italicised();
-    const juce::Font prefixFont   = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f)).italicised();
-    const juce::Font sourceFont   = juce::Font(juce::FontOptions().withName("Helvetica Neue").withHeight(16.0f));
+    const juce::Font titleFont    = juce::Font(juce::FontOptions().withHeight(18.0f).withStyle("Bold"));
+    const juce::Font artistFont   = juce::Font(juce::FontOptions().withHeight(16.0f));
+    const juce::Font noArtistFont = juce::Font(juce::FontOptions().withHeight(16.0f)).italicised();
+    const juce::Font prefixFont   = juce::Font(juce::FontOptions().withHeight(16.0f)).italicised();
+    const juce::Font sourceFont   = juce::Font(juce::FontOptions().withHeight(16.0f));
 
     // Title: cache spaced version (used for both drawing and hit-box width).
     L.titleWidthSpaced = buildSpacedGlyphs(L.titleGlyphs, titleFont, displayTitle, infoLetterSpacing);

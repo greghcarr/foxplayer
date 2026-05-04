@@ -18,10 +18,12 @@ public:
         laf.setColour(juce::ScrollBar::trackColourId,      juce::Colours::transparentBlack);
         laf.setColour(juce::ScrollBar::backgroundColourId, juce::Colours::transparentBlack);
 
-        // App-wide typeface: use the native macOS system font (SF Pro) for the
-        // most "first-party" look. Every juce::Font() created without an
-        // explicit typeface falls through to this default.
-        laf.setDefaultSansSerifTypefaceName("Helvetica Neue");
+        // App-wide typeface: leave the default sans-serif unset so JUCE
+        // falls through to the platform system font. On macOS 10.11+ that's
+        // SF Pro, which is what we want for a "first-party" look. The
+        // previous Helvetica Neue override was a holdover from the pre-SF
+        // era; modern macOS still ships Helvetica Neue but it's no longer
+        // the system font.
 
         // Splash: transparent borderless window showing the embedded app icon.
         splashWindow_ = std::make_unique<Stylus::SplashWindow>();
