@@ -32,6 +32,11 @@ public:
     void enqueueArtOnly(const TrackInfo& track);
     void enqueueAllArtOnly(const std::vector<TrackInfo>& tracks);
 
+    // Cancels every queued job and stops the background worker. The
+    // currently in-flight job (if any) finishes naturally; no further jobs
+    // are processed until something is enqueued again.
+    void cancelAll();
+
     // Returns true after maxConsecutiveFailures consecutive network errors.
     // While suspended the background thread will not process further jobs.
     bool isSuspended() const { return suspended_.load(); }
@@ -65,7 +70,6 @@ private:
     };
 
     void run() override;
-    void cancelAll();
     void processOne(Job job);
 
     std::deque<Job>        queue_;
