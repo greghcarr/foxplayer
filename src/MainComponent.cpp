@@ -671,6 +671,18 @@ MainComponent::MainComponent()
         libPanel->onRescanPodcastFolders = [this] { setMusicFolders(musicFolders_, /*keepLibrary*/ true); };
     }
 
+    // Wire the Display panel: persisted on toggle, applied immediately to the
+    // transport bar. Initial state is read from settings and pushed below.
+    if (auto* dispPanel = preferencesWindow_->displayPanel())
+    {
+        dispPanel->onUseStaticAlbumArtChanged = [this](bool useStatic) {
+            transportBar_.setUseStaticAlbumArt(useStatic);
+        };
+    }
+    if (auto* s = appProperties_.getUserSettings())
+        transportBar_.setUseStaticAlbumArt(
+            s->getBoolValue(DisplayPreferencesPanel::kUseStaticAlbumArtKey, false));
+
     // Analysis callbacks - feed both the library and the log window.
     analysisEngine_.onTrackQueued = [this](TrackInfo t) {
         if (analysisLogWindow_) analysisLogWindow_->log().trackQueued(t);

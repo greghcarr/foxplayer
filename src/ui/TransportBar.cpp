@@ -361,18 +361,16 @@ static void drawSpinningRecord(juce::Graphics& g,
     g.restoreState();
 }
 
-static void drawPodcastArt(juce::Graphics& g,
+static void drawRoundedAlbumArt(juce::Graphics& g,
                             juce::Rectangle<int> bounds,
-                            const juce::Image& art,
-                            const juce::String& fallbackText)
+                            const juce::Image& art)
 {
     constexpr float cornerR = 6.0f;
     const auto boundsF = bounds.toFloat();
 
-    // Drop shadow pre-rendered by TransportBar::paint, see ensureShadowImage().
-
     if (art.isValid())
     {
+        // Drop shadow pre-rendered by TransportBar::paint, see ensureShadowImage().
         juce::Path clip;
         clip.addRoundedRectangle(boundsF, cornerR);
         g.saveState();
@@ -382,22 +380,28 @@ static void drawPodcastArt(juce::Graphics& g,
                     bounds.getWidth(), bounds.getHeight(),
                     0, 0, art.getWidth(), art.getHeight());
         g.restoreState();
+        return;
     }
-    else
-    {
-        g.setColour(juce::Colour(0xff1e1e1e));
-        g.fillRoundedRectangle(boundsF, cornerR);
-        g.setColour(juce::Colour(0xff555555));
-        g.drawRoundedRectangle(boundsF.reduced(0.5f), cornerR, 1.0f);
 
-        if (fallbackText.isNotEmpty())
-        {
-            g.setColour(juce::Colour(0xffaaaaaa));
-            g.setFont(juce::Font(juce::FontOptions()
-                                                      .withHeight(static_cast<float>(bounds.getHeight()) * 0.18f)));
-            g.drawText(fallbackText, bounds.reduced(4), juce::Justification::centred, true);
-        }
-    }
+    // No-art placeholder: dashed rounded rectangle, ported from the iOS
+    // app's DashedSquarePlaceholder. Inset from the slot, transparent fill,
+    // dashed border in mid-grey. The caller is expected to skip the drop
+    // shadow when the placeholder is shown so the empty interior reads as
+    // "no artwork" rather than "shadow halo around an empty box".
+    constexpr float inset             = 8.0f;
+    constexpr float strokeW           = 2.0f;
+    constexpr float placeholderCorner = 3.0f;
+    constexpr float dashes[]          = { 3.0f, 3.0f };
+
+    juce::Path path;
+    path.addRoundedRectangle(boundsF.reduced(inset), placeholderCorner);
+
+    juce::Path dashed;
+    juce::PathStrokeType stroke(strokeW);
+    stroke.createDashedStroke(dashed, path, dashes, juce::numElementsInArray(dashes));
+
+    g.setColour(Color::textSecondary);
+    g.fillPath(dashed);
 }
 
 // Parses an SVG binary resource and returns a tinted Drawable.
@@ -584,7 +588,7 @@ void TransportBar::updateCurrentTrackInfo(const TrackInfo& updated)
     // re-render the disc whenever metadata moves.
     refreshDiscImage();
     if (wasPodcast != updated.isPodcast)
-        recordSpinner_.setVisible(! updated.isPodcast);
+        recordSpinner_.setVisible(! updated.isPodcast && ! useStaticAlbumArt_);
     repaint();
 }
 
@@ -660,6 +664,21 @@ void TransportBar::setRepeatMode(int mode)
 {
     repeatButton_.toggleState = juce::jlimit(0, 2, mode);
     repeatButton_.repaint();
+}
+
+void TransportBar::setUseStaticAlbumArt(bool useStatic)
+{
+    if (useStaticAlbumArt_ == useStatic) return;
+    useStaticAlbumArt_ = useStatic;
+
+    // Update the spinner overlay to match: it's only ever visible/spinning
+    // when we're in vinyl mode for a music track.
+    const bool spinnerActive = hasTrack_ && ! currentTrack_.isPodcast && ! useStaticAlbumArt_;
+    recordSpinner_.setVisible(spinnerActive);
+    recordSpinner_.setSpinning(spinnerActive && engine_.isPlaying());
+    if (spinnerActive)
+        refreshDiscImage();
+    repaint();
 }
 
 void TransportBar::setCanGoPrev(bool can)
@@ -882,20 +901,26 @@ void TransportBar::paint(juce::Graphics& g)
     // on top.
     if (!albumArtBounds_.isEmpty() && hasTrack_)
     {
-        ensureShadowImage(albumArtBounds_, currentTrack_.isPodcast);
-        if (shadowImage_.isValid())
-            g.drawImageAt(shadowImage_,
-                          albumArtBounds_.getX() - shadowMargin,
-                          albumArtBounds_.getY() - shadowMargin);
+        // Rounded-rect shadow for podcasts and for static music art; ellipse
+        // shadow only for the spinning vinyl disc.
+        const bool roundedShape  = currentTrack_.isPodcast || useStaticAlbumArt_;
+        const bool isPlaceholder = roundedShape && ! albumArt_.isValid();
 
-        if (currentTrack_.isPodcast)
+        // Skip the shadow when we're rendering the dashed-border placeholder:
+        // it has a transparent interior, so a shadow would draw a halo around
+        // an empty box.
+        if (! isPlaceholder)
         {
-            const juce::String fallback = currentTrack_.podcast.isNotEmpty()
-                                              ? currentTrack_.podcast
-                                              : currentTrack_.displayTitle();
-            drawPodcastArt(g, albumArtBounds_, albumArt_, fallback);
+            ensureShadowImage(albumArtBounds_, roundedShape);
+            if (shadowImage_.isValid())
+                g.drawImageAt(shadowImage_,
+                              albumArtBounds_.getX() - shadowMargin,
+                              albumArtBounds_.getY() - shadowMargin);
         }
-        // else: disc rendered by recordSpinner_'s CALayer.
+
+        if (currentTrack_.isPodcast || useStaticAlbumArt_)
+            drawRoundedAlbumArt(g, albumArtBounds_, albumArt_);
+        // else: spinning disc rendered by recordSpinner_'s CALayer.
     }
 
     // Three-line track info - faded by infoAlpha so it dissolves smoothly into
@@ -1527,8 +1552,8 @@ void TransportBar::updateTimerState()
 
     // The CD layer's rotation is driven by Core Animation, independent of the
     // message-thread timer. We start/stop it here based on actual audio play
-    // state, including pausing only the disc layer when transport is paused.
-    recordSpinner_.setSpinning(shouldRun && ! currentTrack_.isPodcast);
+    // state, gated on the spinning-disc display mode.
+    recordSpinner_.setSpinning(shouldRun && ! currentTrack_.isPodcast && ! useStaticAlbumArt_);
 
     if (shouldRun && ! isRunning)
     {

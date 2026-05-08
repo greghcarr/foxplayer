@@ -114,6 +114,30 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryPreferencesPanel)
 };
 
+// ---- Display panel -----------------------------------------------------------
+// User-facing toggles for visual presentation. Right now this is just the
+// album-art display mode (spinning vinyl vs. static rounded album art).
+class DisplayPreferencesPanel : public juce::Component
+{
+public:
+    static constexpr const char* kUseStaticAlbumArtKey = "display.useStaticAlbumArt";
+
+    explicit DisplayPreferencesPanel(juce::ApplicationProperties& props);
+
+    // Fired when the user toggles the option. Initial state is loaded from
+    // ApplicationProperties so MainComponent doesn't need to re-read it.
+    std::function<void(bool)> onUseStaticAlbumArtChanged;
+
+    void paint(juce::Graphics& g) override;
+    void resized() override;
+
+private:
+    juce::ApplicationProperties& props_;
+    juce::ToggleButton           staticAlbumArtToggle_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DisplayPreferencesPanel)
+};
+
 // ---- Misc panel --------------------------------------------------------------
 // Miscellaneous app-wide preferences.
 class MiscPreferencesPanel : public juce::Component
@@ -166,7 +190,7 @@ public:
     void mouseDown(const juce::MouseEvent& e) override;
 
 private:
-    enum class Category { Audio, Library, Misc, Debug };
+    enum class Category { Audio, Library, Display, Misc, Debug };
 
     struct SidebarItem
     {
@@ -190,11 +214,13 @@ private:
     juce::ApplicationProperties&             appProperties_;
     std::unique_ptr<AudioPreferencesPanel>   audioPanel_;
     std::unique_ptr<LibraryPreferencesPanel> libraryPanel_;
+    std::unique_ptr<DisplayPreferencesPanel> displayPanel_;
     std::unique_ptr<MiscPreferencesPanel>    miscPanel_;
     std::unique_ptr<DebugPreferencesPanel>   debugPanel_;
 
 public:
     LibraryPreferencesPanel& libraryPanel() { return *libraryPanel_; }
+    DisplayPreferencesPanel& displayPanel() { return *displayPanel_; }
 
 private:
 
@@ -218,6 +244,10 @@ public:
     // Direct access to the library panel so MainComponent can wire up callbacks
     // and push the current folder lists into the view.
     LibraryPreferencesPanel* libraryPanel();
+
+    // Direct access to the display panel so MainComponent can wire up the
+    // album-art-mode change callback.
+    DisplayPreferencesPanel* displayPanel();
 
     // Opens Preferences and navigates straight to the Library tab.
     void showLibraryCategory();

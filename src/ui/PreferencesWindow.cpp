@@ -497,6 +497,43 @@ void LibraryPreferencesPanel::removeSelectedPodcastFolders()
 }
 
 // ============================================================================
+// DisplayPreferencesPanel
+// ============================================================================
+
+DisplayPreferencesPanel::DisplayPreferencesPanel(juce::ApplicationProperties& props)
+    : props_(props)
+{
+    const bool current = [&] {
+        if (auto* s = props_.getUserSettings())
+            return s->getBoolValue(kUseStaticAlbumArtKey, false);
+        return false;
+    }();
+
+    staticAlbumArtToggle_.setButtonText("Use static album art display");
+    staticAlbumArtToggle_.setToggleState(current, juce::dontSendNotification);
+    staticAlbumArtToggle_.setColour(juce::ToggleButton::textColourId,         Color::textPrimary);
+    staticAlbumArtToggle_.setColour(juce::ToggleButton::tickColourId,         Color::accent);
+    staticAlbumArtToggle_.setColour(juce::ToggleButton::tickDisabledColourId, Color::textSecondary);
+    staticAlbumArtToggle_.onClick = [this] {
+        const bool on = staticAlbumArtToggle_.getToggleState();
+        if (auto* s = props_.getUserSettings())
+            s->setValue(kUseStaticAlbumArtKey, on);
+        if (onUseStaticAlbumArtChanged) onUseStaticAlbumArtChanged(on);
+    };
+    addAndMakeVisible(staticAlbumArtToggle_);
+}
+
+void DisplayPreferencesPanel::paint(juce::Graphics& g)
+{
+    g.fillAll(Color::background);
+}
+
+void DisplayPreferencesPanel::resized()
+{
+    staticAlbumArtToggle_.setBounds(getLocalBounds().reduced(24).removeFromTop(32));
+}
+
+// ============================================================================
 // MiscPreferencesPanel
 // ============================================================================
 
@@ -578,15 +615,18 @@ PreferencesComponent::PreferencesComponent(juce::AudioDeviceManager& dm,
 {
     items_.push_back({ Category::Audio,   "Audio",   {} });
     items_.push_back({ Category::Library, "Library", {} });
+    items_.push_back({ Category::Display, "Display", {} });
     items_.push_back({ Category::Misc,    "Misc",    {} });
     items_.push_back({ Category::Debug,   "Debug",   {} });
 
     audioPanel_   = std::make_unique<AudioPreferencesPanel>(deviceManager_, appProperties_);
     libraryPanel_ = std::make_unique<LibraryPreferencesPanel>();
+    displayPanel_ = std::make_unique<DisplayPreferencesPanel>(appProperties);
     miscPanel_    = std::make_unique<MiscPreferencesPanel>(appProperties);
     debugPanel_   = std::make_unique<DebugPreferencesPanel>(appProperties);
     addChildComponent(*libraryPanel_);
     addChildComponent(*audioPanel_);
+    addChildComponent(*displayPanel_);
     addChildComponent(*miscPanel_);
     addChildComponent(*debugPanel_);
 
@@ -599,6 +639,7 @@ void PreferencesComponent::showPanel(Category c)
     current_ = c;
     if (audioPanel_)   audioPanel_->setVisible(c == Category::Audio);
     if (libraryPanel_) libraryPanel_->setVisible(c == Category::Library);
+    if (displayPanel_) displayPanel_->setVisible(c == Category::Display);
     if (miscPanel_)    miscPanel_->setVisible(c == Category::Misc);
     if (debugPanel_)   debugPanel_->setVisible(c == Category::Debug);
     repaint();
@@ -657,6 +698,7 @@ void PreferencesComponent::resized()
                                               getWidth() - sidebarWidth, getHeight());
     if (audioPanel_)   audioPanel_->setBounds(content);
     if (libraryPanel_) libraryPanel_->setBounds(content);
+    if (displayPanel_) displayPanel_->setBounds(content);
     if (miscPanel_)    miscPanel_->setBounds(content);
     if (debugPanel_)   debugPanel_->setBounds(content);
 }
@@ -704,6 +746,11 @@ void PreferencesWindow::closeButtonPressed()
 LibraryPreferencesPanel* PreferencesWindow::libraryPanel()
 {
     return prefsComponent_ != nullptr ? &prefsComponent_->libraryPanel() : nullptr;
+}
+
+DisplayPreferencesPanel* PreferencesWindow::displayPanel()
+{
+    return prefsComponent_ != nullptr ? &prefsComponent_->displayPanel() : nullptr;
 }
 
 void PreferencesWindow::showLibraryCategory()

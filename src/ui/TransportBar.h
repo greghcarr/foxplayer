@@ -131,6 +131,11 @@ public:
     // bar does no per-frame work in those states.
     void updateTimerState();
 
+    // Switches between the spinning vinyl-disc display (default) and a static
+    // rounded-corner album-art tile (Swift-app style). When static, the
+    // CALayer overlay is hidden and the art is painted in JUCE.
+    void setUseStaticAlbumArt(bool useStatic);
+
     // juce::Component
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -211,8 +216,10 @@ private:
 
     // Spinning-CD overlay backed by a Core Animation layer. Rotation runs on
     // the GPU; updateDisplay() does not need to repaint it. Hidden for
-    // podcasts and when no track is loaded.
+    // podcasts, when no track is loaded, and when the user has selected the
+    // static album-art display mode.
     RecordSpinnerLayer   recordSpinner_;
+    bool                 useStaticAlbumArt_ { false };  // off = spinning disc (default)
 
     // Renders the static disc visual (album art clipped to circle + spindle
     // hole, or silver/label/arc-text fallback when no art) into a juce::Image
