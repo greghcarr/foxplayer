@@ -196,32 +196,37 @@ MainComponent::MainComponent()
         LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
     };
 
-    libraryTable_.onGoToArtistRequested = [this](TrackInfo t) {
-        for (const auto& [id, name] : artistIdToName_)
-            if (name == t.artist)
-            {
-                sidebar_.setSelectedId(id); showSidebarItem(id);
-                juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
-                return;
-            }
+    // Right-click Go-to handlers. Skip the navigation when already in the
+    // target view (avoids a redundant refreshCurrentView that can perturb
+    // sort state); always re-focus on the right-clicked track in the
+    // destination so the user can see what they navigated for.
+    auto navigateAndFocusFile = [this](int targetId, juce::File trackFile) {
+        if (activeSidebarId_ != targetId)
+        {
+            sidebar_.setSelectedId(targetId);
+            showSidebarItem(targetId);
+        }
+        juce::MessageManager::callAsync([this, trackFile] {
+            scrollSelectedSidebarItemIntoView();
+            libraryTable_.scrollToFile(trackFile);
+        });
     };
-    libraryTable_.onGoToAlbumRequested = [this](TrackInfo t) {
+
+    libraryTable_.onGoToArtistRequested = [this, navigateAndFocusFile](TrackInfo t) {
+        for (const auto& [id, name] : artistIdToName_)
+            if (name == t.artist) { navigateAndFocusFile(id, t.file); return; }
+    };
+    libraryTable_.onGoToAlbumRequested = [this, navigateAndFocusFile](TrackInfo t) {
         for (const auto& [id, info] : albumIdToInfo_)
             if (info.artist == t.artist && info.album == t.album)
             {
-                sidebar_.setSelectedId(id); showSidebarItem(id);
-                juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
+                navigateAndFocusFile(id, t.file);
                 return;
             }
     };
-    libraryTable_.onGoToPodcastRequested = [this](TrackInfo t) {
+    libraryTable_.onGoToPodcastRequested = [this, navigateAndFocusFile](TrackInfo t) {
         for (const auto& [id, name] : podcastIdToName_)
-            if (name == t.podcast)
-            {
-                sidebar_.setSelectedId(id); showSidebarItem(id);
-                juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
-                return;
-            }
+            if (name == t.podcast) { navigateAndFocusFile(id, t.file); return; }
     };
 
     libraryTable_.onAddToQueueRequested = [this](std::vector<TrackInfo> tracks) {
@@ -373,42 +378,66 @@ MainComponent::MainComponent()
     transportBar_.onPrevClicked         = [this] { playPrev(); };
     transportBar_.onNextClicked         = [this] { playNext(); };
     transportBar_.onChangeFolderClicked = [this] { showAddFolderChooser(); };
-    transportBar_.onPlayingFromClicked  = [this](int sidebarId) {
-        sidebar_.setSelectedId(sidebarId);
-        showSidebarItem(sidebarId);
+    // Title and "Playing from:" both navigate to the queue source view and
+    // refocus the playing track. selectAndScrollToPlayingRow works there
+    // because updatePlayingHighlight only sets playingFile_ on the source
+    // view. Skipping the navigation when already at the target avoids a
+    // redundant refreshCurrentView that can perturb sort state.
+    auto navigateToSourceAndFocusPlaying = [this](int sidebarId) {
+        if (activeSidebarId_ != sidebarId)
+        {
+            sidebar_.setSelectedId(sidebarId);
+            showSidebarItem(sidebarId);
+        }
         juce::MessageManager::callAsync([this] {
             scrollSelectedSidebarItemIntoView();
             libraryTable_.selectAndScrollToPlayingRow();
         });
     };
-    transportBar_.onTitleClicked = [this](int sidebarId) {
-        sidebar_.setSelectedId(sidebarId);
-        showSidebarItem(sidebarId);
-        juce::MessageManager::callAsync([this] {
+    transportBar_.onPlayingFromClicked = navigateToSourceAndFocusPlaying;
+    transportBar_.onTitleClicked       = navigateToSourceAndFocusPlaying;
+    // Click handler for the artist / album-art links. Resolves the target
+    // sidebar id, navigates if we're not already there, and async-selects
+    // the playing track's row by file path (works regardless of whether the
+    // destination is the queue source view, unlike selectAndScrollToPlayingRow).
+    // Skipping the navigation when activeSidebarId_ already matches avoids
+    // a redundant refreshCurrentView round-trip that can perturb sort state.
+    auto navigateAndHighlight = [this](int targetId, juce::File playingFile) {
+        if (activeSidebarId_ != targetId)
+        {
+            sidebar_.setSelectedId(targetId);
+            showSidebarItem(targetId);
+        }
+        juce::MessageManager::callAsync([this, playingFile] {
             scrollSelectedSidebarItemIntoView();
-            libraryTable_.selectAndScrollToPlayingRow();
+            libraryTable_.scrollToFile(playingFile);
         });
     };
-    transportBar_.onArtistClicked = [this](TrackInfo t) {
+
+    transportBar_.onArtistClicked = [this, navigateAndHighlight](TrackInfo t) {
         if (t.isPodcast)
         {
             for (const auto& [id, name] : podcastIdToName_)
-                if (name == t.podcast)
-                {
-                    sidebar_.setSelectedId(id);
-                    showSidebarItem(id);
-                    juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
-                    return;
-                }
+                if (name == t.podcast) { navigateAndHighlight(id, t.file); return; }
         }
         else if (t.artist.isNotEmpty())
         {
             for (const auto& [id, name] : artistIdToName_)
-                if (name == t.artist)
+                if (name == t.artist) { navigateAndHighlight(id, t.file); return; }
+        }
+    };
+    transportBar_.onAlbumArtClicked = [this, navigateAndHighlight](TrackInfo t) {
+        if (t.isPodcast)
+        {
+            for (const auto& [id, name] : podcastIdToName_)
+                if (name == t.podcast) { navigateAndHighlight(id, t.file); return; }
+        }
+        else if (t.album.isNotEmpty())
+        {
+            for (const auto& [id, info] : albumIdToInfo_)
+                if (info.artist == t.artist && info.album == t.album)
                 {
-                    sidebar_.setSelectedId(id);
-                    showSidebarItem(id);
-                    juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
+                    navigateAndHighlight(id, t.file);
                     return;
                 }
         }

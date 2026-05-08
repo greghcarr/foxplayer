@@ -97,6 +97,10 @@ public:
     // Fired when the user clicks the artist/podcast name. TrackInfo carries
     // artist/podcast for MainComponent to resolve the sidebar item.
     std::function<void(TrackInfo)> onArtistClicked;
+    // Fired when the user clicks the album art (spinning disc or static
+    // tile). MainComponent navigates to the album sidebar item for music
+    // tracks, or the podcast sidebar item for podcasts.
+    std::function<void(TrackInfo)> onAlbumArtClicked;
     // Fired when the user clicks the song title. Int is the source sidebar ID.
     std::function<void(int)> onTitleClicked;
     // Fired with the new toggle state when the user clicks shuffle/repeat.
@@ -173,9 +177,14 @@ private:
 
     AudioEngine& engine_;
     TrackInfo    currentTrack_;
-    bool         hasTrack_     { false };
-    bool         draggingSeek_ { false };
-    double       seekDragPos_  { 0.0 };
+    bool         hasTrack_       { false };
+    bool         draggingSeek_   { false };
+    double       seekDragPos_    { 0.0 };
+    // True between a left-button mouseDown on the album-art slot and the
+    // matching mouseUp; gates the album-art-clicked callback so only proper
+    // click-and-release-in-place gestures navigate (drag-outs and right-
+    // clicks no longer trigger an unwanted jump to the album view).
+    bool         albumArtPressed_ { false };
 
     TransportButton shuffleButton_;
     TransportButton prevButton_;

@@ -93,6 +93,12 @@ static const CGFloat kInactiveDimAlpha = 0.5;
 
 - (BOOL)isFlipped { return YES; }
 
+// The spinner is a purely visual overlay - clicks should fall through to the
+// JUCE TransportBar underneath so it can resolve them as album-art /
+// seek-bar / button hits. Returning nil from hitTest tells AppKit to keep
+// looking for an event recipient.
+- (NSView*)hitTest:(NSPoint)point { return nil; }
+
 - (void)dealloc
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
@@ -208,6 +214,12 @@ RecordSpinnerLayer::RecordSpinnerLayer()
         [[StylusRecordSpinnerView alloc] initWithFrame:NSZeroRect];
     discView_ = (void*) CFBridgingRetain(view);
     setView(discView_);  // juce::NSViewComponent takes its own retain
+
+    // Pass clicks through to the JUCE TransportBar underneath so it can route
+    // album-art / seek-bar / button hits. The NSView returns nil from
+    // hitTest:, but the JUCE Component side of NSViewComponent still claims
+    // mouse clicks by default and would swallow them otherwise.
+    setInterceptsMouseClicks(false, false);
 }
 
 RecordSpinnerLayer::~RecordSpinnerLayer()

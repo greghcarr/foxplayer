@@ -1708,6 +1708,17 @@ void TransportBar::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
+    // Album-art click: fire on mouseUp (in the matching handler) so that
+    // accidental drags or right-clicks don't trigger a navigation. We only
+    // mark the press here; the release inside the same bounds completes
+    // the click.
+    if (!albumArtBounds_.isEmpty() && albumArtBounds_.contains(e.x, e.y)
+        && ! e.mods.isPopupMenu())
+    {
+        albumArtPressed_ = true;
+        return;
+    }
+
     // Expand the seek bar hit area vertically so the thumb (which extends
     // above and below the 6px track) is easy to grab.
     constexpr int seekHitPadY = 8;
@@ -1740,6 +1751,17 @@ void TransportBar::mouseDrag(const juce::MouseEvent& e)
 
 void TransportBar::mouseUp(const juce::MouseEvent& e)
 {
+    if (albumArtPressed_)
+    {
+        const bool wasClick = e.mouseWasClicked();
+        const bool inBounds = ! albumArtBounds_.isEmpty()
+                              && albumArtBounds_.contains(e.x, e.y);
+        albumArtPressed_ = false;
+        if (wasClick && inBounds && hasTrack_ && onAlbumArtClicked)
+            onAlbumArtClicked(currentTrack_);
+        return;
+    }
+
     if (!draggingSeek_) return;
     draggingSeek_ = false;
     engine_.seekToNormalized(seekBarNormalizedX(e.x));
@@ -1770,6 +1792,10 @@ juce::MouseCursor TransportBar::getMouseCursor()
     if (! titleLinkBounds_.isEmpty()  && titleLinkBounds_.contains(pos))
         return juce::MouseCursor::PointingHandCursor;
     if (! artistLinkBounds_.isEmpty() && artistLinkBounds_.contains(pos))
+        return juce::MouseCursor::PointingHandCursor;
+
+    // Album art (spinning disc or static tile) navigates to the album/podcast.
+    if (hasTrack_ && ! albumArtBounds_.isEmpty() && albumArtBounds_.contains(pos))
         return juce::MouseCursor::PointingHandCursor;
 
     return juce::Component::getMouseCursor();
