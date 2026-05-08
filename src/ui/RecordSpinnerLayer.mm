@@ -12,6 +12,11 @@ static constexpr double kRotationSeconds = 1.8;
 // ---------------------------------------------------------------------------
 @interface StylusRecordSpinnerView : NSView
 @property (nonatomic, strong) CALayer* discLayer;
+// Frozen rotation angle (radians) used to bridge pause/resume cleanly. Stored
+// as a scalar rather than reading and writing CATransform3D matrices across
+// pause/resume cycles, which would compound floating-point error in the
+// matrix elements until the disc visibly drifts toward an ellipse.
+@property (nonatomic, assign) CGFloat currentAngle;
 - (void)setDiscImage:(CGImageRef)cg;
 - (void)setSpinning:(BOOL)spinning;
 - (void)updateDimForKeyState;
@@ -131,9 +136,11 @@ static const CGFloat kInactiveDimAlpha = 0.5;
     {
         if ([_discLayer animationForKey:@"rotation"] != nil) return;
 
+        // Animate from the frozen angle so resume picks up where pause left
+        // off, instead of snapping back to angle 0 each time.
         CABasicAnimation* a = [CABasicAnimation animationWithKeyPath:@"transform.rotation.z"];
-        a.fromValue           = @0.0;
-        a.toValue             = @(2.0 * M_PI);
+        a.fromValue           = @(_currentAngle);
+        a.toValue             = @(_currentAngle + 2.0 * M_PI);
         a.duration            = kRotationSeconds;
         a.repeatCount         = HUGE_VALF;
         a.removedOnCompletion = NO;
@@ -142,19 +149,24 @@ static const CGFloat kInactiveDimAlpha = 0.5;
     }
     else
     {
-        // Freeze at the current visible angle: read back the presentation
-        // layer's rotation, write it to the model, then drop the animation.
-        // Without this, removeAnimationForKey would snap back to angle 0.
+        // Freeze at the current visible angle. Extract the scalar rotation
+        // from the presentation layer (atan2 over the rotation matrix's m11
+        // and m12 columns), store it, and rebuild a pristine rotation matrix
+        // for the model layer. Doing this scalar-first avoids the matrix-
+        // drift mode where reading and writing presented.transform across
+        // many cycles slowly accumulates non-rotation components, making the
+        // disc look gradually oval.
         CALayer* presented = (CALayer*)[_discLayer presentationLayer];
         if (presented != nil)
         {
-            CATransform3D t = presented.transform;
-            [CATransaction begin];
-            [CATransaction setDisableActions:YES];
-            _discLayer.transform = t;
-            [CATransaction commit];
+            const CATransform3D t = presented.transform;
+            _currentAngle = atan2(t.m12, t.m11);
         }
         [_discLayer removeAnimationForKey:@"rotation"];
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        _discLayer.transform = CATransform3DMakeRotation(_currentAngle, 0, 0, 1);
+        [CATransaction commit];
     }
 }
 
