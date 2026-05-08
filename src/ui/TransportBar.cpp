@@ -567,16 +567,17 @@ void TransportBar::setCurrentTrack(const TrackInfo& track)
 {
     currentTrack_ = track;
     hasTrack_ = true;
-    albumArt_ = {};
+    // Deliberately do NOT clear albumArt_ or refresh the disc image here:
+    // the previous track's art keeps displaying until applyLoadedAlbumArt
+    // fires with the new one. Without this, every track change went through
+    // an empty/placeholder frame (old art -> placeholder -> new art) which
+    // showed up as a visible flicker.
     loadAlbumArtAsync();
 
     compactScrollStartMs_ = juce::Time::getMillisecondCounter();
     resized();
     updateDisplay();
-    // Show the no-art placeholder disc immediately; once album art arrives,
-    // applyLoadedAlbumArt re-renders with it.
-    refreshDiscImage();
-    recordSpinner_.setVisible(! track.isPodcast);
+    recordSpinner_.setVisible(! track.isPodcast && ! useStaticAlbumArt_);
 }
 
 void TransportBar::updateCurrentTrackInfo(const TrackInfo& updated)
