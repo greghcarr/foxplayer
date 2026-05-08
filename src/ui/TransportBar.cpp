@@ -27,7 +27,7 @@ static constexpr int   pad        = 10;
 static constexpr int   artMaxFull        = 64;    // record diameter in pixels
 static constexpr float cdDataInnerRatio  = 0.43f;  // CD hub ring outer radius as fraction of disc radius
 static constexpr float cdHoleRatio       = 0.12f;  // CD spindle hole radius as fraction of disc radius
-static constexpr float infoLetterSpacing = 0.2f;   // extra px between glyphs in info text
+static constexpr float infoLetterSpacing = 0.0f;   // no extra spacing between glyphs in info text
 
 // Forward decl: defined later in this file, used inside TransportBar::paint().
 static void drawCachedGlyphs(juce::Graphics& g,
