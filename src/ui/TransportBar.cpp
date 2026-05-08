@@ -469,6 +469,10 @@ TransportBar::TransportBar(AudioEngine& engine)
     addAndMakeVisible(playPauseButton_);
     addAndMakeVisible(nextButton_);
     addAndMakeVisible(repeatButton_);
+    // Spinning CD layer overlays the album-art region; hidden until a music
+    // track is loaded. Sits on top of the JUCE drawing (drop shadow, gradient)
+    // by virtue of being a layer-backed NSView added later in z-order.
+    addChildComponent(recordSpinner_);
 
     // Volume slider (vertical)
     volumeSlider_.setSliderStyle(juce::Slider::LinearVertical);
@@ -565,12 +569,22 @@ void TransportBar::setCurrentTrack(const TrackInfo& track)
     compactScrollStartMs_ = juce::Time::getMillisecondCounter();
     resized();
     updateDisplay();
+    // Show the no-art placeholder disc immediately; once album art arrives,
+    // applyLoadedAlbumArt re-renders with it.
+    refreshDiscImage();
+    recordSpinner_.setVisible(! track.isPodcast);
 }
 
 void TransportBar::updateCurrentTrackInfo(const TrackInfo& updated)
 {
     if (!hasTrack_ || currentTrack_.file != updated.file) return;
+    const bool wasPodcast = currentTrack_.isPodcast;
     currentTrack_ = updated;
+    // Title / artist changes affect the no-art arc-text fallback, so
+    // re-render the disc whenever metadata moves.
+    refreshDiscImage();
+    if (wasPodcast != updated.isPodcast)
+        recordSpinner_.setVisible(! updated.isPodcast);
     repaint();
 }
 
@@ -603,6 +617,7 @@ void TransportBar::applyLoadedAlbumArt(int loadId, const juce::File& file, juce:
     if (loadId != albumArtLoadId_) return;
     if (! hasTrack_ || currentTrack_.file != file) return;
     albumArt_ = std::move(img);
+    refreshDiscImage();
     repaint();
 }
 
@@ -674,43 +689,65 @@ void TransportBar::clearTrack()
     elapsedLabel_.setText("", juce::dontSendNotification);
     totalLabel_.setText("", juce::dontSendNotification);
     playPauseButton_.icon = TransportButton::Icon::Play;
+    recordSpinner_.setSpinning(false);
+    recordSpinner_.setVisible(false);
+    recordSpinner_.setImage({});
     resized();
     repaint();
 }
 
-void TransportBar::paint(juce::Graphics& g)
+juce::Image TransportBar::renderDiscImage() const
 {
-    // Fast paths for the steady-state 20Hz timer repaint. updateDisplay()
-    // marks only the album-art and seek-bar subregions dirty, so when the clip
-    // is fully inside one of those, skip the full-bar machinery (5 fonts,
-    // gradient bound math, info-text glyphs, all the buttons) and just redraw
-    // the dirty piece. This is the dominant paint cost during playback.
-    const auto clip = g.getClipBounds();
+    if (! hasTrack_ || currentTrack_.isPodcast || albumArtBounds_.isEmpty())
+        return {};
 
-    if (hasTrack_ && !currentTrack_.isPodcast
-        && !albumArtBounds_.isEmpty() && albumArtBounds_.contains(clip))
+    // Render at 2x for crispness on Retina; the layer scales with kCAGravityResize.
+    constexpr int   scale  = 2;
+    const int       sizePx = albumArtBounds_.getWidth() * scale;
+
+    juce::Image img(juce::Image::ARGB, sizePx, sizePx, true);
+    juce::Graphics g(img);
+    g.addTransform(juce::AffineTransform::scale(static_cast<float>(scale)));
+
+    juce::String labelText;
+    const auto displayedTitle = currentTrack_.displayTitle();
+    if (currentTrack_.artist.isNotEmpty() && displayedTitle.isNotEmpty())
+        labelText = currentTrack_.artist
+                    + juce::String(juce::CharPointer_UTF8(" \xc2\xb7 "))
+                    + displayedTitle;
+    else if (currentTrack_.artist.isNotEmpty())
+        labelText = currentTrack_.artist;
+    else if (displayedTitle.isNotEmpty())
+        labelText = displayedTitle;
+    else
+        labelText = currentTrack_.file.getFileNameWithoutExtension();
+
+    // Stationary render (rotation = 0); the CALayer animates the rotation.
+    juce::Rectangle<int> bounds(0, 0, albumArtBounds_.getWidth(), albumArtBounds_.getHeight());
+    drawSpinningRecord(g, bounds, 0.0f, albumArt_, labelText);
+
+    return img;
+}
+
+void TransportBar::refreshDiscImage()
+{
+    if (! hasTrack_ || currentTrack_.isPodcast || albumArtBounds_.isEmpty())
     {
-        g.fillAll(Color::transportBg);
-        ensureShadowImage(albumArtBounds_, /*isPodcast*/ false);
-        if (shadowImage_.isValid())
-            g.drawImageAt(shadowImage_,
-                          albumArtBounds_.getX() - shadowMargin,
-                          albumArtBounds_.getY() - shadowMargin);
-
-        juce::String labelText;
-        const auto displayedTitle = currentTrack_.displayTitle();
-        if (currentTrack_.artist.isNotEmpty() && displayedTitle.isNotEmpty())
-            labelText = currentTrack_.artist
-                        + juce::String(juce::CharPointer_UTF8(" \xc2\xb7 "))
-                        + displayedTitle;
-        else if (currentTrack_.artist.isNotEmpty())
-            labelText = currentTrack_.artist;
-        else
-            labelText = displayedTitle;
-
-        drawSpinningRecord(g, albumArtBounds_, recordRotation_, albumArt_, labelText);
+        recordSpinner_.setImage({});
         return;
     }
+    recordSpinner_.setImage(renderDiscImage());
+}
+
+void TransportBar::paint(juce::Graphics& g)
+{
+    // Fast path for the steady-state 20Hz seek-bar repaint. updateDisplay()
+    // marks only the seek-bar subregion dirty, so when the clip is fully
+    // inside seekBarBounds_ skip all the full-bar machinery (5 fonts, gradient
+    // bound math, info-text glyphs, buttons) and just redraw the moving thumb.
+    // The disc spin is handled by the CALayer overlay and never takes the
+    // paint() path.
+    const auto clip = g.getClipBounds();
 
     if (hasTrack_ && !seekBarBounds_.isEmpty() && seekBarBounds_.contains(clip))
     {
@@ -839,11 +876,12 @@ void TransportBar::paint(juce::Graphics& g)
         gradValid = leftFadeWidth > 0.0f;
     }
 
-    // Album art / CD, podcasts get a stationary rounded square, music gets the spinning CD.
+    // Album art / CD. Podcasts get a stationary rounded square drawn here in
+    // JUCE; music tracks delegate to the CALayer overlay (recordSpinner_), so
+    // we only paint the drop shadow under the disc and let the layer composite
+    // on top.
     if (!albumArtBounds_.isEmpty() && hasTrack_)
     {
-        // Pre-rendered drop shadow, blitted in one cheap image draw rather
-        // than re-rasterising a box-blurred shadow each frame.
         ensureShadowImage(albumArtBounds_, currentTrack_.isPodcast);
         if (shadowImage_.isValid())
             g.drawImageAt(shadowImage_,
@@ -857,25 +895,7 @@ void TransportBar::paint(juce::Graphics& g)
                                               : currentTrack_.displayTitle();
             drawPodcastArt(g, albumArtBounds_, albumArt_, fallback);
         }
-        else
-        {
-            juce::String labelText;
-            if (currentTrack_.artist.isNotEmpty() || currentTrack_.displayTitle().isNotEmpty())
-            {
-                if (currentTrack_.artist.isNotEmpty() && currentTrack_.displayTitle().isNotEmpty())
-                    labelText = currentTrack_.artist
-                                + juce::String(juce::CharPointer_UTF8(" \xc2\xb7 "))
-                                + currentTrack_.displayTitle();
-                else
-                    labelText = currentTrack_.artist.isNotEmpty() ? currentTrack_.artist
-                                                                   : currentTrack_.displayTitle();
-            }
-            else
-            {
-                labelText = currentTrack_.file.getFileNameWithoutExtension();
-            }
-            drawSpinningRecord(g, albumArtBounds_, recordRotation_, albumArt_, labelText);
-        }
+        // else: disc rendered by recordSpinner_'s CALayer.
     }
 
     // Three-line track info - faded by infoAlpha so it dissolves smoothly into
@@ -1319,6 +1339,10 @@ void TransportBar::resized()
         compactInfoBounds_ = {};
     }
 
+    // Mirror the album-art rect onto the CALayer overlay so the spinning disc
+    // tracks layout changes (window resize, mini-mode flip, track-load).
+    recordSpinner_.setBounds(albumArtBounds_);
+
     repaint();
 }
 
@@ -1501,18 +1525,18 @@ void TransportBar::updateTimerState()
     const bool shouldRun = hasTrack_ && engine_.isPlaying();
     const bool isRunning = isTimerRunning();
 
+    // The CD layer's rotation is driven by Core Animation, independent of the
+    // message-thread timer. We start/stop it here based on actual audio play
+    // state, including pausing only the disc layer when transport is paused.
+    recordSpinner_.setSpinning(shouldRun && ! currentTrack_.isPodcast);
+
     if (shouldRun && ! isRunning)
     {
-        // Reset the rotation timestamp so the first tick after a long pause
-        // doesn't compute deltaRads over the entire pause duration and snap
-        // the CD to a new angle.
-        lastUpdateMs_ = 0.0;
         startTimerHz(transportTimerHz);
     }
     else if (! shouldRun && isRunning)
     {
         stopTimer();
-        lastUpdateMs_ = 0.0;
     }
 
     if (hasTrack_)
@@ -1582,38 +1606,18 @@ void TransportBar::updateDisplay()
         playPauseButton_.repaint();
     }
 
-    // Advance rotation by actual elapsed wall-clock time since the last tick.
-    // Using real time instead of a fixed per-frame amount means paint() always
-    // has an accurate sync point, so the CD keeps spinning even during window
-    // resize (when the timer stops firing but resized() still triggers repaints).
-    const double nowMs = juce::Time::getMillisecondCounterHiRes();
-    if (engine_.isPlaying() && lastUpdateMs_ > 0.0 && !currentTrack_.isPodcast)
-    {
-        const float deltaRads = static_cast<float>((nowMs - lastUpdateMs_) / 1000.0)
-                                * (33.333f / 60.0f) * juce::MathConstants<float>::twoPi;
-        recordRotation_ = std::fmod(recordRotation_ + deltaRads,
-                                    juce::MathConstants<float>::twoPi);
-    }
-    lastUpdateMs_ = nowMs;
-
     const double elapsed = engine_.elapsedSeconds();
     const double total   = engine_.durationSeconds();
     if (!draggingSeek_)
         elapsedLabel_.setText(formatSeconds(elapsed), juce::dontSendNotification);
     totalLabel_.setText(formatSeconds(total),     juce::dontSendNotification);
 
-    // Targeted repaints instead of a full-bar repaint: only the album art
-    // (CD spin animates each tick) and the seek bar (thumb position changes)
-    // actually need to redraw on the timer. The full-bar repaint was forcing
-    // a full re-render of background, gradients, info text, buttons,  every
-    // 33ms even though those visuals are static during playback.
-    if (!draggingSeek_)
-    {
-        if (!albumArtBounds_.isEmpty() && !currentTrack_.isPodcast)
-            repaint(albumArtBounds_);
-        if (!seekBarBounds_.isEmpty())
-            repaint(seekBarBounds_);
-    }
+    // Targeted repaint of just the seek bar: the disc spin is GPU-driven by
+    // the CALayer overlay, so the message-thread timer only needs to redraw
+    // the moving thumb. The bg, gradient, info text, and buttons are static
+    // during playback.
+    if (!draggingSeek_ && !seekBarBounds_.isEmpty())
+        repaint(seekBarBounds_);
 }
 
 juce::String TransportBar::formatSeconds(double secs) const

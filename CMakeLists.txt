@@ -62,6 +62,7 @@ target_sources(Stylus PRIVATE
     src/ui/StatusBarItem.mm
     src/ui/MacWindowHelper.mm
     src/ui/NowPlayingBridge.mm
+    src/ui/RecordSpinnerLayer.mm
     src/library/LibraryTableComponent.cpp
     src/ui/TransportBar.cpp
     src/ui/QueueView.cpp

@@ -3,6 +3,7 @@
 #include "audio/AudioEngine.h"
 #include "audio/TrackInfo.h"
 #include "audio/AlbumArtExtractor.h"
+#include "RecordSpinnerLayer.h"
 #include <JuceHeader.h>
 #include <functional>
 
@@ -207,8 +208,18 @@ private:
     juce::Rectangle<int> compactInfoBounds_;    // mini-mode "Artist - Title" line above the buttons
     juce::Rectangle<int> speakerBounds_;     // clickable speaker icon area
     juce::Image          albumArt_;
-    float                recordRotation_ { 0.0f };
-    double               lastUpdateMs_   { 0.0 };  // wall-clock time of last timer tick
+
+    // Spinning-CD overlay backed by a Core Animation layer. Rotation runs on
+    // the GPU; updateDisplay() does not need to repaint it. Hidden for
+    // podcasts and when no track is loaded.
+    RecordSpinnerLayer   recordSpinner_;
+
+    // Renders the static disc visual (album art clipped to circle + spindle
+    // hole, or silver/label/arc-text fallback when no art) into a juce::Image
+    // sized for albumArtBounds_ at retina resolution. Returns an empty Image
+    // if there is no music track.
+    juce::Image renderDiscImage() const;
+    void        refreshDiscImage();
 
     // Pre-rendered drop-shadow image, blitted under the album art instead of
     // re-rasterising a box blur on every paint (it was the single largest
