@@ -46,6 +46,8 @@ static CGEventRef stylusMediaKeyTapCallback(CGEventTapProxy,
     BOOL               _playing;
     BOOL               _hasTrack;
     CFTimeInterval     _lastPlayPauseTime;
+    CFTimeInterval     _lastNextTime;
+    CFTimeInterval     _lastPreviousTime;
     CFMachPortRef      _eventTap;
     CFRunLoopSourceRef _tapSource;
 }
@@ -55,6 +57,8 @@ static CGEventRef stylusMediaKeyTapCallback(CGEventTapProxy,
     if (!(self = [super init])) return nil;
     _owner             = owner;
     _lastPlayPauseTime = 0.0;
+    _lastNextTime      = 0.0;
+    _lastPreviousTime  = 0.0;
     [self registerCommands];
     return self;
 }
@@ -68,9 +72,10 @@ static CGEventRef stylusMediaKeyTapCallback(CGEventTapProxy,
 }
 
 // ---------------------------------------------------------------------------
-// Debounced play/pause: gate drops duplicate fires within 200 ms.
-// Both the CGEventTap and MPRemoteCommandCenter can theoretically fire for
-// the same key; the timestamp prevents a double-toggle.
+// Debounced media-key handlers: gate drops duplicate fires within 200 ms.
+// Both the CGEventTap and MPRemoteCommandCenter can fire for the same key
+// (depending on Accessibility permission state, focus, and macOS version);
+// per-action timestamps prevent the action from triggering twice.
 // ---------------------------------------------------------------------------
 
 - (void)firePlayPause
@@ -79,6 +84,22 @@ static CGEventRef stylusMediaKeyTapCallback(CGEventTapProxy,
     if (now - _lastPlayPauseTime < 0.2) return;
     _lastPlayPauseTime = now;
     if (_owner && _owner->onPlayPause) _owner->onPlayPause();
+}
+
+- (void)fireNext
+{
+    CFTimeInterval now = CACurrentMediaTime();
+    if (now - _lastNextTime < 0.2) return;
+    _lastNextTime = now;
+    if (_owner && _owner->onNext) _owner->onNext();
+}
+
+- (void)firePrevious
+{
+    CFTimeInterval now = CACurrentMediaTime();
+    if (now - _lastPreviousTime < 0.2) return;
+    _lastPreviousTime = now;
+    if (_owner && _owner->onPrevious) _owner->onPrevious();
 }
 
 // ---------------------------------------------------------------------------
@@ -102,11 +123,11 @@ static CGEventRef stylusMediaKeyTapCallback(CGEventTapProxy,
         return YES;
     }
     if (keyCode == NX_KEYTYPE_NEXT || keyCode == NX_KEYTYPE_FAST) {
-        if (_owner && _owner->onNext) _owner->onNext();
+        [self fireNext];
         return YES;
     }
     if (keyCode == NX_KEYTYPE_PREVIOUS || keyCode == NX_KEYTYPE_REWIND) {
-        if (_owner && _owner->onPrevious) _owner->onPrevious();
+        [self firePrevious];
         return YES;
     }
     return NO;
@@ -181,12 +202,12 @@ static CGEventRef stylusMediaKeyTapCallback(CGEventTapProxy,
         }];
     self.nextTarget = [center.nextTrackCommand
         addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent*) {
-            if (self->_owner && self->_owner->onNext) self->_owner->onNext();
+            [self fireNext];
             return MPRemoteCommandHandlerStatusSuccess;
         }];
     self.prevTarget = [center.previousTrackCommand
         addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent*) {
-            if (self->_owner && self->_owner->onPrevious) self->_owner->onPrevious();
+            [self firePrevious];
             return MPRemoteCommandHandlerStatusSuccess;
         }];
 
