@@ -881,6 +881,12 @@ MainComponent::MainComponent()
         queue_.removeAt(queueIndices);
     };
 
+    queueView_.onSelectionChanged = [this] {
+        // Mirror image of libraryTable_.onSelectionChanged: clear the library
+        // selection when the user picks a queue row.
+        libraryTable_.deselectAll();
+    };
+
     queueView_.onTracksDropped = [this](juce::StringArray paths, int insertIndex) {
         std::vector<TrackInfo> tracks;
         tracks.reserve(static_cast<size_t>(paths.size()));
@@ -2396,6 +2402,8 @@ void MainComponent::setMusicFolders(std::vector<juce::File> folders, bool keepLi
         libraryTable_.clearTracks();
         refreshSidebarArtists();
         refreshSidebarAlbums();
+        refreshSidebarGenres();
+        refreshSidebarPodcasts();
     }
 
     if (musicFolders_.empty())
