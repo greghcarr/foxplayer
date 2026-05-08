@@ -57,6 +57,23 @@ void QueueView::refresh(const PlayQueue& queue)
     list_.updateContent();
     list_.repaint();
 
+    // After a delete, slide selection to the row that took the deleted row's
+    // place (or the new last row if the tail was deleted). Empty queue ->
+    // no selection.
+    if (pendingDeleteTarget_ >= 0)
+    {
+        if (newCount > 0)
+        {
+            const int target = juce::jmin(pendingDeleteTarget_, newCount - 1);
+            juce::SparseSet<int> sel;
+            sel.addRange({ target, target + 1 });
+            suppressSelectionCallback_ = true;
+            list_.setSelectedRows(sel, juce::dontSendNotification);
+            suppressSelectionCallback_ = false;
+        }
+        pendingDeleteTarget_ = -1;
+    }
+
     if (playingIndex_ >= 0)
         list_.scrollToEnsureRowIsOnscreen(playingIndex_);
 }
@@ -197,6 +214,42 @@ void QueueView::listBoxItemDoubleClicked(int row, const juce::MouseEvent&)
 {
     if (row >= 0 && row < static_cast<int>(items_.size()))
         if (onRowActivated) onRowActivated(row);
+}
+
+void QueueView::selectedRowsChanged(int /*lastRowSelected*/)
+{
+    if (suppressSelectionCallback_) return;
+    if (onSelectionChanged) onSelectionChanged();
+}
+
+void QueueView::deleteKeyPressed(int /*lastRowSelected*/)
+{
+    const auto& sel = list_.getSelectedRows();
+    if (sel.isEmpty()) return;
+
+    std::vector<int> rows;
+    rows.reserve(static_cast<size_t>(sel.size()));
+    for (int i = 0; i < sel.size(); ++i)
+    {
+        const int row = sel[i];
+        // Ghost rows beyond the actual queue contents are valid selection
+        // targets visually (the ListBox doesn't know they're padding) but
+        // shouldn't be passed to removeAt.
+        if (row >= 0 && row < static_cast<int>(items_.size()))
+            rows.push_back(row);
+    }
+    if (rows.empty()) return;
+    // Slide selection to the row the deletion vacates; refresh() consumes
+    // this and clamps to the new size.
+    pendingDeleteTarget_ = rows.front();
+    if (onRemoveTracks) onRemoveTracks(std::move(rows));
+}
+
+void QueueView::deselectAll()
+{
+    suppressSelectionCallback_ = true;
+    list_.setSelectedRows(juce::SparseSet<int>{}, juce::dontSendNotification);
+    suppressSelectionCallback_ = false;
 }
 
 bool QueueView::isInterestedInDragSource(const SourceDetails& details)

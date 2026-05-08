@@ -312,6 +312,22 @@ void LibraryTableComponent::applyFilter()
     refreshPlayingIndex();
     table_.updateContent();
     table_.repaint();
+
+    // After a delete-driven rebuild, slide the selection to the row that took
+    // the deleted row's place (or the new last row if the deletion was at the
+    // tail). Empty result -> no selection.
+    if (pendingDeleteTarget_ >= 0)
+    {
+        const int newCount = static_cast<int>(filteredTracks_.size());
+        if (newCount > 0)
+        {
+            const int target = juce::jmin(pendingDeleteTarget_, newCount - 1);
+            juce::SparseSet<int> sel;
+            sel.addRange({ target, target + 1 });
+            table_.setSelectedRows(sel, juce::dontSendNotification);
+        }
+        pendingDeleteTarget_ = -1;
+    }
 }
 
 void LibraryTableComponent::refreshPlayingIndex()
@@ -1075,6 +1091,10 @@ void LibraryTableComponent::deleteKeyPressed(int /*lastRowSelected*/)
 
     if (viewMode_ == ViewMode::Playlist)
     {
+        // Slide selection to the row the deletion vacates (or the last row,
+        // if the user deleted from the tail). Consumed by applyFilter when
+        // the playlist refresh round-trips through MainComponent.
+        pendingDeleteTarget_ = rows.front();
         if (onRemoveFromPlaylistRequested)
             onRemoveFromPlaylistRequested(selected);
         return;
@@ -1106,8 +1126,13 @@ void LibraryTableComponent::deleteKeyPressed(int /*lastRowSelected*/)
             .withButton("Cancel")
             .withAssociatedComponent(this),
         [this](int result) {
-            if (result == 1)
-                setHiddenForSelection(true);
+            if (result != 1) return;
+            // Slide selection to the deleted row's position after applyFilter
+            // rebuilds. Captured here (after confirm) instead of pre-alert so
+            // a Cancel doesn't move the highlight.
+            const auto rowsNow = selectedRows();
+            pendingDeleteTarget_ = rowsNow.empty() ? -1 : rowsNow.front();
+            setHiddenForSelection(true);
         });
 }
 

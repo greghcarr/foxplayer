@@ -361,6 +361,10 @@ MainComponent::MainComponent()
         for (auto it = savedSelectionByView_.begin(); it != savedSelectionByView_.end();)
             it = (it->first == activeSidebarId_) ? std::next(it)
                                                  : savedSelectionByView_.erase(it);
+        // Library and queue selection are mutually exclusive: selecting in
+        // one clears the other so the user only ever sees a highlight in the
+        // pane that the delete key would act on.
+        queueView_.deselectAll();
     };
 
     libraryTable_.onLibraryChanged = [this] {
@@ -1051,6 +1055,7 @@ MainComponent::MainComponent()
                 libraryTable_.setTracks(fullLibrary_);
                 refreshSidebarArtists();
                 refreshSidebarAlbums();
+                refreshSidebarGenres();
                 refreshSidebarPodcasts();
                 if (! sessionRestored_)
                     restoreSessionState();

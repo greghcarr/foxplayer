@@ -240,6 +240,14 @@ private:
     juce::TextEditor         searchBox_;
     juce::TableListBox       table_;
 
+    // Row to select after the next applyFilter() rebuild caused by a delete
+    // (playlist remove, library hide). Set by deleteKeyPressed (or its alert
+    // confirm callback) to the smallest selected row before deletion;
+    // applyFilter() consumes it and clamps to the new row count so the
+    // selection slides forward to the next track in place, or back to the
+    // last track if the deleted rows were at the end. -1 = no pending.
+    int                      pendingDeleteTarget_ { -1 };
+
     std::vector<TrackInfo>   tracks_;          // full library
     std::vector<TrackInfo*>  filteredTracks_;  // pointers into tracks_ for current view
     juce::File               playingFile_;     // currently playing file (ground truth for highlight)

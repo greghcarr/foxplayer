@@ -33,8 +33,20 @@ public:
     void paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool selected) override;
     void listBoxItemClicked(int row, const juce::MouseEvent& e) override;
     void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override;
+    void selectedRowsChanged(int lastRowSelected) override;
+    void deleteKeyPressed(int lastRowSelected) override;
+
+    // Clears the selection without firing onSelectionChanged. Used by
+    // MainComponent to enforce mutually exclusive selection between the
+    // library table and the queue.
+    void deselectAll();
 
     std::function<void(int queueIndex)> onRowActivated;
+
+    // Fired only on user-driven selection changes (not programmatic clears
+    // via deselectAll). MainComponent uses this to clear the library table's
+    // selection so the two never highlight rows simultaneously.
+    std::function<void()> onSelectionChanged;
 
     // Fired when the user picks "Remove from Queue" for one or more rows.
     // Indices are in live-queue order; the currently playing index, if
@@ -57,6 +69,13 @@ public:
 private:
     juce::ListBox list_;
     juce::Label   header_;
+    bool          suppressSelectionCallback_ { false };
+
+    // Row to select after the next refresh() that follows a delete. Lets the
+    // selection slide forward to whatever track moved into the deleted row's
+    // slot, or back to the last row if the deletion was at the tail.
+    // -1 = no pending.
+    int           pendingDeleteTarget_ { -1 };
 
     std::vector<TrackInfo> items_;
     int playingIndex_ { -1 };
