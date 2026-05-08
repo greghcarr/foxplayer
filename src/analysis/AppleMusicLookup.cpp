@@ -232,6 +232,49 @@ namespace
 
         return best;
     }
+
+    // One iTunes Search API call + best-match selection. Returns the chosen
+    // result object or an empty var when there were zero matches. Sets
+    // networkError when the request itself failed (empty response). The
+    // entity argument is "song" for track-level searches or "album" for the
+    // album-entity fallback used when a song search comes up empty.
+    juce::var searchITunes(const juce::String& term,
+                           const juce::String& entity,
+                           const TrackInfo& track,
+                           const juce::String& hintAlbum,
+                           bool& networkError)
+    {
+        networkError = false;
+        if (term.isEmpty()) return {};
+
+        const juce::URL url = juce::URL("https://itunes.apple.com/search")
+                                  .withParameter("term",   term)
+                                  .withParameter("entity", entity)
+                                  .withParameter("limit",  "10");
+
+        juce::String response;
+        {
+            const auto opts = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+                                  .withConnectionTimeoutMs(8000);
+            if (auto stream = url.createInputStream(opts))
+                response = stream->readEntireStreamAsString();
+        }
+
+        if (response.isEmpty())
+        {
+            networkError = true;
+            return {};
+        }
+
+        const juce::var json = juce::JSON::parse(response);
+        auto* root = json.getDynamicObject();
+        if (root == nullptr || ! root->hasProperty("results")) return {};
+
+        auto resultsVar = root->getProperty("results");
+        if (! resultsVar.isArray()) return {};
+
+        return pickBestMatch(*resultsVar.getArray(), track, hintAlbum);
+    }
 }
 
 void AppleMusicLookup::processOne(Job job)
@@ -247,57 +290,9 @@ void AppleMusicLookup::processOne(Job job)
 
     if (threadShouldExit()) return;
 
-    const juce::String query = buildQuery(track);
-    const juce::URL url = juce::URL("https://itunes.apple.com/search")
-                              .withParameter("term",   query)
-                              .withParameter("entity", "song")
-                              .withParameter("limit",  "10");
-
-    juce::String response;
-    {
-        const auto opts = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
-                              .withConnectionTimeoutMs(8000);
-        if (auto stream = url.createInputStream(opts))
-            response = stream->readEntireStreamAsString();
-    }
-
-    if (response.isEmpty() || threadShouldExit())
-    {
-        ++consecutiveNetworkFailures_;
-        const bool shouldSuspend = (consecutiveNetworkFailures_ >= maxConsecutiveFailures);
-        if (shouldSuspend) suspended_.store(true);
-
-        juce::MessageManager::callAsync([this, t = track, isBatch, shouldSuspend]() mutable {
-            if (onLookupCompleted) onLookupCompleted(std::move(t), "Network error", isBatch);
-            if (shouldSuspend && onLookupSuspended) onLookupSuspended();
-        });
-        return;
-    }
-
-    const juce::var json = juce::JSON::parse(response);
-    auto* root = json.getDynamicObject();
-    if (root == nullptr || ! root->hasProperty("results"))
-    {
-        juce::MessageManager::callAsync([this, t = track, isBatch]() mutable {
-            if (onLookupCompleted) onLookupCompleted(std::move(t), "No match", isBatch);
-        });
-        return;
-    }
-
-    auto resultsVar = root->getProperty("results");
-    if (! resultsVar.isArray())
-    {
-        juce::MessageManager::callAsync([this, t = track, isBatch]() mutable {
-            if (onLookupCompleted) onLookupCompleted(std::move(t), "No match", isBatch);
-        });
-        return;
-    }
-
-    const auto& results = *resultsVar.getArray();
-
     // Look up the dominant album already resolved for this directory so the
     // scorer can prefer results that are consistent with sibling tracks.
-    const juce::String dirKey  = track.file.getParentDirectory().getFullPathName();
+    const juce::String dirKey = track.file.getParentDirectory().getFullPathName();
     juce::String       hintAlbum;
     {
         auto it = resolvedAlbums_.find(dirKey);
@@ -310,7 +305,38 @@ void AppleMusicLookup::processOne(Job job)
         }
     }
 
-    const juce::var match = pickBestMatch(results, track, hintAlbum);
+    auto reportNetworkError = [this, isBatch](TrackInfo t) {
+        ++consecutiveNetworkFailures_;
+        const bool shouldSuspend = (consecutiveNetworkFailures_ >= maxConsecutiveFailures);
+        if (shouldSuspend) suspended_.store(true);
+
+        juce::MessageManager::callAsync([this, tCopy = std::move(t), isBatch, shouldSuspend]() mutable {
+            if (onLookupCompleted) onLookupCompleted(std::move(tCopy), "Network error", isBatch);
+            if (shouldSuspend && onLookupSuspended) onLookupSuspended();
+        });
+    };
+
+    bool networkError = false;
+    juce::var match = searchITunes(buildQuery(track), "song", track, hintAlbum, networkError);
+    if (networkError) { reportNetworkError(track); return; }
+    if (threadShouldExit()) return;
+
+    // Album fallback: when the title+artist song search comes up empty (often
+    // because the title tag is mistitled or missing) and the track has both
+    // an album and an artist tagged, try a second search with entity=album.
+    // We score against the user's album as the hint so collection-name
+    // matches dominate; album-entity results still expose artistName,
+    // collectionName, artworkUrl100, releaseDate, and primaryGenreName, so
+    // the metadata-application code below works unchanged. trackName and
+    // trackNumber simply aren't filled in (they don't exist on album rows).
+    if (match.isVoid() && track.album.isNotEmpty() && track.artist.isNotEmpty())
+    {
+        const juce::String albumTerm = track.album + " " + track.artist;
+        match = searchITunes(albumTerm, "album", track, track.album, networkError);
+        if (networkError) { reportNetworkError(track); return; }
+        if (threadShouldExit()) return;
+    }
+
     auto* matchObj = match.getDynamicObject();
     if (matchObj == nullptr)
     {
