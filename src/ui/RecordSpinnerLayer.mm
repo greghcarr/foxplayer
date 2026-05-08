@@ -14,7 +14,14 @@ static constexpr double kRotationSeconds = 1.8;
 @property (nonatomic, strong) CALayer* discLayer;
 - (void)setDiscImage:(CGImageRef)cg;
 - (void)setSpinning:(BOOL)spinning;
+- (void)updateDimForKeyState;
 @end
+
+// Dim factor applied to the view when its window isn't key. Keeps the disc
+// from looking jarringly bright next to the JUCE-rendered chrome that macOS
+// has darkened for the inactive state. Tuned to roughly match the appearance
+// of the rest of the bar on resign-key.
+static const CGFloat kInactiveDimAlpha = 0.5;
 
 @implementation StylusRecordSpinnerView
 
@@ -33,16 +40,66 @@ static constexpr double kRotationSeconds = 1.8;
         _discLayer.frame           = self.bounds;
         _discLayer.position        = CGPointMake(NSMidX(self.bounds), NSMidY(self.bounds));
         [self.layer addSublayer:_discLayer];
-        // contentsScale on the host layer; the disc layer inherits it for
-        // crisp rendering on Retina displays. The CGImage we hand it is
-        // already 2x; gravity=resize stretches to bounds.
+        // Initial scale; refined in viewDidChangeBackingProperties once the
+        // view is in a window so we know which display we're actually on.
         self.layer.contentsScale = NSScreen.mainScreen.backingScaleFactor;
         _discLayer.contentsScale = NSScreen.mainScreen.backingScaleFactor;
     }
     return self;
 }
 
+// Re-subscribe to window-key notifications whenever the view moves to a new
+// window, and apply the current dim state immediately. Without this the disc
+// stays at full alpha when its window isn't key, which makes it stand out
+// against JUCE's inactive-state rendering of the rest of the bar.
+- (void)viewDidMoveToWindow
+{
+    [super viewDidMoveToWindow];
+    NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
+    [nc removeObserver:self name:NSWindowDidBecomeKeyNotification object:nil];
+    [nc removeObserver:self name:NSWindowDidResignKeyNotification object:nil];
+    if (self.window != nil)
+    {
+        [nc addObserver:self selector:@selector(updateDimForKeyState)
+                   name:NSWindowDidBecomeKeyNotification object:self.window];
+        [nc addObserver:self selector:@selector(updateDimForKeyState)
+                   name:NSWindowDidResignKeyNotification object:self.window];
+    }
+    [self updateDimForKeyState];
+}
+
+- (void)updateDimForKeyState
+{
+    const BOOL isKey = (self.window != nil && self.window.isKeyWindow);
+    self.alphaValue = isKey ? 1.0 : kInactiveDimAlpha;
+}
+
+// Fired when the view moves between displays with different backing scales
+// (e.g. dragging the window from a Retina built-in display to a 1x external
+// monitor). Updating contentsScale on the layer keeps the CGImage rendering
+// at native resolution; without this, the disc looks oversampled or soft.
+- (void)viewDidChangeBackingProperties
+{
+    [super viewDidChangeBackingProperties];
+    const CGFloat scale = self.window != nil
+                              ? self.window.backingScaleFactor
+                              : NSScreen.mainScreen.backingScaleFactor;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    self.layer.contentsScale  = scale;
+    _discLayer.contentsScale  = scale;
+    [CATransaction commit];
+}
+
 - (BOOL)isFlipped { return YES; }
+
+- (void)dealloc
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+#if !__has_feature(objc_arc)
+    [super dealloc];
+#endif
+}
 
 - (void)setFrame:(NSRect)frame
 {
