@@ -233,24 +233,41 @@ namespace
         return best;
     }
 
-    // One iTunes Search API call + best-match selection. Returns the chosen
-    // result object or an empty var when there were zero matches. Sets
-    // networkError when the request itself failed (empty response). The
-    // entity argument is "song" for track-level searches or "album" for the
-    // album-entity fallback used when a song search comes up empty.
-    juce::var searchITunes(const juce::String& term,
-                           const juce::String& entity,
-                           const TrackInfo& track,
-                           const juce::String& hintAlbum,
-                           bool& networkError)
+    // Returns true when the result's artist roughly matches the tagged
+    // artist (or there's no tagged artist to constrain on). Used as a
+    // hardline reject filter on top of pickBestMatch's score-based ranking:
+    // iTunes search frequently returns 10 unrelated tracks for a misspelt
+    // or generic title, and pickBestMatch will still pick "the best wrong
+    // one" even when none of them are the right song. Accepting that result
+    // would clobber the user's metadata or fetch the wrong cover art.
+    bool resultMatchesTrackArtist(const juce::var& match, const TrackInfo& track)
+    {
+        auto* obj = match.getDynamicObject();
+        if (obj == nullptr) return false;
+        if (track.artist.isEmpty()) return true;
+        const juce::String got = obj->getProperty("artistName").toString();
+        return got.equalsIgnoreCase(track.artist)
+            || isLooseStringMatch(got, track.artist);
+    }
+
+    // Issues one iTunes Search API call and returns the raw results array.
+    // Sets networkError when the request itself failed (empty response).
+    // Callers pick the best match via pickBestMatch or pickByAlbum.
+    juce::Array<juce::var> fetchITunes(const juce::String& term,
+                                        const juce::String& entity,
+                                        int limit,
+                                        const juce::String& attribute,
+                                        bool& networkError)
     {
         networkError = false;
         if (term.isEmpty()) return {};
 
-        const juce::URL url = juce::URL("https://itunes.apple.com/search")
-                                  .withParameter("term",   term)
-                                  .withParameter("entity", entity)
-                                  .withParameter("limit",  "10");
+        juce::URL url = juce::URL("https://itunes.apple.com/search")
+                            .withParameter("term",   term)
+                            .withParameter("entity", entity)
+                            .withParameter("limit",  juce::String(limit));
+        if (attribute.isNotEmpty())
+            url = url.withParameter("attribute", attribute);
 
         juce::String response;
         {
@@ -273,7 +290,38 @@ namespace
         auto resultsVar = root->getProperty("results");
         if (! resultsVar.isArray()) return {};
 
-        return pickBestMatch(*resultsVar.getArray(), track, hintAlbum);
+        return *resultsVar.getArray();
+    }
+
+    juce::var searchITunes(const juce::String& term,
+                           const juce::String& entity,
+                           const TrackInfo& track,
+                           const juce::String& hintAlbum,
+                           bool& networkError)
+    {
+        const auto results = fetchITunes(term, entity, 10, {}, networkError);
+        if (networkError) return {};
+        return pickBestMatch(results, track, hintAlbum);
+    }
+
+    // Picks the first result whose collectionName matches the target album
+    // (case-insensitive equality or substring relationship via
+    // isLooseStringMatch). Used by the artist-only fallback to recover the
+    // right album for tracks whose specific title isn't in iTunes' catalog
+    // even though sibling tracks from the same album are.
+    juce::var pickByAlbum(const juce::Array<juce::var>& results,
+                          const juce::String& targetAlbum)
+    {
+        if (targetAlbum.isEmpty()) return {};
+        for (const auto& r : results)
+        {
+            auto* obj = r.getDynamicObject();
+            if (obj == nullptr) continue;
+            const juce::String col = obj->getProperty("collectionName").toString();
+            if (col.equalsIgnoreCase(targetAlbum) || isLooseStringMatch(col, targetAlbum))
+                return r;
+        }
+        return {};
     }
 }
 
@@ -321,20 +369,47 @@ void AppleMusicLookup::processOne(Job job)
     if (networkError) { reportNetworkError(track); return; }
     if (threadShouldExit()) return;
 
-    // Album fallback: when the title+artist song search comes up empty (often
-    // because the title tag is mistitled or missing) and the track has both
-    // an album and an artist tagged, try a second search with entity=album.
-    // We score against the user's album as the hint so collection-name
-    // matches dominate; album-entity results still expose artistName,
-    // collectionName, artworkUrl100, releaseDate, and primaryGenreName, so
-    // the metadata-application code below works unchanged. trackName and
-    // trackNumber simply aren't filled in (they don't exist on album rows).
-    if (match.isVoid() && track.album.isNotEmpty() && track.artist.isNotEmpty())
+    // Album fallback: when the title+artist song search either came up empty
+    // OR returned a best result whose artist doesn't match the tagged
+    // artist (the typical "misspelt title returns 10 unrelated tracks"
+    // case), try a second search with entity=album using the album as the
+    // primary term. We score against the user's album as the hint so
+    // collection-name matches dominate; album-entity results still expose
+    // artistName, collectionName, artworkUrl100, releaseDate, and
+    // primaryGenreName, so the metadata-application code below works
+    // unchanged. trackName and trackNumber simply aren't filled in (they
+    // don't exist on album rows).
+    const bool songMatchUsable = ! match.isVoid() && resultMatchesTrackArtist(match, track);
+    if (! songMatchUsable && track.album.isNotEmpty() && track.artist.isNotEmpty())
     {
         const juce::String albumTerm = track.album + " " + track.artist;
         match = searchITunes(albumTerm, "album", track, track.album, networkError);
         if (networkError) { reportNetworkError(track); return; }
         if (threadShouldExit()) return;
+
+        // Same artist-match guard on the fallback result. A search for
+        // "Abbey Road The Beatles" can return Abbey Road covers by other
+        // artists; without the guard those would be accepted.
+        if (! match.isVoid() && ! resultMatchesTrackArtist(match, track))
+            match = juce::var();
+    }
+
+    // Stage 3: artist-scoped search, pick by album. Some albums (e.g., Knife
+    // Party - Abandon Ship) are findable by entity=song&attribute=artistTerm
+    // even though entity=album returns nothing for them, and even though the
+    // specific track ("Superstar" in that case) isn't in iTunes at all. We
+    // scan the artist's catalog for any track on the user's tagged album
+    // and use that result for art and album-level metadata.
+    if (match.isVoid() && track.album.isNotEmpty() && track.artist.isNotEmpty())
+    {
+        const auto artistResults = fetchITunes(track.artist, "song", 200,
+                                                "artistTerm", networkError);
+        if (networkError) { reportNetworkError(track); return; }
+        if (threadShouldExit()) return;
+
+        match = pickByAlbum(artistResults, track.album);
+        if (! match.isVoid() && ! resultMatchesTrackArtist(match, track))
+            match = juce::var();
     }
 
     auto* matchObj = match.getDynamicObject();
