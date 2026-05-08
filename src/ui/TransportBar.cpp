@@ -1026,20 +1026,22 @@ void TransportBar::paint(juce::Graphics& g)
             drawCachedGlyphs(g, infoTextLayout_.sourceGlyphs,
                              linkX, source3Y, infoW - prefixTextW, line3H);
 
-            // Click hit-box: only cover the visible portion of the link.
+            // Click hit-box: span the entire "Playing from: X" line so the
+            // prefix is part of the affordance, not just the source name.
+            // Clipped to the visible info area and the gradient fade-in.
             const int linkRight = juce::jmin(linkX + sourceTextW + 4,
-                                             infoX + (infoW - prefixTextW),
+                                             infoX + infoW,
                                              gradStart);
-            const int clippedW  = linkRight - linkX;
+            const int clippedW  = linkRight - infoX;
             sourceLinkBounds_ = (clippedW > 0)
-                                    ? juce::Rectangle<int>(linkX, source3Y, clippedW, line3H)
+                                    ? juce::Rectangle<int>(infoX, source3Y, clippedW, line3H)
                                     : juce::Rectangle<int>();
 
             if (hoveredSource_ && !sourceLinkBounds_.isEmpty())
             {
                 g.setColour(Color::textSecondary.withMultipliedAlpha(infoAlpha));
                 g.drawHorizontalLine(source3Y + line3H - 1,
-                                     static_cast<float>(linkX),
+                                     static_cast<float>(infoX),
                                      static_cast<float>(linkX + sourceTextW));
             }
         }
