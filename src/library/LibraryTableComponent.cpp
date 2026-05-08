@@ -360,8 +360,8 @@ void LibraryTableComponent::applySort()
         {
             std::stable_sort(filteredTracks_.begin(), filteredTracks_.end(),
                 [](const TrackInfo* a, const TrackInfo* b) {
-                    if (int c = a->artist.compareIgnoreCase(b->artist)) return c < 0;
-                    if (int c = a->album.compareIgnoreCase(b->album))   return c < 0;
+                    if (int c = a->artist.compareNatural(b->artist)) return c < 0;
+                    if (int c = a->album.compareNatural(b->album))   return c < 0;
                     if (a->trackNumber != b->trackNumber)
                     {
                         // Tracks with no number (0) sort after numbered ones.
@@ -369,7 +369,7 @@ void LibraryTableComponent::applySort()
                         if (b->trackNumber == 0) return true;
                         return a->trackNumber < b->trackNumber;
                     }
-                    return a->displayTitle().compareIgnoreCase(b->displayTitle()) < 0;
+                    return a->displayTitle().compareNatural(b->displayTitle()) < 0;
                 });
         }
         return;
@@ -399,15 +399,18 @@ void LibraryTableComponent::applySort()
                 const int bi = static_cast<int>(b - base);
                 return (ai < bi) ? -1 : (ai > bi) ? 1 : 0;
             }
-            case colIdTitle:  return a->displayTitle().compareIgnoreCase(b->displayTitle());
+            // String columns use compareNatural so embedded numbers sort by
+            // numeric value ("RHOSLC 9" before "RHOSLC 10") instead of by
+            // lexicographic codepoint.
+            case colIdTitle:  return a->displayTitle().compareNatural(b->displayTitle());
             case colIdArtist:
             {
                 const juce::String& av = a->isPodcast ? a->podcast : a->artist;
                 const juce::String& bv = b->isPodcast ? b->podcast : b->artist;
-                return av.compareIgnoreCase(bv);
+                return av.compareNatural(bv);
             }
-            case colIdAlbum:  return a->album.compareIgnoreCase(b->album);
-            case colIdGenre:  return a->genre.compareIgnoreCase(b->genre);
+            case colIdAlbum:  return a->album.compareNatural(b->album);
+            case colIdGenre:  return a->genre.compareNatural(b->genre);
             case colIdTime:   return (a->durationSecs < b->durationSecs) ? -1
                                   : (a->durationSecs > b->durationSecs) ?  1 : 0;
             case colIdBpm:    return (a->bpm          < b->bpm)          ? -1

@@ -958,7 +958,7 @@ MainComponent::MainComponent()
                 const bool bNum = b.trackNumber > 0;
                 if (aNum != bNum) return aNum > bNum;
                 if (aNum && a.trackNumber != b.trackNumber) return a.trackNumber < b.trackNumber;
-                return a.displayTitle().compareIgnoreCase(b.displayTitle()) < 0;
+                return a.displayTitle().compareNatural(b.displayTitle()) < 0;
             });
         }
         // Artist view: unnumbered-album tracks first (alpha by title), then
@@ -970,14 +970,14 @@ MainComponent::MainComponent()
                 const bool bNoAlbum = b.album.isEmpty();
                 if (aNoAlbum != bNoAlbum) return aNoAlbum > bNoAlbum;
                 if (aNoAlbum)
-                    return a.displayTitle().compareIgnoreCase(b.displayTitle()) < 0;
-                const int albumCmp = a.album.compareIgnoreCase(b.album);
+                    return a.displayTitle().compareNatural(b.displayTitle()) < 0;
+                const int albumCmp = a.album.compareNatural(b.album);
                 if (albumCmp != 0) return albumCmp < 0;
                 const bool aNum = a.trackNumber > 0;
                 const bool bNum = b.trackNumber > 0;
                 if (aNum != bNum) return aNum > bNum;
                 if (aNum && a.trackNumber != b.trackNumber) return a.trackNumber < b.trackNumber;
-                return a.displayTitle().compareIgnoreCase(b.displayTitle()) < 0;
+                return a.displayTitle().compareNatural(b.displayTitle()) < 0;
             });
         }
 
@@ -995,7 +995,7 @@ MainComponent::MainComponent()
                 const bool aNum = a.trackNumber > 0, bNum = b.trackNumber > 0;
                 if (aNum != bNum) return aNum > bNum;
                 if (aNum && a.trackNumber != b.trackNumber) return a.trackNumber < b.trackNumber;
-                return a.displayTitle().compareIgnoreCase(b.displayTitle()) < 0;
+                return a.displayTitle().compareNatural(b.displayTitle()) < 0;
             });
         }
         else if (sidebarId >= 2000 && sidebarId < 3000)
@@ -1003,13 +1003,13 @@ MainComponent::MainComponent()
             std::sort(tracks.begin(), tracks.end(), [](const TrackInfo& a, const TrackInfo& b) {
                 const bool aNoAlbum = a.album.isEmpty(), bNoAlbum = b.album.isEmpty();
                 if (aNoAlbum != bNoAlbum) return aNoAlbum > bNoAlbum;
-                if (aNoAlbum) return a.displayTitle().compareIgnoreCase(b.displayTitle()) < 0;
-                const int albumCmp = a.album.compareIgnoreCase(b.album);
+                if (aNoAlbum) return a.displayTitle().compareNatural(b.displayTitle()) < 0;
+                const int albumCmp = a.album.compareNatural(b.album);
                 if (albumCmp != 0) return albumCmp < 0;
                 const bool aNum = a.trackNumber > 0, bNum = b.trackNumber > 0;
                 if (aNum != bNum) return aNum > bNum;
                 if (aNum && a.trackNumber != b.trackNumber) return a.trackNumber < b.trackNumber;
-                return a.displayTitle().compareIgnoreCase(b.displayTitle()) < 0;
+                return a.displayTitle().compareNatural(b.displayTitle()) < 0;
             });
         }
     };
