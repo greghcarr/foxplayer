@@ -6,6 +6,12 @@ namespace Stylus
 
 using namespace UIConstants;
 
+// Spinning-CD update rate. The CD rotates at 33.3 RPM = 200 deg/s, so 20 fps
+// (10 deg/frame) still looks smooth and the seek-bar thumb is sub-pixel-accurate
+// at this rate for any reasonable track duration. Down from 30 fps (33% fewer
+// paints, the dominant CPU cost during playback).
+static constexpr int   transportTimerHz = 20;
+
 static constexpr int   modBtnD    = 28;   // hit area for shuffle/repeat floating icons
 static constexpr int   skipBtnD   = 38;   // diameter of prev/next circles
 static constexpr int   playBtnD   = 46;   // diameter of play/pause circle
@@ -674,6 +680,65 @@ void TransportBar::clearTrack()
 
 void TransportBar::paint(juce::Graphics& g)
 {
+    // Fast paths for the steady-state 20Hz timer repaint. updateDisplay()
+    // marks only the album-art and seek-bar subregions dirty, so when the clip
+    // is fully inside one of those, skip the full-bar machinery (5 fonts,
+    // gradient bound math, info-text glyphs, all the buttons) and just redraw
+    // the dirty piece. This is the dominant paint cost during playback.
+    const auto clip = g.getClipBounds();
+
+    if (hasTrack_ && !currentTrack_.isPodcast
+        && !albumArtBounds_.isEmpty() && albumArtBounds_.contains(clip))
+    {
+        g.fillAll(Color::transportBg);
+        ensureShadowImage(albumArtBounds_, /*isPodcast*/ false);
+        if (shadowImage_.isValid())
+            g.drawImageAt(shadowImage_,
+                          albumArtBounds_.getX() - shadowMargin,
+                          albumArtBounds_.getY() - shadowMargin);
+
+        juce::String labelText;
+        const auto displayedTitle = currentTrack_.displayTitle();
+        if (currentTrack_.artist.isNotEmpty() && displayedTitle.isNotEmpty())
+            labelText = currentTrack_.artist
+                        + juce::String(juce::CharPointer_UTF8(" \xc2\xb7 "))
+                        + displayedTitle;
+        else if (currentTrack_.artist.isNotEmpty())
+            labelText = currentTrack_.artist;
+        else
+            labelText = displayedTitle;
+
+        drawSpinningRecord(g, albumArtBounds_, recordRotation_, albumArt_, labelText);
+        return;
+    }
+
+    if (hasTrack_ && !seekBarBounds_.isEmpty() && seekBarBounds_.contains(clip))
+    {
+        g.fillAll(Color::transportBg);
+        g.setColour(Color::seekBarTrack);
+        g.fillRect(seekBarBounds_);
+
+        const double pos    = draggingSeek_ ? seekDragPos_ : engine_.normalizedPosition();
+        const int    fillW  = static_cast<int>(pos * seekBarBounds_.getWidth());
+        g.setColour(Color::seekBarFill);
+        g.fillRect(seekBarBounds_.withWidth(fillW));
+
+        const auto  seekF  = seekBarBounds_.toFloat();
+        const float thumbD = (draggingSeek_ || hoveredSeek_) ? 16.0f : 12.0f;
+        const float thumbX = seekF.getX() + static_cast<float>(pos) * seekF.getWidth();
+        const float thumbY = seekF.getCentreY();
+        g.setColour(juce::Colours::white);
+        g.fillEllipse(thumbX - thumbD * 0.5f, thumbY - thumbD * 0.5f, thumbD, thumbD);
+
+        if (draggingSeek_)
+        {
+            const float dotD = thumbD * 0.5f;
+            g.setColour(juce::Colour(0xff404040));
+            g.fillEllipse(thumbX - dotD * 0.5f, thumbY - dotD * 0.5f, dotD, dotD);
+        }
+        return;
+    }
+
     g.fillAll(Color::transportBg);
 
     // Top border
@@ -1442,7 +1507,7 @@ void TransportBar::updateTimerState()
         // doesn't compute deltaRads over the entire pause duration and snap
         // the CD to a new angle.
         lastUpdateMs_ = 0.0;
-        startTimerHz(30);
+        startTimerHz(transportTimerHz);
     }
     else if (! shouldRun && isRunning)
     {
@@ -1506,9 +1571,16 @@ void TransportBar::updateDisplay()
 {
     if (!hasTrack_) return;
 
-    playPauseButton_.icon = engine_.isPlaying() ? TransportButton::Icon::Pause
-                                                : TransportButton::Icon::Play;
-    playPauseButton_.repaint();
+    // Play-pause icon only flips on actual state changes, so only repaint the
+    // button when the icon would change. Doing it unconditionally was repainting
+    // a 46px circle every tick for nothing.
+    const auto desiredIcon = engine_.isPlaying() ? TransportButton::Icon::Pause
+                                                  : TransportButton::Icon::Play;
+    if (playPauseButton_.icon != desiredIcon)
+    {
+        playPauseButton_.icon = desiredIcon;
+        playPauseButton_.repaint();
+    }
 
     // Advance rotation by actual elapsed wall-clock time since the last tick.
     // Using real time instead of a fixed per-frame amount means paint() always
@@ -1530,8 +1602,18 @@ void TransportBar::updateDisplay()
         elapsedLabel_.setText(formatSeconds(elapsed), juce::dontSendNotification);
     totalLabel_.setText(formatSeconds(total),     juce::dontSendNotification);
 
+    // Targeted repaints instead of a full-bar repaint: only the album art
+    // (CD spin animates each tick) and the seek bar (thumb position changes)
+    // actually need to redraw on the timer. The full-bar repaint was forcing
+    // a full re-render of background, gradients, info text, buttons,  every
+    // 33ms even though those visuals are static during playback.
     if (!draggingSeek_)
-        repaint();
+    {
+        if (!albumArtBounds_.isEmpty() && !currentTrack_.isPodcast)
+            repaint(albumArtBounds_);
+        if (!seekBarBounds_.isEmpty())
+            repaint(seekBarBounds_);
+    }
 }
 
 juce::String TransportBar::formatSeconds(double secs) const
