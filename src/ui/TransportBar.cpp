@@ -12,6 +12,13 @@ using namespace UIConstants;
 // paints, the dominant CPU cost during playback).
 static constexpr int   transportTimerHz = 20;
 
+// The seek-bar track is 6 px tall but the thumb circle is 12-16 px in diameter,
+// so it extends 3-5 px above and below the bar. Repaint and fast-path checks
+// expand the bar bounds vertically by this amount so a moving thumb doesn't
+// leave stale pixels above/below the bar (the previous thumb position's top
+// and bottom halves would otherwise survive a partial repaint).
+static constexpr int   seekThumbHalfExtent = 8;
+
 static constexpr int   modBtnD    = 28;   // hit area for shuffle/repeat floating icons
 static constexpr int   skipBtnD   = 38;   // diameter of prev/next circles
 static constexpr int   playBtnD   = 46;   // diameter of play/pause circle
@@ -769,7 +776,8 @@ void TransportBar::paint(juce::Graphics& g)
     // paint() path.
     const auto clip = g.getClipBounds();
 
-    if (hasTrack_ && !seekBarBounds_.isEmpty() && seekBarBounds_.contains(clip))
+    if (hasTrack_ && !seekBarBounds_.isEmpty()
+        && seekBarBounds_.expanded(0, seekThumbHalfExtent).contains(clip))
     {
         g.fillAll(Color::transportBg);
         g.setColour(Color::seekBarTrack);
@@ -1641,9 +1649,10 @@ void TransportBar::updateDisplay()
     // Targeted repaint of just the seek bar: the disc spin is GPU-driven by
     // the CALayer overlay, so the message-thread timer only needs to redraw
     // the moving thumb. The bg, gradient, info text, and buttons are static
-    // during playback.
+    // during playback. Expand the dirty rect vertically to cover the thumb
+    // circle, which extends past the bar's top and bottom edges.
     if (!draggingSeek_ && !seekBarBounds_.isEmpty())
-        repaint(seekBarBounds_);
+        repaint(seekBarBounds_.expanded(0, seekThumbHalfExtent));
 }
 
 juce::String TransportBar::formatSeconds(double secs) const
