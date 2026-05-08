@@ -21,4 +21,11 @@ namespace Stylus::Constants
     static const juce::StringArray supportedExtensions {
         "mp3", "flac", "wav", "aiff", "aif", "m4a", "aac", "alac", "ogg", "opus"
     };
+
+    // Audio pipeline
+    // Read-ahead buffer for AudioTransportSource, in samples. Decouples disk I/O
+    // and decoding from the audio callback so dropouts don't happen when the OS
+    // briefly deprioritises the app (Cmd-Tab, Mission Control) or another
+    // process spikes CPU/disk. ~743ms at 44.1kHz, ~341ms at 96kHz.
+    static constexpr int audioReadAheadBufferSize = 32768;
 }

@@ -65,6 +65,11 @@ private:
     juce::AudioDeviceManager           deviceManager_;
     juce::AudioFormatManager           formatManager_;
     juce::AudioSourcePlayer            sourcePlayer_;
+    // Declared before transportSource_ so it outlives it: the BufferingAudioSource
+    // that AudioTransportSource builds internally references this thread for
+    // background reads, and must be torn down (via setSource(nullptr)) before
+    // the thread is destroyed.
+    juce::TimeSliceThread              readAheadThread_ { "Stylus Read-Ahead" };
     juce::AudioTransportSource         transportSource_;
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource_;
 

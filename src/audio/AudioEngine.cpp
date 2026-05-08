@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include "../Constants.h"
 
 namespace Stylus
 {
@@ -12,6 +13,12 @@ AudioEngine::AudioEngine()
     auto result = deviceManager_.initialiseWithDefaultDevices(0, 2);
     jassert(result.isEmpty()); // empty string means success
     juce::ignoreUnused(result);
+
+    // Background reader thread for AudioTransportSource. Decouples disk I/O
+    // and decoding from the audio callback so a busy CPU/disk or an OS
+    // priority dip (Cmd-Tab, Mission Control, Spotlight) can't starve the
+    // audio thread into a dropout.
+    readAheadThread_.startThread(juce::Thread::Priority::high);
 
     // Wire: deviceManager -> sourcePlayer -> transportSource.
     deviceManager_.addAudioCallback(&sourcePlayer_);
@@ -157,8 +164,8 @@ void AudioEngine::loadTrack(const TrackInfo& track)
     currentTrack_ = track;
     readerSource_ = std::make_unique<juce::AudioFormatReaderSource>(reader, true);
     transportSource_.setSource(readerSource_.get(),
-                               0,            // no read-ahead buffer (synchronous read)
-                               nullptr,
+                               Constants::audioReadAheadBufferSize,
+                               &readAheadThread_,
                                reader->sampleRate);
     trackLoaded_ = true;
     loading_ = false;
