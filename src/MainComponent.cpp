@@ -81,6 +81,13 @@ MainComponent::MainComponent()
     addAndMakeVisible(queueView_);
     addChildComponent(queueButton_);  // hidden until the queue has tracks
 
+   #if ! JUCE_MAC
+    // Windows host for the menu bar. menuBar_ is a juce::MenuBarComponent
+    // bound to MainComponent (a MenuBarModel) so it renders the same File /
+    // Window menus that setMacMainMenu installs into the system menu on Mac.
+    addAndMakeVisible(menuBar_);
+   #endif
+
     // Pin button (always-on-top toggle). Lives in the title-bar strip on the
     // right-hand side, styled to sit naturally next to the traffic lights on
     // the opposite side of the bar.
@@ -2330,6 +2337,14 @@ void MainComponent::resized()
 {
     auto bounds = getLocalBounds();
 
+   #if ! JUCE_MAC
+    // Windows menu bar at the very top. Standard JUCE default height is the
+    // best fit for native window chrome; we don't customise it.
+    const int menuBarH = juce::LookAndFeel::getDefaultLookAndFeel()
+                             .getDefaultMenuBarHeight();
+    menuBar_.setBounds(bounds.removeFromTop(menuBarH));
+   #endif
+
     // Transport bar at the bottom
     transportBar_.setBounds(bounds.removeFromBottom(transportBarHeight));
 
@@ -2761,6 +2776,13 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String& /*
     if (index == 0)
     {
         menu.addCommandItem(&commandManager_, cmdShowHidden);
+       #if ! JUCE_MAC
+        // On macOS Preferences lives in the application (Apple) menu via
+        // appleMenuExtras in MainWindow. Windows has no equivalent of that
+        // hidden menu, so route it through File where users will look for it.
+        menu.addSeparator();
+        menu.addCommandItem(&commandManager_, cmdPreferences);
+       #endif
     }
     else if (index == 1)
     {
