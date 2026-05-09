@@ -65,6 +65,10 @@ public:
     AnalysisLogWindow();
 
     void closeButtonPressed() override;
+    // Reapply the dark title bar each time the window is shown: the peer
+    // may have been rebuilt while hidden, and applyDarkTitleBar is a cheap
+    // idempotent call that no-ops on platforms other than Windows.
+    void visibilityChanged() override;
 
     AnalysisLogComponent& log();
 

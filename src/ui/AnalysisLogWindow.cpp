@@ -1,5 +1,6 @@
 #include "AnalysisLogWindow.h"
 #include "UIConstants.h"
+#include "PlatformChrome.h"
 
 namespace Stylus
 {
@@ -254,6 +255,13 @@ AnalysisLogWindow::AnalysisLogWindow()
 void AnalysisLogWindow::closeButtonPressed()
 {
     setVisible(false);
+}
+
+void AnalysisLogWindow::visibilityChanged()
+{
+    juce::DocumentWindow::visibilityChanged();
+    if (isVisible())
+        applyDarkTitleBar(*this);
 }
 
 AnalysisLogComponent& AnalysisLogWindow::log()

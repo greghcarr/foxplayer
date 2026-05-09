@@ -3,13 +3,8 @@
 #include "MainComponent.h"
 #include "UIConstants.h"
 #include "ui/MacWindowHelper.h"
+#include "ui/PlatformChrome.h"
 #include <JuceHeader.h>
-
-#if JUCE_WINDOWS
- #include <windows.h>
- #include <dwmapi.h>
- #pragma comment(lib, "dwmapi.lib")
-#endif
 
 namespace Stylus
 {
@@ -51,20 +46,10 @@ public:
                                            "Hide Stylus");
        #endif
 
-       #if JUCE_WINDOWS
-        // Switch the OS title bar to its Win11 dark variant so it stops
-        // clashing with the dark JUCE-rendered window body. setVisible(true)
-        // above already created the peer, so the HWND is available.
-        if (auto* peer = getPeer())
-        {
-            if (auto* hwnd = (HWND) peer->getNativeHandle())
-            {
-                BOOL dark = TRUE;
-                // DWMWA_USE_IMMERSIVE_DARK_MODE = 20 on Win10 19041+ / Win11.
-                DwmSetWindowAttribute(hwnd, 20, &dark, sizeof(dark));
-            }
-        }
-       #endif
+        // Win11 dark title bar (no-op on macOS; see PlatformChrome.h).
+        // setVisible(true) above has already created the peer, so this
+        // takes effect immediately on the first paint.
+        applyDarkTitleBar(*this);
 
         // Both the Window-menu command and the Dock icon click call showWindow().
         mainComponent_->onShowWindowRequested = [this]() { showWindow(); };

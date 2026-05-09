@@ -1,5 +1,6 @@
 #include "PreferencesWindow.h"
 #include "UIConstants.h"
+#include "PlatformChrome.h"
 
 namespace Stylus
 {
@@ -741,6 +742,13 @@ void PreferencesWindow::closeButtonPressed()
 {
     setVisible(false);
     if (onClosed) onClosed();
+}
+
+void PreferencesWindow::visibilityChanged()
+{
+    juce::DocumentWindow::visibilityChanged();
+    if (isVisible())
+        applyDarkTitleBar(*this);
 }
 
 LibraryPreferencesPanel* PreferencesWindow::libraryPanel()

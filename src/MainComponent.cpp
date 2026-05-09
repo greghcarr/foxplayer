@@ -2,6 +2,7 @@
 #include "UIConstants.h"
 #include "audio/StylFile.h"
 #include "ui/SongInfoEditor.h"
+#include "ui/PlatformChrome.h"
 #include <algorithm>
 #include <set>
 
@@ -2195,6 +2196,7 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track,
     }
 
     dw->setVisible(true);
+    applyDarkTitleBar(*dw);
 }
 
 void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
@@ -2236,6 +2238,7 @@ void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
     editor->onDismiss = closeDialog;
     dw->onDismiss     = closeDialog;
     dw->setVisible(true);
+    applyDarkTitleBar(*dw);
 }
 
 void MainComponent::setupAudioEngineCallbacks()
@@ -3426,6 +3429,7 @@ void MainComponent::requestQuit(std::function<void()> onConfirmed)
                     | juce::ComponentPeer::windowIsTemporary);
     dlg->setVisible(true);
     dlg->setCentrePosition(getScreenBounds().getCentreX(), getScreenBounds().getCentreY());
+    applyDarkTitleBar(*dlg);
 
     activeQuitDialog_ = dlg;
     quitLockOverlay_.setVisible(true);

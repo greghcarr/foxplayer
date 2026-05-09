@@ -240,6 +240,8 @@ public:
                       juce::ApplicationProperties& appProperties);
 
     void closeButtonPressed() override;
+    // See AnalysisLogWindow::visibilityChanged for why this is here.
+    void visibilityChanged() override;
 
     // Direct access to the library panel so MainComponent can wire up callbacks
     // and push the current folder lists into the view.
