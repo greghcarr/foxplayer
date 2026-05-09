@@ -362,11 +362,11 @@ private:
 
    #if ! JUCE_MAC
     // Windows hosts the File / Window menus inside the main window because
-    // there is no system menu bar to hand them to. juce::MenuBarComponent
-    // takes a MenuBarModel (us) and renders the standard text menus across
-    // the top of the window. On macOS we use setMacMainMenu(this, ...) in
-    // MainWindow instead, so this member is omitted to avoid drawing a
-    // duplicate menu bar inside the window.
+    // the OS-managed Win32 menu bar strip can't be reliably dark-themed
+    // (only its dropdown popups can, via uxtheme private APIs). Rendering
+    // the bar via JUCE keeps it dark and cohesive with the rest of the
+    // app — the menu's visuals come from the app-wide StylusLnF, which
+    // also styles popup context menus, so the look is consistent.
     juce::MenuBarComponent              menuBar_ { this };
    #endif
 

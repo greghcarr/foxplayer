@@ -25,7 +25,14 @@ public:
         // era; modern macOS still ships Helvetica Neue but it's no longer
         // the system font.
 
+       #if JUCE_MAC
         // Splash: transparent borderless window showing the embedded app icon.
+        // macOS-only for now: JUCE's transparent-layered-window path on
+        // Windows mishandles opaque image content (only the JUCE-drawn
+        // drop-shadow ring renders), and the natural fix (an opaque splash)
+        // ran into the borderless-DocumentWindow combo not appearing at
+        // all. Cold launch on Windows is fast enough that skipping the
+        // splash is fine while we sort that out.
         splashWindow_ = std::make_unique<Stylus::SplashWindow>();
 
         // Defer main window creation one message loop iteration so the splash
@@ -37,6 +44,10 @@ public:
         juce::Timer::callAfterDelay(2500, [this]() {
             splashWindow_.reset();
         });
+       #else
+        // No splash on Windows for now; create the main window immediately.
+        mainWindow_ = std::make_unique<Stylus::MainWindow>(juce::String());
+       #endif
     }
 
     void shutdown() override

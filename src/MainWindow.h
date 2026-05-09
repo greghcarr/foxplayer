@@ -5,6 +5,12 @@
 #include "ui/MacWindowHelper.h"
 #include <JuceHeader.h>
 
+#if JUCE_WINDOWS
+ #include <windows.h>
+ #include <dwmapi.h>
+ #pragma comment(lib, "dwmapi.lib")
+#endif
+
 namespace Stylus
 {
 
@@ -45,6 +51,21 @@ public:
                                            "Hide Stylus");
        #endif
 
+       #if JUCE_WINDOWS
+        // Switch the OS title bar to its Win11 dark variant so it stops
+        // clashing with the dark JUCE-rendered window body. setVisible(true)
+        // above already created the peer, so the HWND is available.
+        if (auto* peer = getPeer())
+        {
+            if (auto* hwnd = (HWND) peer->getNativeHandle())
+            {
+                BOOL dark = TRUE;
+                // DWMWA_USE_IMMERSIVE_DARK_MODE = 20 on Win10 19041+ / Win11.
+                DwmSetWindowAttribute(hwnd, 20, &dark, sizeof(dark));
+            }
+        }
+       #endif
+
         // Both the Window-menu command and the Dock icon click call showWindow().
         mainComponent_->onShowWindowRequested = [this]() { showWindow(); };
 
@@ -64,9 +85,20 @@ public:
 
     void closeButtonPressed() override
     {
-        // Hide rather than quit. firstCommandTarget is permanently set to the
-        // MainComponent in its constructor, so menus stay routable here too.
+       #if JUCE_MAC
+        // macOS convention: closing the window leaves the app running so
+        // the Dock icon stays available for re-opening, and music keeps
+        // playing in the background. firstCommandTarget is permanently set
+        // to MainComponent in its constructor, so menus stay routable here.
         setVisible(false);
+       #else
+        // Windows / Linux convention: closing the main window quits the
+        // app. Route through systemRequestedQuit so the same confirmation
+        // flow as File > Quit and Alt-F4 runs (preference for "Ask before
+        // quitting", chance to flush state, etc.).
+        if (auto* app = juce::JUCEApplication::getInstance())
+            app->systemRequestedQuit();
+       #endif
     }
 
     // "Stylus" stays in the title bar at every window size for now.

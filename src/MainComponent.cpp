@@ -12,7 +12,10 @@ using namespace UIConstants;
 
 static constexpr int orphanCheckIntervalMs = 30'000;
 
-// Global LookAndFeel: pointer cursor on TextButton, light-red hover on "Quit".
+// Global LookAndFeel: pointer cursor on TextButton, light-red hover on "Quit",
+// and (on Windows) flat dark menu styling that matches the immersive title
+// bar. macOS uses the system menu bar via setMacMainMenu so the menu-side
+// overrides only matter for popup / context menus there.
 class StylusLnF : public juce::LookAndFeel_V4
 {
 public:
@@ -36,6 +39,170 @@ public:
         }
         LookAndFeel_V4::drawButtonBackground(g, button, backgroundColour, highlighted, down);
     }
+
+    // Flat fill for the menu bar strip: V4's default draws a 1-px contrast
+    // border at the top and bottom that breaks visual continuity with the
+    // title bar above.
+    void drawMenuBarBackground(juce::Graphics& g, int width, int height,
+                               bool, juce::MenuBarComponent& bar) override
+    {
+        juce::ignoreUnused(width, height);
+        g.fillAll(bar.findColour(juce::PopupMenu::backgroundColourId));
+    }
+
+    // Flat fill for popup menu panels. V4's default adds a subtle gradient
+    // that doesn't match the Win11 dark menu look.
+    void drawPopupMenuBackground(juce::Graphics& g, int width, int height) override
+    {
+        juce::ignoreUnused(width, height);
+        g.fillAll(findColour(juce::PopupMenu::backgroundColourId));
+    }
+
+   #if JUCE_WINDOWS
+    // Win11 system menus use Segoe UI at ~9pt; matching the system font is
+    // the biggest single win for "looks native" perception. Mac inherits
+    // SF Pro from JUCE's platform default, so this override is Windows-only.
+    juce::Font getMenuBarFont(juce::MenuBarComponent&,
+                              int /*itemIndex*/,
+                              const juce::String& /*itemText*/) override
+    {
+        return juce::Font(juce::FontOptions().withName("Segoe UI").withHeight(17.0f));
+    }
+
+    juce::Font getPopupMenuFont() override
+    {
+        return juce::Font(juce::FontOptions().withName("Segoe UI").withHeight(19.0f));
+    }
+
+    // Tighter horizontal padding per menu-bar item than the V4 default's
+    // +16 px so "File" and "Window" sit closer together, matching the
+    // density of native Win11 menu bars.
+    int getMenuBarItemWidth(juce::MenuBarComponent& bar, int itemIndex,
+                            const juce::String& itemText) override
+    {
+        return juce::GlyphArrangement::getStringWidthInt(
+                   getMenuBarFont(bar, itemIndex, itemText), itemText) + 14;
+    }
+
+    // Brighter highlight than highlightedBackgroundColourId because the
+    // menu bar's full-cell fill looks visually dimmer than the popup's
+    // inset rounded fill at the same colour value. We don't want to nudge
+    // the global highlight colour up because that brightens the popup
+    // hover too far.
+    void drawMenuBarItem(juce::Graphics& g, int width, int height,
+                         int itemIndex, const juce::String& itemText,
+                         bool isMouseOverItem, bool isMenuOpen,
+                         bool /*isMouseOverBar*/,
+                         juce::MenuBarComponent& bar) override
+    {
+        if (isMenuOpen || isMouseOverItem)
+        {
+            g.setColour(juce::Colour(0xff404040));
+            g.fillRect(0, 0, width, height);
+            g.setColour(bar.findColour(juce::PopupMenu::highlightedTextColourId));
+        }
+        else
+        {
+            g.setColour(bar.findColour(juce::PopupMenu::textColourId));
+        }
+        g.setFont(getMenuBarFont(bar, itemIndex, itemText));
+        g.drawFittedText(itemText, 0, 0, width, height,
+                         juce::Justification::centred, 1);
+    }
+
+    // Tighter popup-item layout than V4's default. The default reserves a
+    // font-height-wide column on the left for icons/checkmarks even when
+    // none are shown, which leaves a visible gap before the item text.
+    // Reserve a smaller column and only draw a checkmark when an item is
+    // actually ticked.
+    void drawPopupMenuItem(juce::Graphics& g, const juce::Rectangle<int>& area,
+                           bool isSeparator, bool isActive, bool isHighlighted,
+                           bool isTicked, bool hasSubMenu, const juce::String& text,
+                           const juce::String& shortcutKeyText,
+                           const juce::Drawable* icon,
+                           const juce::Colour* textColour) override
+    {
+        if (isSeparator)
+        {
+            auto r = area.reduced(5, 0);
+            r.removeFromTop(juce::roundToInt((float) r.getHeight() * 0.5f - 0.5f));
+            g.setColour(findColour(juce::PopupMenu::textColourId)
+                            .withMultipliedAlpha(0.3f));
+            g.fillRect(r.removeFromTop(1));
+            return;
+        }
+
+        juce::Colour col = (textColour != nullptr ? *textColour
+                                                  : findColour(juce::PopupMenu::textColourId));
+        auto r = area.reduced(1);
+
+        if (isHighlighted && isActive)
+        {
+            g.setColour(findColour(juce::PopupMenu::highlightedBackgroundColourId));
+            g.fillRect(r);
+            g.setColour(findColour(juce::PopupMenu::highlightedTextColourId));
+        }
+        else
+        {
+            g.setColour(col.withMultipliedAlpha(isActive ? 1.0f : 0.5f));
+        }
+
+        r.reduce(4, 0);
+
+        auto font = getPopupMenuFont();
+        const float maxFontHeight = (float) r.getHeight() / 1.3f;
+        if (font.getHeight() > maxFontHeight)
+            font.setHeight(maxFontHeight);
+        g.setFont(font);
+
+        // Tighter icon/tick column than V4's default. The column is always
+        // reserved (so the leading text alignment stays consistent across
+        // ticked and unticked items) but smaller than V4's full-font-height
+        // gap, so plain text doesn't appear orphaned away from the menu's
+        // left edge.
+        const int iconAreaW = juce::roundToInt(font.getHeight() * 0.35f);
+        auto iconArea = r.removeFromLeft(iconAreaW).toFloat();
+
+        if (icon != nullptr)
+        {
+            icon->drawWithin(g, iconArea,
+                             juce::RectanglePlacement::centred
+                             | juce::RectanglePlacement::onlyReduceInSize, 1.0f);
+        }
+        else if (isTicked)
+        {
+            auto tick = getTickShape(1.0f);
+            g.fillPath(tick, tick.getTransformToScaleToFit(
+                                iconArea.reduced(iconArea.getWidth() / 5,
+                                                 iconArea.getHeight() / 5),
+                                true));
+        }
+
+        if (hasSubMenu)
+        {
+            const float arrowH = 0.6f * font.getHeight();
+            const float x = (float) r.removeFromRight((int) arrowH).getX();
+            const float halfH = (float) r.getCentreY();
+
+            juce::Path p;
+            p.startNewSubPath(x, halfH - arrowH * 0.5f);
+            p.lineTo(x + arrowH * 0.6f, halfH);
+            p.lineTo(x, halfH + arrowH * 0.5f);
+            g.strokePath(p, juce::PathStrokeType(2.0f));
+        }
+
+        r.removeFromRight(3);
+        g.drawFittedText(text, r, juce::Justification::centredLeft, 1);
+
+        if (shortcutKeyText.isNotEmpty())
+        {
+            auto f2 = font;
+            f2.setHeight(f2.getHeight() * 0.85f);
+            g.setFont(f2);
+            g.drawText(shortcutKeyText, r, juce::Justification::centredRight, true);
+        }
+    }
+   #endif
 };
 
 MainComponent::MainComponent()
@@ -43,6 +210,20 @@ MainComponent::MainComponent()
 {
     appLnF_ = std::make_unique<StylusLnF>();
     juce::LookAndFeel::setDefaultLookAndFeel(appLnF_.get());
+
+   #if ! JUCE_MAC
+    // Menu palette matches Win11's immersive dark title bar. Set on the
+    // LnF (rather than just the menu bar component) so context menus and
+    // dropdowns inherit the same colours.
+    appLnF_->setColour(juce::PopupMenu::backgroundColourId,
+                       juce::Colour(0xff202020));
+    appLnF_->setColour(juce::PopupMenu::textColourId,
+                       Color::textPrimary);
+    appLnF_->setColour(juce::PopupMenu::highlightedBackgroundColourId,
+                       juce::Colour(0xff2d2d2d));
+    appLnF_->setColour(juce::PopupMenu::highlightedTextColourId,
+                       Color::textPrimary);
+   #endif
 
     // ApplicationProperties for persisting settings.
     juce::PropertiesFile::Options opts;
@@ -82,9 +263,9 @@ MainComponent::MainComponent()
     addChildComponent(queueButton_);  // hidden until the queue has tracks
 
    #if ! JUCE_MAC
-    // Windows host for the menu bar. menuBar_ is a juce::MenuBarComponent
-    // bound to MainComponent (a MenuBarModel) so it renders the same File /
-    // Window menus that setMacMainMenu installs into the system menu on Mac.
+    // Windows host for the menu bar. Colours and font come from the app-wide
+    // StylusLnF set above, so we don't need any per-component setColour or
+    // setLookAndFeel calls here.
     addAndMakeVisible(menuBar_);
    #endif
 
@@ -2132,6 +2313,15 @@ void MainComponent::setupAudioEngineCallbacks()
 void MainComponent::paint(juce::Graphics& g)
 {
     g.fillAll(Color::background);
+
+   #if ! JUCE_MAC
+    // Paint the menu-bar background colour across the full top strip even
+    // in the leading gap before the first menu item, so the dark chrome
+    // (title bar, leading pad, menu items) all reads as one continuous band.
+    constexpr int menuBarH = 28;
+    g.setColour(juce::Colour(0xff202020));
+    g.fillRect(0, 0, getWidth(), menuBarH);
+   #endif
 }
 
 MainComponent::PrefsLockOverlay::PrefsLockOverlay()
@@ -2338,11 +2528,19 @@ void MainComponent::resized()
     auto bounds = getLocalBounds();
 
    #if ! JUCE_MAC
-    // Windows menu bar at the very top. Standard JUCE default height is the
-    // best fit for native window chrome; we don't customise it.
-    const int menuBarH = juce::LookAndFeel::getDefaultLookAndFeel()
-                             .getDefaultMenuBarHeight();
-    menuBar_.setBounds(bounds.removeFromTop(menuBarH));
+    // Windows menu bar strip at the very top, rendered by JUCE so it
+    // matches the dark theme of the rest of the window. Leading pad means
+    // "File" doesn't sit flush against the window's left edge; the gap
+    // matches the inter-item gap so the bar reads as evenly spaced. The
+    // strip-coloured fill behind the leading gap is drawn in paint().
+    constexpr int menuBarH      = 28;
+    // Each menu-bar item carries half of getMenuBarItemWidth's +14 padding
+    // on its leading side (i.e. ~7 px of internal pad before its text),
+    // so the OUTER offset is half the inter-item gap to make the visual
+    // distance "screen edge → File text" equal "File text → Window text".
+    constexpr int menuLeadingPx = 7;
+    auto topStrip = bounds.removeFromTop(menuBarH);
+    menuBar_.setBounds(topStrip.withTrimmedLeft(menuLeadingPx));
    #endif
 
     // Transport bar at the bottom
@@ -3168,7 +3366,11 @@ void MainComponent::requestQuit(std::function<void()> onConfirmed)
         juce::TextButton   cancelBtn { "Cancel" };
         juce::TextButton   quitBtn   { "Quit" };
 
-        enum { pad = 18, rowH = 22, btnH = 28 };
+        // Bottom padding is larger than the symmetric top padding so the
+        // buttons don't crowd the OS-managed window border on platforms
+        // where the title-bar style steals a few pixels from the bottom of
+        // the client area (Windows native title bars in particular).
+        enum { pad = 18, padBottom = 28, rowH = 22, btnH = 28 };
 
         QuitDialog()
         {
@@ -3177,7 +3379,7 @@ void MainComponent::requestQuit(std::function<void()> onConfirmed)
             addAndMakeVisible(dontShow);
             addAndMakeVisible(cancelBtn);
             addAndMakeVisible(quitBtn);
-            setSize(320, pad + rowH + 10 + rowH + 16 + btnH + pad);
+            setSize(320, pad + rowH + 10 + rowH + 16 + btnH + padBottom);
         }
 
         void paint(juce::Graphics& g) override
