@@ -5,15 +5,23 @@
 namespace Stylus
 {
 
-// Native overlay component that displays a spinning CD using a Core Animation
-// CALayer parented inside a layer-backed NSView. Rotation runs entirely on the
-// GPU via a CABasicAnimation on transform.rotation.z, so it is decoupled from
-// JUCE's paint cycle: the message thread does no per-frame work.
+// Spinning-disc overlay above the album art.
 //
-// Built on juce::NSViewComponent, which handles the parenting and frame
-// tracking automatically and ensures the native view composites on top of
-// JUCE's drawing (the only way to make a native overlay reliably visible
-// inside a JUCE component hierarchy on macOS).
+// macOS: backed by a Core Animation CALayer parented inside a layer-backed
+// NSView (juce::NSViewComponent host). Rotation runs entirely on the GPU via
+// a CABasicAnimation on transform.rotation.z, so the message thread does no
+// per-frame work.
+//
+// Other platforms (Windows): JUCE-component fallback. A juce::Timer at 30 Hz
+// advances the rotation angle and triggers a repaint that draws the disc
+// image with an affine rotation. Slightly more main-thread work, but small
+// in absolute terms (the disc is one image, drawn once per frame).
+//
+// Public surface is identical on both platforms so call sites in TransportBar
+// don't need to know which backend is active.
+
+#if JUCE_MAC
+
 class RecordSpinnerLayer : public juce::NSViewComponent
 {
 public:
@@ -33,5 +41,32 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RecordSpinnerLayer)
 };
+
+#else
+
+class RecordSpinnerLayer : public juce::Component,
+                           private juce::Timer
+{
+public:
+    RecordSpinnerLayer();
+    ~RecordSpinnerLayer() override;
+
+    void setImage(const juce::Image& image);
+    void setSpinning(bool shouldSpin);
+
+    void paint(juce::Graphics& g) override;
+
+private:
+    void timerCallback() override;
+
+    juce::Image image_;
+    double      angleRadians_ { 0.0 };
+    bool        spinning_     { false };
+    juce::int64 lastTickMs_   { 0 };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RecordSpinnerLayer)
+};
+
+#endif
 
 } // namespace Stylus

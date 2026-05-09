@@ -1,16 +1,26 @@
 # Stylus: Architecture Reference
 
 ## Overview
-C++17/JUCE 8.0.4 audio player for macOS. Current state: library browser with multi-folder support, on-disk library cache, playback with media keys + Now Playing + system tray, resizable play queue with right-click remove and shuffle-aware ordering, sidebar with Library / Artists / Albums / Genres / Playlists / Podcasts, drag-to-reorder playlists, album art display, BPM / key analysis, Apple Music + album-art lookups (with undo + retries), per-track play count + date-added, mini-player resize mode, always-on-top, per-view selection memory.
+C++17/JUCE 8.0.4 audio player. Primary target macOS; Windows 11 build also supported (see "Cross-platform structure" below). Current state: library browser with multi-folder support, on-disk library cache, playback with media keys + Now Playing + system tray, resizable play queue with right-click remove and shuffle-aware ordering, sidebar with Library / Artists / Albums / Genres / Playlists / Podcasts, drag-to-reorder playlists, album art display, BPM / key analysis, Apple Music + album-art lookups (with undo + retries), per-track play count + date-added, mini-player resize mode, always-on-top, per-view selection memory.
 Long-term: DJ mode, beatgrid detection, Rekordbox/Serato metadata export.
 
 ## Build
+
+### macOS
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --parallel
 open build/Stylus_artefacts/Debug/Stylus.app
 ```
 Requires: CMake 3.22+, Xcode CLT. JUCE 8.0.4 is fetched automatically via FetchContent.
+
+### Windows 11
+```powershell
+cmake -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Debug --parallel
+& "build\Stylus_artefacts\Debug\Stylus.exe"
+```
+Requires: CMake 3.22+, Visual Studio 2022 with the "Desktop development with C++" workload (MSVC v14.4x + Windows 10/11 SDK). VS uses a multi-config generator, so pass `--config Debug|Release` at build time, not `-DCMAKE_BUILD_TYPE` at configure time.
 
 ## File Layout
 ```
@@ -24,9 +34,10 @@ src/
     PlayQueue.h/.cpp           : Ordered track list + current index; advance/prev/jump
     AudioEngine.h/.cpp         : Full audio pipeline; owns DeviceManager/TransportSource
     StylFile.h/.cpp            : Read/write .styl JSON sidecar files (dot-prefixed, hidden)
-    AlbumArtExtractor.h        : JUCE-side: calls ObjC bridge, falls back to folder art
-    AlbumArtExtractor.cpp      : JUCE-side implementation (no ObjC here)
-    AlbumArtExtractor.mm       : Pure ObjC++: AVFoundation album art extraction (no JUCE types)
+    AlbumArtExtractor.h        : JUCE-side: calls platform bridge, falls back to folder art
+    AlbumArtExtractor.cpp      : JUCE-side implementation (no platform code here)
+    AlbumArtExtractor.mm       : macOS: pure ObjC++ AVFoundation extraction (no JUCE types)
+    AlbumArtExtractor_Win.cpp  : Windows: stub returning nullptr (folder-art fallback handles it)
   analysis/
     BpmDetector.h/.cpp         : BPM detection
     KeyDetector.h/.cpp         : Musical key detection
@@ -48,9 +59,15 @@ src/
     LoadingIndicator.h         : Centred spinner overlay shown during a fresh library scan
     Splash.h                   : Transparent borderless splash, shows the embedded app icon
     PreferencesWindow.h/.cpp   : Tabbed Preferences window (Audio, Library, Misc, Debug); Cmd-,
-    MacWindowHelper.h/.mm      : Native NSWindow activation; Dock-reopen swizzle + appDidBecomeActive
-    NowPlayingBridge.h/.mm     : MPNowPlayingInfoCenter + MPRemoteCommandCenter (media keys, lock screen)
-    StatusBarItem.h/.mm        : macOS menu-bar status item with quick controls
+    MacWindowHelper.h/.mm      : macOS: native NSWindow activation; Dock-reopen swizzle + appDidBecomeActive
+    MacWindowHelper_Win.cpp    : Windows: no-op stubs (toFront() in MainWindow handles activation)
+    NowPlayingBridge.h/.mm     : macOS: MPNowPlayingInfoCenter + MPRemoteCommandCenter (media keys, lock screen)
+    NowPlayingBridge_Win.cpp   : Windows: no-op stub; SMTC bridge is the planned replacement
+    StatusBarItem.h/.mm        : macOS: menu-bar status item with quick controls
+    StatusBarItem_Win.cpp      : Windows: no-op stub; Shell_NotifyIcon is the planned replacement
+    RecordSpinnerLayer.h       : Spinning-disc overlay; base class differs per platform (see header)
+    RecordSpinnerLayer.mm      : macOS: NSViewComponent + CALayer GPU rotation
+    RecordSpinnerLayer_Win.cpp : Windows: juce::Component + Timer-driven affine-rotation paint
 
 resources/
   icons/                       : Phosphor fill-weight SVGs, curated to ~255 icons
@@ -64,6 +81,23 @@ resources/
 ```
 
 ## Key Patterns
+
+### Cross-platform structure
+One codebase, two platforms. Don't fork; don't keep a long-lived "windows" branch. Platform divergence is handled in two places only:
+
+1. **CMakeLists.txt** picks platform-specific source files via `if (APPLE) ... else() ... endif()`. The `.mm` ObjC++ files build on macOS; sibling `_Win.cpp` files build on Windows. Both files are always present in the tree; only one is compiled per build. Apple frameworks (`AVFoundation`, `MediaPlayer`, `IOKit`) and the `juceaide macicon` custom command are also under `if (APPLE)`. JUCE auto-runs `juceaide winicon` on Windows from the same `ICON_BIG` PNG, so the icon pipeline is symmetric.
+
+2. **`#if JUCE_MAC` guards in headers** when the *base class* differs per platform (`RecordSpinnerLayer` derives from `juce::NSViewComponent` on Mac, plain `juce::Component + Timer` on Windows) or when a call site is mac-only (`MenuBarModel::setMacMainMenu` in `MainWindow.h`). Prefer the CMake split for whole-file divergence; reserve `#if` for cases where a single header has to shapeshift.
+
+The Mac-helper free functions (`Stylus_activateAndShowWindow`, `Stylus_setDockReopenCallback`, etc.) are declared in `MacWindowHelper.h` with no platform guard, so call sites in `MainWindow.h` stay clean. The Windows `_Win.cpp` provides empty implementations; the actual activation on Windows is `toFront(true)` (guarded `#if ! JUCE_MAC` in `MainWindow::showWindow()`).
+
+**What's stubbed but not yet implemented on Windows** (functional gaps, not crash risks):
+- `NowPlayingBridge_Win.cpp` — no-op. SMTC (Windows.Media.SystemMediaTransportControls via C++/WinRT) is the planned replacement; would restore media keys + lock-screen Now Playing.
+- `StatusBarItem_Win.cpp` — no-op. `Shell_NotifyIcon` is the planned replacement.
+- `AlbumArtExtractor_Win.cpp` — returns nullptr. Folder/sidecar art still works via the cross-platform fallback in `AlbumArtExtractor.cpp`. TagLib or the Windows Property System (`IPropertyStore` + `PKEY_*`) would restore embedded-art reads.
+- **Menu bar** — `setMacMainMenu` is the macOS native menu bar; on Windows, MainComponent (a `MenuBarModel`) has no host yet. Hosting a `MenuBarComponent` inside MainComponent on non-Mac is the planned fix.
+- **Audio codecs** — `registerBasicFormats()` includes `CoreAudioFormat` on macOS (gives MP3/AAC/ALAC/AIFF/WAV); Windows gets only MP3/WAV/AIFF/FLAC/Ogg. AAC/ALAC/M4A files won't load until MediaFoundation (or FFmpeg) is wired into `AudioEngine`.
+- `.styl` sidecar files are not actually hidden on Windows (NTFS doesn't honor the dot-prefix convention; would need `SetFileAttributes(FILE_ATTRIBUTE_HIDDEN)`).
 
 ### Format registration
 `registerBasicFormats()` already includes CoreAudioFormat on macOS: do not call `registerFormat(new CoreAudioFormat(), ...)` separately or JUCE will assert on the duplicate.

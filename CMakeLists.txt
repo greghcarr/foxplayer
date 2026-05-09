@@ -18,10 +18,9 @@ FetchContent_MakeAvailable(JUCE)
 # Links only the GUI-free JUCE modules, so it can be reused on iOS as a
 # static library underneath a SwiftUI app. No source in this target may
 # depend on juce_graphics or juce_gui_basics.
-add_library(StylusCore STATIC
+set(STYLUS_CORE_SOURCES
     src/audio/PlayQueue.cpp
     src/audio/StylFile.cpp
-    src/audio/AlbumArtExtractor.mm
     src/analysis/BpmDetector.cpp
     src/analysis/KeyDetector.cpp
     src/analysis/AnalysisEngine.cpp
@@ -30,6 +29,14 @@ add_library(StylusCore STATIC
     src/library/LibraryCache.cpp
     src/library/PlaylistStore.cpp
 )
+
+if (APPLE)
+    list(APPEND STYLUS_CORE_SOURCES src/audio/AlbumArtExtractor.mm)
+else()
+    list(APPEND STYLUS_CORE_SOURCES src/audio/AlbumArtExtractor_Win.cpp)
+endif()
+
+add_library(StylusCore STATIC ${STYLUS_CORE_SOURCES})
 
 target_include_directories(StylusCore PUBLIC src)
 
@@ -54,15 +61,11 @@ juce_add_gui_app(Stylus
 
 juce_generate_juce_header(Stylus)
 
-target_sources(Stylus PRIVATE
+set(STYLUS_APP_SOURCES
     src/Main.cpp
     src/MainComponent.cpp
     src/audio/AudioEngine.cpp
     src/audio/AlbumArtExtractor.cpp
-    src/ui/StatusBarItem.mm
-    src/ui/MacWindowHelper.mm
-    src/ui/NowPlayingBridge.mm
-    src/ui/RecordSpinnerLayer.mm
     src/library/LibraryTableComponent.cpp
     src/ui/TransportBar.cpp
     src/ui/QueueView.cpp
@@ -71,6 +74,24 @@ target_sources(Stylus PRIVATE
     src/ui/AnalysisLogWindow.cpp
     src/ui/PreferencesWindow.cpp
 )
+
+if (APPLE)
+    list(APPEND STYLUS_APP_SOURCES
+        src/ui/StatusBarItem.mm
+        src/ui/MacWindowHelper.mm
+        src/ui/NowPlayingBridge.mm
+        src/ui/RecordSpinnerLayer.mm
+    )
+else()
+    list(APPEND STYLUS_APP_SOURCES
+        src/ui/StatusBarItem_Win.cpp
+        src/ui/MacWindowHelper_Win.cpp
+        src/ui/NowPlayingBridge_Win.cpp
+        src/ui/RecordSpinnerLayer_Win.cpp
+    )
+endif()
+
+target_sources(Stylus PRIVATE ${STYLUS_APP_SOURCES})
 
 target_include_directories(Stylus PRIVATE src)
 
@@ -84,30 +105,32 @@ target_compile_definitions(Stylus PRIVATE
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Stylus,JUCE_VERSION>"
 )
 
-# JUCE runs juceaide at CMake *configure* time to bake resources/app-icon.png
-# into Stylus_artefacts/JuceLibraryCode/Icon.icns, which the build then just
-# copies into the bundle. If only the PNG changes (no configure re-run, no
-# CMakeLists.txt edit), neither icns gets refreshed. Force it at build time:
-# invoke juceaide ourselves to regenerate the icns, then delete the stale copy
-# in the bundle so JUCE recopies the fresh one.
-set(APP_ICON_PNG   ${CMAKE_CURRENT_SOURCE_DIR}/resources/app-icon.png)
-set(APP_ICON_STAMP ${CMAKE_CURRENT_BINARY_DIR}/.app-icon.stamp)
-set(APP_ICON_ICNS  ${CMAKE_CURRENT_BINARY_DIR}/Stylus_artefacts/JuceLibraryCode/Icon.icns)
+if (APPLE)
+    # JUCE runs juceaide at CMake *configure* time to bake resources/app-icon.png
+    # into Stylus_artefacts/JuceLibraryCode/Icon.icns, which the build then just
+    # copies into the bundle. If only the PNG changes (no configure re-run, no
+    # CMakeLists.txt edit), neither icns gets refreshed. Force it at build time:
+    # invoke juceaide ourselves to regenerate the icns, then delete the stale copy
+    # in the bundle so JUCE recopies the fresh one.
+    set(APP_ICON_PNG   ${CMAKE_CURRENT_SOURCE_DIR}/resources/app-icon.png)
+    set(APP_ICON_STAMP ${CMAKE_CURRENT_BINARY_DIR}/.app-icon.stamp)
+    set(APP_ICON_ICNS  ${CMAKE_CURRENT_BINARY_DIR}/Stylus_artefacts/JuceLibraryCode/Icon.icns)
 
-add_custom_command(
-    OUTPUT  ${APP_ICON_STAMP}
-    DEPENDS ${APP_ICON_PNG}
-    COMMAND $<TARGET_FILE:juce::juceaide> macicon
-            "${APP_ICON_ICNS}" "${APP_ICON_PNG}"
-    COMMAND ${CMAKE_COMMAND} -E rm -f
-            "${CMAKE_CURRENT_BINARY_DIR}/Stylus_artefacts/$<CONFIG>/Stylus.app/Contents/Resources/Icon.icns"
-    COMMAND ${CMAKE_COMMAND} -E touch ${APP_ICON_STAMP}
-    COMMENT "app-icon.png changed - regenerating Icon.icns via juceaide"
-    VERBATIM
-)
+    add_custom_command(
+        OUTPUT  ${APP_ICON_STAMP}
+        DEPENDS ${APP_ICON_PNG}
+        COMMAND $<TARGET_FILE:juce::juceaide> macicon
+                "${APP_ICON_ICNS}" "${APP_ICON_PNG}"
+        COMMAND ${CMAKE_COMMAND} -E rm -f
+                "${CMAKE_CURRENT_BINARY_DIR}/Stylus_artefacts/$<CONFIG>/Stylus.app/Contents/Resources/Icon.icns"
+        COMMAND ${CMAKE_COMMAND} -E touch ${APP_ICON_STAMP}
+        COMMENT "app-icon.png changed - regenerating Icon.icns via juceaide"
+        VERBATIM
+    )
 
-add_custom_target(StylusIconRefresh DEPENDS ${APP_ICON_STAMP})
-add_dependencies(Stylus StylusIconRefresh)
+    add_custom_target(StylusIconRefresh DEPENDS ${APP_ICON_STAMP})
+    add_dependencies(Stylus StylusIconRefresh)
+endif()
 
 juce_add_binary_data(StylusIcons
     SOURCES
@@ -138,9 +161,6 @@ target_link_libraries(Stylus
     PRIVATE
         StylusCore
         StylusIcons
-        "-framework AVFoundation"
-        "-framework MediaPlayer"
-        "-framework IOKit"
         juce::juce_audio_devices
         juce::juce_audio_utils
         juce::juce_dsp
@@ -152,3 +172,11 @@ target_link_libraries(Stylus
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
 )
+
+if (APPLE)
+    target_link_libraries(Stylus PRIVATE
+        "-framework AVFoundation"
+        "-framework MediaPlayer"
+        "-framework IOKit"
+    )
+endif()
