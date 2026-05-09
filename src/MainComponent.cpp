@@ -250,6 +250,38 @@ MainComponent::MainComponent()
             handleTracksDroppedOnPlaylist(1000 + playlistStoreId, paths);
         };
 
+    libraryTable_.onCreateNewPlaylistRequested =
+        [this](std::vector<TrackInfo> tracks) {
+            if (tracks.empty()) return;
+
+            // Intelligent name: same album across the selection wins,
+            // otherwise same artist, otherwise fall back to "New Playlist".
+            // Empty fields don't count - a selection that's all "no album"
+            // shouldn't end up with an empty-string playlist name.
+            juce::String suggested;
+            const auto& first = tracks.front();
+            const bool sameAlbum = ! first.album.isEmpty()
+                && std::all_of(tracks.begin(), tracks.end(),
+                    [&](const TrackInfo& t) { return t.album == first.album; });
+            const bool sameArtist = ! first.artist.isEmpty()
+                && std::all_of(tracks.begin(), tracks.end(),
+                    [&](const TrackInfo& t) { return t.artist == first.artist; });
+            if      (sameAlbum)  suggested = first.album;
+            else if (sameArtist) suggested = first.artist;
+            else                 suggested = "New Playlist";
+
+            const int newId = playlistStore_->createPlaylist(suggested);
+            std::vector<juce::String> paths;
+            paths.reserve(tracks.size());
+            for (const auto& t : tracks) paths.push_back(t.file.getFullPathName());
+            playlistStore_->addTracksToPlaylist(newId, paths);
+
+            const int newSidebarId = 1000 + newId;
+            sidebar_.setSelectedId(newSidebarId);
+            showSidebarItem(newSidebarId);
+            juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
+        };
+
     libraryTable_.onPlayNextRequested = [this](std::vector<TrackInfo> tracks) {
         PlayQueue::QueueSource source;
         source.sidebarId = activeSidebarId_;
@@ -1000,6 +1032,16 @@ MainComponent::MainComponent()
         paths.reserve(tracks.size());
         for (const auto& t : tracks) paths.push_back(t.file.getFullPathName());
         playlistStore_->addTracksToPlaylist(newId, paths);
+
+        // Jump to the freshly-created playlist so the user immediately sees
+        // the tracks they just collected, instead of leaving them on the
+        // source view wondering whether the action did anything. Scroll
+        // happens async so the sidebar's reflow has run before we ask it
+        // to bring the new row on-screen.
+        const int newSidebarId = 1000 + newId;
+        sidebar_.setSelectedId(newSidebarId);
+        showSidebarItem(newSidebarId);
+        juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
     };
 
     auto sortTracksForSidebar = [](std::vector<TrackInfo>& tracks, int sidebarId) {

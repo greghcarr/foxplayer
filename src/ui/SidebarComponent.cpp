@@ -662,30 +662,35 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
 
                         // "Add to Playlist" submenu: every other playlist
                         // (omit the source so the user can't add a playlist
-                        // to itself, which would just duplicate every track).
+                        // to itself, which would just duplicate every track),
+                        // plus a divider and "+ Create New Playlist" at the
+                        // bottom that copies these tracks into a fresh
+                        // playlist and jumps to it.
                         std::vector<std::pair<int, juce::String>> playlistsForMenu;
                         if (getPlaylistsForMenu) playlistsForMenu = getPlaylistsForMenu();
                         const int sourceStoreId = item.id - 1000;
                         juce::PopupMenu addToPlaylistSubMenu;
-                        constexpr int kAddToPlaylistBase = 10000;
                         for (const auto& [storeId, name] : playlistsForMenu)
                             if (storeId != sourceStoreId)
-                                addToPlaylistSubMenu.addItem(kAddToPlaylistBase + storeId, name);
+                                addToPlaylistSubMenu.addItem(10000 + storeId, name);
+                        if (addToPlaylistSubMenu.getNumItems() > 0)
+                            addToPlaylistSubMenu.addSeparator();
+                        addToPlaylistSubMenu.addItem(9999, "+ Create New Playlist");
 
                         juce::PopupMenu menu;
                         menu.addItem(1, "Play Next");
                         menu.addItem(2, "Add to Queue");
-                        if (addToPlaylistSubMenu.getNumItems() > 0)
-                            menu.addSubMenu("Add to Playlist", addToPlaylistSubMenu);
+                        menu.addSubMenu("Add to Playlist", addToPlaylistSubMenu);
                         menu.addSeparator();
                         menu.addItem(3, "Rename Playlist");
                         menu.addItem(4, "Duplicate Playlist");
                         menu.addItem(5, "Delete Playlist");
-                        const int capturedId = item.id;
+                        const int capturedId     = item.id;
+                        const juce::String label = item.label;
                         menu.showMenuAsync(
                             juce::PopupMenu::Options{}.withTargetScreenArea(
                                 juce::Rectangle<int>().withPosition(e.getScreenPosition())),
-                            [this, capturedId](int result) {
+                            [this, capturedId, label](int result) {
                                 if (result == 1 && onPlayNextFromItem)
                                     onPlayNextFromItem(capturedId);
                                 else if (result == 2 && onAddToQueueFromItem)
@@ -696,6 +701,8 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                                     onDuplicatePlaylist(capturedId);
                                 else if (result == 5 && onDeletePlaylist)
                                     onDeletePlaylist(capturedId);
+                                else if (result == 9999 && onCreatePlaylistFromItem)
+                                    onCreatePlaylistFromItem(capturedId, label);
                                 else if (result >= 10000 && onAddToPlaylistFromItem)
                                     onAddToPlaylistFromItem(capturedId, result - 10000);
                             });
@@ -712,12 +719,19 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                         const bool isPodcast = (item.id >= 4000 && item.id < 5000);
 
                         // "Add to Playlist" submenu (only for non-podcast
-                        // groups, since playlists hold music tracks).
+                        // groups, since playlists hold music tracks). Always
+                        // ends with "+ Create New Playlist" so the user can
+                        // make a fresh playlist out of this group's tracks
+                        // even if no playlists exist yet.
                         std::vector<std::pair<int, juce::String>> playlistsForMenu;
                         if (!isPodcast && getPlaylistsForMenu) playlistsForMenu = getPlaylistsForMenu();
                         juce::PopupMenu addToPlaylistSubMenu;
                         for (const auto& [storeId, name] : playlistsForMenu)
                             addToPlaylistSubMenu.addItem(10000 + storeId, name);
+                        if (addToPlaylistSubMenu.getNumItems() > 0)
+                            addToPlaylistSubMenu.addSeparator();
+                        if (!isPodcast)
+                            addToPlaylistSubMenu.addItem(9999, "+ Create New Playlist");
 
                         juce::PopupMenu menu;
                         menu.addItem(1, "Play Next");
@@ -737,6 +751,8 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                                 else if (result == 2 && onAddToQueueFromItem)
                                     onAddToQueueFromItem(capturedId);
                                 else if (result == 3 && onCreatePlaylistFromItem)
+                                    onCreatePlaylistFromItem(capturedId, label);
+                                else if (result == 9999 && onCreatePlaylistFromItem)
                                     onCreatePlaylistFromItem(capturedId, label);
                                 else if (result >= 10000 && onAddToPlaylistFromItem)
                                     onAddToPlaylistFromItem(capturedId, result - 10000);

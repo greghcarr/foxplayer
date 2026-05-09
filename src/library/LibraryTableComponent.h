@@ -119,6 +119,12 @@ public:
     // single-track duplicate warning).
     std::function<void(std::vector<TrackInfo>, int playlistStoreId)> onAddToPlaylistRequested;
 
+    // Called when the user picks "+ Create New Playlist" at the bottom of
+    // the "Add to Playlist" submenu. Receiver should derive a sensible name
+    // (same album / same artist / "New Playlist"), create the playlist,
+    // add the selected tracks, then navigate to it in the sidebar.
+    std::function<void(std::vector<TrackInfo>)> onCreateNewPlaylistRequested;
+
     // Called when the user chooses "Play Next" from the context menu.
     // Receivers should insert the tracks immediately after the currently
     // playing one rather than appending to the end of the queue.
