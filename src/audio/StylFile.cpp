@@ -1,5 +1,9 @@
 #include "StylFile.h"
 
+#if JUCE_WINDOWS
+ #include <windows.h>
+#endif
+
 namespace Stylus
 {
 
@@ -113,7 +117,16 @@ bool StylFile::save(const TrackInfo& track)
     const juce::String text = juce::JSON::toString(root, false);
 
     const juce::File sidecar = sidecarFor(track.file);
-    return sidecar.replaceWithText(text);
+    if (! sidecar.replaceWithText(text)) return false;
+
+    // Apply OS-level "hidden" attribute where the dot-prefix naming isn't
+    // honoured. Finder treats `.foo` as hidden by default; Windows Explorer
+    // shows the file unless FILE_ATTRIBUTE_HIDDEN is set.
+   #if JUCE_WINDOWS
+    SetFileAttributesW(sidecar.getFullPathName().toWideCharPointer(),
+                       FILE_ATTRIBUTE_HIDDEN);
+   #endif
+    return true;
 }
 
 bool StylFile::exists(const TrackInfo& track)
