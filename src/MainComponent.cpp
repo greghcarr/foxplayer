@@ -909,6 +909,22 @@ MainComponent::MainComponent()
             delete dlg;
         }
     };
+    quitLockOverlay_.onShowQuit = [this] {
+        if (auto* dlg = activeQuitDialog_.getComponent())
+        {
+            // The dialog can end up behind the main window or otherwise
+            // hidden (some title-bar interactions, alt-tab, etc.). The
+            // Show button drops it back on top — and re-centres it on
+            // the main window — instead of forcing the user to cancel
+            // and restart the quit flow.
+            const auto mainScreen = getScreenBounds();
+            dlg->setCentrePosition(mainScreen.getCentreX(),
+                                   mainScreen.getCentreY());
+            dlg->setVisible(true);
+            dlg->toFront(true);
+            applyDarkTitleBar(*dlg);
+        }
+    };
     addChildComponent(quitLockOverlay_);
 
     // Wire the Library panel in Preferences to the live folder list.
@@ -2504,9 +2520,15 @@ MainComponent::QuitLockOverlay::QuitLockOverlay()
     message_.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(message_);
 
-    cancelBtn_.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
-    cancelBtn_.setColour(juce::TextButton::textColourOffId, UIConstants::Color::textPrimary);
+    auto styleButton = [](juce::TextButton& b) {
+        b.setColour(juce::TextButton::buttonColourId,  juce::Colour(0xff2a5a8a));
+        b.setColour(juce::TextButton::textColourOffId, UIConstants::Color::textPrimary);
+    };
+    styleButton(showBtn_);
+    styleButton(cancelBtn_);
+    showBtn_.onClick   = [this] { if (onShowQuit)   onShowQuit(); };
     cancelBtn_.onClick = [this] { if (onCancelQuit) onCancelQuit(); };
+    addAndMakeVisible(showBtn_);
     addAndMakeVisible(cancelBtn_);
 }
 
@@ -2514,14 +2536,15 @@ void MainComponent::QuitLockOverlay::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colours::black.withAlpha(0.55f));
 
-    constexpr int msgH = 28;
-    constexpr int gap  = 12;
-    constexpr int btnH = 32;
-    constexpr int btnW = 180;
-    constexpr int padX = 22;
-    constexpr int padY = 16;
+    constexpr int msgH   = 28;
+    constexpr int gap    = 12;
+    constexpr int btnH   = 32;
+    constexpr int btnW   = 140;
+    constexpr int btnGap = 12;
+    constexpr int padX   = 22;
+    constexpr int padY   = 16;
 
-    const int groupW = btnW;
+    const int groupW = btnW * 2 + btnGap;
     const int groupH = msgH + gap + btnH;
     const auto panel = getLocalBounds()
                           .withSizeKeepingCentre(groupW + padX * 2,
@@ -2536,17 +2559,22 @@ void MainComponent::QuitLockOverlay::paint(juce::Graphics& g)
 
 void MainComponent::QuitLockOverlay::resized()
 {
-    constexpr int msgH = 28;
-    constexpr int gap  = 12;
-    constexpr int btnH = 32;
-    constexpr int btnW = 180;
+    constexpr int msgH   = 28;
+    constexpr int gap    = 12;
+    constexpr int btnH   = 32;
+    constexpr int btnW   = 140;
+    constexpr int btnGap = 12;
 
+    const int groupW = btnW * 2 + btnGap;
     const int groupH = msgH + gap + btnH;
-    auto area = getLocalBounds().withSizeKeepingCentre(btnW, groupH);
+    auto area = getLocalBounds().withSizeKeepingCentre(groupW, groupH);
 
     message_.setBounds(area.removeFromTop(msgH));
     area.removeFromTop(gap);
-    cancelBtn_.setBounds(area.removeFromTop(btnH));
+    auto row = area.removeFromTop(btnH);
+    showBtn_.setBounds(row.removeFromLeft(btnW));
+    row.removeFromLeft(btnGap);
+    cancelBtn_.setBounds(row.removeFromLeft(btnW));
 }
 
 void MainComponent::resized()
@@ -3024,7 +3052,28 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String& /*
     return menu;
 }
 
-void MainComponent::menuItemSelected(int /*menuItemID*/, int /*topLevelMenuIndex*/) {}
+void MainComponent::menuItemSelected(int /*menuItemID*/, int /*topLevelMenuIndex*/)
+{
+   #if ! JUCE_MAC
+    // Tell the menu bar an item was picked so its grace-window for
+    // cross-menu hover navigation is cleared (otherwise an idle hover
+    // afterwards would re-pop a menu).
+    menuBar_.onItemSelected();
+   #endif
+}
+
+void MainComponent::menuBarActivated(bool isActive)
+{
+   #if ! JUCE_MAC
+    // JUCE fires this when the menu bar's currentPopupIndex transitions
+    // between -1 and >=0 (popup just closed / just opened). The bar uses
+    // this signal to keep cross-menu hover navigation working past
+    // PopupMenu's auto-dismiss-on-mouseUp.
+    menuBar_.onModelActivationChanged(isActive);
+   #else
+    juce::ignoreUnused(isActive);
+   #endif
+}
 
 // juce::ApplicationCommandTarget
 void MainComponent::getAllCommands(juce::Array<juce::CommandID>& commands)

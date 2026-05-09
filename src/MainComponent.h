@@ -55,6 +55,9 @@ public:
     juce::PopupMenu getMenuForIndex(int topLevelMenuIndex,
                                     const juce::String& menuName) override;
     void menuItemSelected(int menuItemID, int topLevelMenuIndex) override;
+    // Tracks popup-open / popup-close transitions so StylusMenuBar can
+    // keep cross-menu hover navigation working past JUCE's auto-dismiss.
+    void menuBarActivated(bool isActive) override;
 
     juce::ApplicationCommandManager& commandManager() { return commandManager_; }
 
@@ -230,6 +233,10 @@ private:
     {
     public:
         std::function<void()> onCancelQuit;
+        // Re-shows / brings to front the quit-confirm dialog. Useful when
+        // the dialog has somehow ended up behind another window or hidden
+        // and the user wants to bring it back instead of cancelling.
+        std::function<void()> onShowQuit;
 
         QuitLockOverlay();
         void paint(juce::Graphics& g) override;
@@ -237,6 +244,7 @@ private:
 
     private:
         juce::Label      message_   { {}, "Confirm Quit dialog open." };
+        juce::TextButton showBtn_   { "Show" };
         juce::TextButton cancelBtn_ { "Cancel" };
     };
     QuitLockOverlay       quitLockOverlay_;
@@ -367,7 +375,108 @@ private:
     // the bar via JUCE keeps it dark and cohesive with the rest of the
     // app — the menu's visuals come from the app-wide StylusLnF, which
     // also styles popup context menus, so the look is consistent.
-    juce::MenuBarComponent              menuBar_ { this };
+    //
+    // The subclass plugs a UX gap in JUCE's MenuBarComponent: cross-menu
+    // hover navigation (click File, slide cursor to Window, Window's menu
+    // opens) only works while the internal popup is still open. JUCE's
+    // PopupMenu auto-dismisses on mouseUp before the user reaches the
+    // next bar item (its mouseUpCanTrigger flag starts false when the
+    // user is mid-click), so the built-in mouseMove handler ends up in
+    // the no-popup branch and quietly does nothing. We re-issue showMenu
+    // ourselves for hovers over a different item within a short grace
+    // window after each click. Mac uses setMacMainMenu so this whole
+    // class is absent there, leaving the system menu bar untouched.
+    class StylusMenuBar : public juce::MenuBarComponent
+    {
+    public:
+        using juce::MenuBarComponent::MenuBarComponent;
+
+        // Called from MainComponent::handleMenuBarActivate. JUCE fires that
+        // model callback whenever the popup opens or closes, which is the
+        // exact signal we need to know when cross-menu hover navigation is
+        // legitimately ongoing — including when JUCE's PopupMenu auto-
+        // dismisses on mouseUp before the user reaches the next bar item.
+        void onModelActivationChanged(bool nowActive)
+        {
+            if (nowActive)
+            {
+                modelIsActive_      = true;
+                lastDeactivatedMs_  = 0;
+            }
+            else
+            {
+                modelIsActive_      = false;
+                lastDeactivatedMs_  = juce::Time::getMillisecondCounter();
+            }
+        }
+
+        // Called from MainComponent::menuItemSelected. The user picked an
+        // item, so we definitely don't want hovers to keep popping menus.
+        void onItemSelected()
+        {
+            modelIsActive_     = false;
+            lastDeactivatedMs_ = 0;
+        }
+
+        void mouseMove(const juce::MouseEvent& e) override
+        {
+            juce::MenuBarComponent::mouseMove(e);
+
+            if (! shouldHandleHoverNavigation()) return;
+
+            // While a popup is open, MenuBarComponent installs a global
+            // mouse listener (so it can drive cross-menu drag), which
+            // means mouseMove fires here for events on the popup too.
+            // Translate into our local coords and ignore anything that
+            // isn't actually inside the menu bar strip.
+            const auto pos = e.getEventRelativeTo(this).getPosition();
+            if (! getLocalBounds().contains(pos)) return;
+
+            const int hovered = itemAt(pos);
+            if (hovered >= 0)
+                showMenu(hovered);   // no-op when already on this item
+        }
+
+    private:
+        // Grace window after a popup closes during which a hover over a
+        // different bar item still re-pops it. Long enough to cover the
+        // gap between JUCE's auto-dismiss-on-mouseUp and the user moving
+        // their cursor; short enough that a separate dismissal followed
+        // by an unrelated hover doesn't accidentally re-pop the menu.
+        static constexpr juce::uint32 graceWindowMs = 600;
+
+        bool         modelIsActive_     { false };
+        juce::uint32 lastDeactivatedMs_ { 0 };
+
+        bool shouldHandleHoverNavigation() const
+        {
+            if (modelIsActive_) return true;
+            if (lastDeactivatedMs_ == 0) return false;
+            const auto now = juce::Time::getMillisecondCounter();
+            return (now - lastDeactivatedMs_) < graceWindowMs;
+        }
+
+        // JUCE's MenuBarComponent::getItemAt is private, so reimplement
+        // using the LookAndFeel's per-item width — same source of truth
+        // JUCE uses internally to lay the bar out.
+        int itemAt(juce::Point<int> p)
+        {
+            if (auto* m = getModel())
+            {
+                const auto names = m->getMenuBarNames();
+                auto& lnf = getLookAndFeel();
+                int x = 0;
+                for (int i = 0; i < names.size(); ++i)
+                {
+                    const int w = lnf.getMenuBarItemWidth(*this, i, names[i]);
+                    if (p.x >= x && p.x < x + w) return i;
+                    x += w;
+                }
+            }
+            return -1;
+        }
+    };
+    StylusMenuBar                       menuBar_ { this };
    #endif
 
     struct SidebarTooltipWindow : public juce::TooltipWindow {
