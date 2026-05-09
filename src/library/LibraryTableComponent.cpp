@@ -20,6 +20,16 @@ LibraryTableComponent::LibraryTableComponent()
     searchBox_.setColour(juce::TextEditor::focusedOutlineColourId, Color::accent);
     searchBox_.setJustification(juce::Justification::centredLeft);
     searchBox_.onTextChange = [this] { applyFilter(); };
+    // Pressing Enter in the search box jumps the keyboard focus to the
+    // table on the first matching row, so the user can immediately drive
+    // arrows / Enter into the filtered results. If the filter has no
+    // matches we leave focus in the search box.
+    searchBox_.onReturnKey = [this] {
+        if (filteredTracks_.empty()) return;
+        if (table_.getSelectedRows().isEmpty())
+            table_.selectRow(0);
+        table_.grabKeyboardFocus();
+    };
     addAndMakeVisible(searchBox_);
 
     addAndMakeVisible(table_);
