@@ -738,8 +738,6 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                         menu.addItem(2, "Add to Queue");
                         if (addToPlaylistSubMenu.getNumItems() > 0)
                             menu.addSubMenu("Add to Playlist", addToPlaylistSubMenu);
-                        if (!isPodcast)
-                            menu.addItem(3, "Create Playlist");
                         const int capturedId     = item.id;
                         const juce::String label = item.label;
                         menu.showMenuAsync(
@@ -750,8 +748,6 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                                     onPlayNextFromItem(capturedId);
                                 else if (result == 2 && onAddToQueueFromItem)
                                     onAddToQueueFromItem(capturedId);
-                                else if (result == 3 && onCreatePlaylistFromItem)
-                                    onCreatePlaylistFromItem(capturedId, label);
                                 else if (result == 9999 && onCreatePlaylistFromItem)
                                     onCreatePlaylistFromItem(capturedId, label);
                                 else if (result >= 10000 && onAddToPlaylistFromItem)
