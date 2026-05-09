@@ -67,6 +67,17 @@ public:
         // takes effect immediately on the first paint.
         applyDarkTitleBar(*this);
 
+       #if JUCE_WINDOWS
+        // Windows withholds foreground rights from newly-launched
+        // processes that didn't get them via a user click — launching
+        // from PowerShell, Explorer's "Run", IDE debug, etc. all hit
+        // this. Without explicit handling, the window appears only in
+        // the taskbar and waits for the user to click the icon. Pair
+        // toFront with the standard AttachThreadInput trick so
+        // SetForegroundWindow is actually allowed through.
+        bringWindowToForegroundOnLaunch();
+       #endif
+
         // Both the Window-menu command and the Dock icon click call showWindow().
         mainComponent_->onShowWindowRequested = [this]() { showWindow(); };
 
@@ -114,6 +125,42 @@ public:
 
 private:
     std::unique_ptr<MainComponent> mainComponent_;
+
+   #if JUCE_WINDOWS
+    void bringWindowToForegroundOnLaunch()
+    {
+        auto* peer = getPeer();
+        if (peer == nullptr) return;
+        auto* hwnd = (HWND) peer->getNativeHandle();
+        if (hwnd == nullptr) return;
+
+        // The AttachThreadInput dance: temporarily pretend our thread
+        // shares the input queue of whoever currently holds focus, so
+        // Windows allows SetForegroundWindow to actually transfer
+        // foreground rights. Without it, anti-focus-stealing logic
+        // silently demotes our request to a taskbar flash.
+        const DWORD foregroundThreadId =
+            GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
+        const DWORD currentThreadId = GetCurrentThreadId();
+        const bool attached = (foregroundThreadId != 0
+                            && foregroundThreadId != currentThreadId
+                            && AttachThreadInput(foregroundThreadId,
+                                                 currentThreadId, TRUE) != 0);
+
+        ShowWindow(hwnd, SW_SHOW);
+        BringWindowToTop(hwnd);
+        SetForegroundWindow(hwnd);
+        SetActiveWindow(hwnd);
+
+        if (attached)
+            AttachThreadInput(foregroundThreadId, currentThreadId, FALSE);
+
+        // toFront also issues a Z-order bump and sets keyboard focus on
+        // the JUCE side; harmless after the Win32 calls above.
+        toFront(true);
+        grabKeyboardFocus();
+    }
+   #endif
 
     void showWindow()
     {
