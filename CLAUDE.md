@@ -1,7 +1,7 @@
 # Stylus: Architecture Reference
 
 ## Overview
-C++17/JUCE 8.0.4 audio player. Primary target macOS; Windows 11 build also supported (see "Cross-platform structure" below). Current state: library browser with multi-folder support, on-disk library cache, playback with media keys + Now Playing + system tray, resizable play queue with right-click remove and shuffle-aware ordering, sidebar with Library / Artists / Albums / Genres / Playlists / Podcasts, drag-to-reorder playlists, album art display, BPM / key analysis, Apple Music + album-art lookups (with undo + retries), per-track play count + date-added, mini-player resize mode, always-on-top, per-view selection memory.
+C++17/JUCE 8.0.4 audio player. Primary target macOS; Windows 11 build also supported (see "Cross-platform structure" below). Current state: library browser with multi-folder support, on-disk library cache, playback with media keys + Now Playing + system tray, resizable play queue with right-click remove and shuffle-aware ordering, sidebar with Library / Artists / Albums / Genres / Playlists / Podcasts, drag-to-reorder playlists, album art display, BPM / key / LUFS analysis, Apple Music + album-art lookups (with undo + retries), per-track play count + date-added, mini-player resize mode, always-on-top, per-view selection memory, BS.1770 volume normalisation with lazy LUFS measurement and 2 s smoothstep gain ramps, full keyboard navigation across the three panes with type-ahead search.
 Long-term: DJ mode, beatgrid detection, Rekordbox/Serato metadata export.
 
 ## Build
@@ -43,7 +43,8 @@ src/
   analysis/
     BpmDetector.h/.cpp         : BPM detection
     KeyDetector.h/.cpp         : Musical key detection
-    AnalysisEngine.h/.cpp      : Queue-based analysis; fires onTrackAnalysed callback
+    LufsDetector.h/.cpp        : BS.1770 K-weighted integrated LUFS measurement
+    AnalysisEngine.h/.cpp      : Queue-based analysis (Full or LufsOnly mode); fires onTrackAnalysed
     AppleMusicLookup.h/.cpp    : Background iTunes Search API queries; retry + suspend logic
   library/
     LibraryScanner.h/.cpp      : Background thread: recursive scan + metadata extraction
@@ -60,7 +61,7 @@ src/
     AutoHideViewport.h         : Viewport that fades its vertical scrollbar after idle
     LoadingIndicator.h         : Centred spinner overlay shown during a fresh library scan
     Splash.h                   : Transparent borderless splash, shows the embedded app icon
-    PreferencesWindow.h/.cpp   : Tabbed Preferences window (Audio, Library, Misc, Debug); Cmd-,
+    PreferencesWindow.h/.cpp   : Tabbed Preferences window (Audio, Library, Display, Misc); Cmd-,
     MacWindowHelper.h/.mm      : macOS: native NSWindow activation; Dock-reopen swizzle + appDidBecomeActive
     MacWindowHelper_Win.cpp    : Windows: no-op stubs (toFront() in MainWindow handles activation)
     NowPlayingBridge.h/.mm     : macOS: MPNowPlayingInfoCenter + MPRemoteCommandCenter (media keys, lock screen)
@@ -236,9 +237,10 @@ JUCE interprets `const char*` as Latin-1. Always wrap UTF-8 emoji/non-ASCII with
 `SplashWindow` is a transparent borderless `juce::DocumentWindow` shown immediately in `JUCEApplication::initialise()`, then dismissed via `juce::Timer::callAfterDelay`. Content is just the embedded `BinaryData::appicon_png` drawn centred via `drawImageWithin(... onlyReduceInSize)`: no background rectangle since the icon already carries its own squircle + shadow. `MainWindow` creation is deferred ~60 ms so the splash gets a paint cycle before `MainComponent`'s heavy constructor blocks the message thread.
 
 ### Preferences window
-`PreferencesWindow` is owned by `MainComponent`, created hidden, and shown via **Cmd-,** (File menu → "Preferences..."). Sidebar on the left lists categories (Audio, Library, Misc, Debug); right-hand panel hosts the current category. `AudioPreferencesPanel` wraps an output-device `ComboBox` plus a buffer-size `ComboBox`:
+`PreferencesWindow` is owned by `MainComponent`, created hidden, and shown via **Cmd-,** (File menu → "Preferences..."). Sidebar on the left lists categories (Audio, Library, Display, Misc); right-hand panel hosts the current category. `AudioPreferencesPanel` wraps an output-device `ComboBox`, a buffer-size `ComboBox`, and a "Normalize playback volume" toggle:
 - The top row of the device combo is "System default (currentDefaultDeviceName)". Picking it sets `usingDefault_ = true` and calls `setAudioDeviceSetup` with the *resolved* default-device name - passing an empty `outputDeviceName` tells JUCE to close the device entirely, so audio goes silent.
 - A 2-second `juce::Timer` polls `type->getDefaultDeviceIndex(false)` because JUCE's `ChangeListener` doesn't always broadcast OS-default flips on macOS. When the default changes, we rebuild the combo (so the label refreshes) and, if `usingDefault_`, re-apply the new default to follow the OS.
+- The normalize toggle persists at `audio.normalizeVolume` and has a mirror button on the transport bar; both stay in sync via `setNormalizeVolumeChecked` and the `onNormalizeVolumeChanged` callback. See "Volume normalisation" below.
 
 `LibraryPreferencesPanel` shows two stacked sections (Music, Podcasts) each with Add / Remove / Rescan Folders buttons. Rescan triggers `setMusicFolders(musicFolders_, /*keepLibrary*/ true)`, which keeps the cached library visible while a fresh scan runs. Both Rescan buttons trigger the same scan (the scanner processes music + podcast roots in a single pass).
 
@@ -268,8 +270,52 @@ Inside `TransportBar::resized()`:
 ### Queue button visibility
 The queue toggle button is `addChildComponent`-ed (hidden) at startup. `queue_.onQueueChanged` shows/hides it based on `queue_.size() > 0` and force-collapses the queue panel (and its divider) when the queue empties out.
 
-### Pin (always-on-top) button
-A second `TransportButton` lives at the right edge of the transport bar, mirroring the album-art / play-cluster on the left. Its `Icon::Pin` is treated as a `toggleStyle` mod button: no surrounding circle, dark grey when off, red when on. Toggle persists in `sessionAlwaysOnTop` and applies via `juce::DocumentWindow::setAlwaysOnTop`. Shift-Cmd-P toggles it from anywhere.
+### Right-edge mod buttons (pin + normalize)
+Two `TransportButton` instances sit on the right edge of the transport bar, mirroring the album-art / play-cluster on the left. Both are `toggleStyle` mods (no surrounding circle), and both share the speaker icon's `Color::textDim` resting tone so the three rightmost controls read as one family at rest:
+- **Pin (`Icon::Pin`)**: top third. Off = textDim grey, On = red. Toggle persists in `sessionAlwaysOnTop` and applies via `juce::DocumentWindow::setAlwaysOnTop`. Shift-Cmd-P toggles it from anywhere.
+- **Normalize (`Icon::Normalize`)**: bottom third, slightly larger (21 px vs the pin's 17 px) so the slider+check composition reads. Base is the `sliders-fill` icon, dim (`#404040`) when off, brightening to textDim when on; a `check-fat-fill` overlay drawn at 0.78 opacity in green (`#3ec25e`) marks the active state, leaving the underlying sliders visible behind/around it. Toggle persists at `audio.normalizeVolume`. Tooltip says "Normalize playback volume". See "Volume normalisation" for the engine side.
+
+Speaker icon (paint-drawn by `TransportBar`, between the two mod buttons) carries a position-aware tooltip ("Mute" / "Unmute") via `TransportBar`'s `TooltipClient` override; the pin and normalize buttons get their tooltips through `SettableTooltipClient` on `TransportButton`.
+
+### Volume normalisation (BS.1770 LUFS)
+When enabled in Audio preferences (or via the transport-bar mirror button), `AudioEngine` applies a per-track gain offset on top of the user volume so all tracks play at a similar level. Target is **-14 LUFS** (the Apple Music / Spotify / YouTube Music streaming standard); offset is `pow(10, (target − track.lufs) / 20)`, clamped to ±6 dB so a wildly miscalibrated reading can't push toward clipping or near-silence. `LufsDetector` implements the BS.1770 K-weighting (high-shelf pre-filter + RLB high-pass) using hardcoded 48 kHz coefficients applied at all sample rates - within ~1 LU of strict BS.1770 for typical music, fine for matching levels. Full-file integrated mean square; per-channel sums combined per spec (`sumSquares / totalSamples`, NOT `/ (totalSamples * numChannels)`).
+
+Key state machine in `AudioEngine` for the loaded track:
+- `currentTrack_.lufs != 0`: a measured value is available, gain uses it.
+- `currentTrack_.lufs == 0 && ! lufsKnown_`: lazy analysis is genuinely pending; gain pre-rolls at -3 dB so an unanalysed track right after a normalised one doesn't burst in at full level then drop mid-track.
+- `currentTrack_.lufs == 0 && lufsKnown_`: analysis ran but produced no value (file unreadable / decode failure); gain falls back to unity instead of holding the cut.
+
+`AnalysisEngine::enqueueLufsOnly` runs the loudness pass without BPM / key (no log entries either, so casual playback doesn't spam the developer-facing log). Triggered from `engine_.onTrackStarted` whenever normalisation is on, the track's `lufs == 0`, and the file exists. Result writes through the existing `analyseOne` save path (which re-loads the .styl first to avoid clobbering user edits). `MainComponent::analysisEngine_.onTrackAnalysed` routes a non-zero result to `engine_.updateCurrentTrackLufs`, a zero result to `engine_.markLufsAnalysisFailed`.
+
+Gain transitions for normalisation (toggle on/off, LUFS landing, analysis-failed) ramp over **2 s** in dB-space with a smoothstep ease, driven by `AudioEngine::RampTimer` (60 Hz). Volume slider, mute toggle, and `loadTrack` use the immediate path (`applyCombinedGain(false)`) so they stay responsive and so cross-track changes don't fade in awkwardly. Direct-form-II transposed biquads in `LufsDetector`; coefficients constexpr.
+
+### Keyboard navigation
+Three focusable panes with consistent navigation. The "active" sidebar row dictates the library view (indicator bar + white text); the "focused" row additionally draws the gray overlay. Visual mutex: only one of {sidebar focused, library has selection, queue has selection} renders a highlight at any time. Each pane saves its cursor position when focus leaves and restores it on return.
+
+Within-pane keys (after the pane has focus):
+- **Sidebar**: Up/Down/PgUp/PgDn/Home/End (skipping headers / collapsed-section items / pseudo-rows like "+ New Playlist"); type-ahead (printable letter -> jump to first label-prefix match in the *current section*, multi-letter refinement within `kTypeAheadTimeoutMs = 1000`); Alt+Up/Alt+Down section nav (collapses current, expands target, lands on first row, no wrap-around); Cmd+Up/Cmd+Down to first/last row of the current section.
+- **Library** (native TableListBox + KeyListener overrides): arrows / PgUp / Home / End for selection; Cmd+Up/Cmd+Down to first/last row; Up from row 0 pops focus into the search box (and `deselectAll`s for visual mutex); search-box Down pulls focus to the table on the first matching row.
+- **Queue** (native ListBox + KeyListener overrides): same arrow / Cmd+Up/Down model.
+
+Cross-pane keys:
+- **Right** or **Tab** or **Enter** from sidebar → library.
+- **Left** or **Shift-Tab** from library → sidebar; **Right** or **Tab** from library → queue (silent no-op if queue is empty; opens the queue panel automatically if hidden).
+- **Left** or **Shift-Tab** from queue → library (queue stays open); **Tab** continues forward to sidebar; **Shift-Tab** from sidebar reverse-cycles into queue.
+
+`MainComponent`'s `focusSidebar` / `focusLibrary` / `focusQueueIfPossible` lambdas centralise the focus transitions and explicitly call `deselectAll` / `clearFocus` on the panes being left, because cross-pane focus arriving via `setSelectedFiles` / `selectRow(samerow)` doesn't always trip the `onSelectionChanged`-based mutex.
+
+Each pane keeps a "saved selection on leave" snapshot independent of its visible selection: `savedSelectionForRefocus_` (file paths) on `LibraryTableComponent`, `savedSelectedRowForRefocus_` (row index) on `QueueView`. Sidebar's `focusedId_ = -1` on focusLost + `focusedId_ = selectedId_` on focusGained achieves the same thing without a separate slot.
+
+`KeyPress::operator==(int)` is **modifier-sensitive** in JUCE: it returns false if any modifier is held. So bare-arrow handlers use `key == juce::KeyPress::upKey`, but Alt-, Cmd-, or Shift-modified arrows compare via `key.getKeyCode() == juce::KeyPress::upKey` instead. Mixing the two forms is a frequent foot-gun.
+
+### Q-key gate during sidebar type-ahead
+The Q hotkey toggles the queue panel via `cmdToggleQueue` (no modifier). `ApplicationCommandManager` runs commands before `Component::keyPressed`, so a bare Q would normally never reach the sidebar's type-ahead - meaning a user trying to type-ahead to a Q-prefixed row would just toggle the queue. `cmdToggleQueue::getCommandInfo` calls `info.setActive(! sidebar_.isTypeAheadActive())`; `setActive` is queried fresh on each keypress, so the gate flips back to active as soon as the type-ahead's 1 s timeout passes (or focus moves elsewhere).
+
+### Tooltip routing
+A plain `juce::TooltipWindow` is attached to `MainComponent`. Earlier the window subclass restricted lookups to `SidebarComponent`, which silently swallowed tooltips on the transport bar mods - if you're adding a tooltip somewhere new, no scoping work is needed. `TransportButton` inherits `juce::SettableTooltipClient` so `setTooltip("…")` works on the right-edge mods directly. `TransportBar` itself implements `juce::TooltipClient` for the speaker icon, since it's paint-drawn rather than a child component; `getTooltip()` reads the live mouse position and returns "Mute" / "Unmute" based on `muted_` and the slider value.
+
+### Hover-forwarder pattern (avoid double-fire)
+`TransportBar` forwards `mouseMove` / `mouseExit` from its children up to `refreshHoverState` so hover indicators don't go stale when the cursor is over a child. The wiring lives on a tiny `HoverForwarder : juce::MouseListener` class, NOT on `TransportBar` itself: registering `this` as a listener with `addMouseListener(this, true)` causes JUCE to call your `mouseDown` / `mouseUp` twice for direct events (once via virtual dispatch, once via the listener mechanism), which silently breaks any toggle-style click handler. The mute button regression that resulted from this was the giveaway. Reach for the same pattern (separate listener forwarder) any time you need child-event forwarding without polluting the receiving component's own click semantics.
 
 ## Adding a New Feature Checklist
 1. If it needs a tunable value, add it to `Constants.h` first.

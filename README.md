@@ -124,7 +124,7 @@ Or double-click `Stylus.exe` in Explorer at `build\Stylus_artefacts\Debug\`.
 
 ### Analysis
 
-- On-demand BPM and musical key detection via right-click
+- On-demand BPM, musical key, and LUFS loudness detection via right-click
 - Analysis log window with queued / running / completed state per track
 - Background analysis only writes BPM / key / LUFS to disk (it re-loads the styl first), so concurrent user edits are never clobbered
 
@@ -133,6 +133,7 @@ Or double-click `Stylus.exe` in Explorer at `build\Stylus_artefacts\Debug\`.
 - Output device selection in Preferences (follows system default automatically)
 - Buffer size selection
 - Persistent volume and mute across launches
+- **Volume normalization** (BS.1770 K-weighted LUFS, -14 LUFS target with ±6 dB cap): when enabled, each track's playback gain is offset based on its measured loudness so quiet tracks come up and loud tracks come down. Tracks that haven't been analyzed yet trigger a quick lazy LUFS measurement on first play (the result is cached in the .styl sidecar). Gain transitions ramp over 2 seconds in dB-space so toggling the feature mid-track doesn't lurch. Toggle in Preferences → Audio, or via the small slider+check button on the right side of the transport bar (below the speaker icon).
 
 ### Podcast Support
 
@@ -145,40 +146,84 @@ Or double-click `Stylus.exe` in Explorer at `build\Stylus_artefacts\Debug\`.
 
 Right-clicking one or more tracks in the library shows:
 
+- **Play Next**: insert immediately after the currently playing track
+- **Add to Queue**: append to the current play queue
+- **Add to Playlist** ▸ existing playlists, or **+ Create New Playlist** (intelligent name from selection: same album wins, otherwise same artist, otherwise "New Playlist")
 - **Edit Info**: open the metadata editor (also Cmd/Ctrl-R)
+- **Clear Info**: revert to embedded tag values
 - **Look up on Apple Music**: auto-fill metadata, with undo
 - **Look up Album Art**: fetch and embed cover art, with undo
 - **Look up on Podcast Index**: fetch podcast episode metadata (podcasts only)
-- **Add to Queue**: append to the current play queue
-- **Add to Playlist**: append to an existing playlist or create a new one
-- **Go to Artist / Album / Genre / Podcast**: jump to the track's sidebar view
-- **Analyze**: queue BPM and key detection
-- **Hide / Show**: toggle track visibility in the library
-- **Remove from Playlist**: remove selected tracks (playlist view only)
+- **Analyze for Key and BPM**: queue background analysis (also fills LUFS for normalization)
+- **Go to Artist / Album / Podcast**: jump to the track's sidebar view
+- **Hide from Library / Unhide from Library**: toggle visibility
+- **Show in Finder** (single selection)
+- **Remove from Queue / Remove from Playlist**: contextual on the queue panel and playlist views
+
+Right-clicking sidebar items (artists, albums, playlists, genres, per-show podcasts) offers Play Next, Add to Queue, and Add to Playlist (with the same "+ Create New Playlist" option that uses the row's label as the suggested name). Playlist rows additionally offer Rename, Duplicate, and Delete.
+
+**Double-click** any sidebar row (playlist, artist, album, genre, podcast) to inline-rename it. Renaming an artist / album / genre / podcast updates every track in that group on disk; album rows expect "Artist - Album" and silently revert if the separator's missing.
 
 ## Keyboard Shortcuts
 
 The modifier is **Cmd** on macOS and **Ctrl** on Windows; JUCE auto-translates.
 
+### Global
+
 | Shortcut | Action |
 |---|---|
 | Space | Play / Pause |
+| Q | Show / hide queue panel |
 | Cmd/Ctrl-, | Open Preferences |
 | Cmd/Ctrl-F | Focus search box |
 | Cmd/Ctrl-R | Edit Info for the current selection |
 | Shift-Cmd/Ctrl-L | Toggle Analysis Log window |
 | Shift-Cmd/Ctrl-P | Toggle Always on Top |
-| Enter | Play selected track |
-| Delete | Hide selected track(s) from library |
+| Enter | Play selected track (when in library) |
+| Delete | Hide selected track(s) from library / remove from playlist or queue |
+
+### Navigation between panes
+
+The sidebar, library, and queue act as three focusable panes; the visual highlight always lives on the currently focused one. Each pane remembers its cursor position when you leave and restores it on return.
+
+| Shortcut | Action |
+|---|---|
+| Right / Tab | Move focus from sidebar → library |
+| Left / Shift-Tab | Move focus from library → sidebar |
+| Right / Tab | Move focus from library → queue (silent no-op if empty; opens panel if hidden) |
+| Left / Shift-Tab | Move focus from queue → library (queue stays open) |
+| Tab | From queue → sidebar |
+| Shift-Tab | From sidebar → queue |
+| Up | From row 0 of library → search box |
+| Down | From search box → first matching library row |
+
+### Within the sidebar
+
+| Shortcut | Action |
+|---|---|
+| Up / Down | Move cursor between rows |
+| PgUp / PgDn | Jump 8 rows |
+| Home / End | First / last row across the whole sidebar |
+| Cmd/Ctrl-Up / Cmd/Ctrl-Down | First / last row of the *current section* |
+| Alt/Option-Up / Alt/Option-Down | Jump to first row of the previous / next section (collapses current, expands target) |
+| Enter | Hand focus to the library |
+| (any letter) | Type-ahead: jump to first row in current section starting with the typed prefix; multi-letter refinement within 1 s |
+
+### Within the library or queue
+
+| Shortcut | Action |
+|---|---|
+| Up / Down / PgUp / PgDn / Home / End | Native list navigation |
+| Cmd/Ctrl-Up / Cmd/Ctrl-Down | Jump to first / last row |
 
 ## Preferences
 
 Open with **Cmd/Ctrl-,** or via the **File** menu (the **Stylus** application menu on macOS).
 
-- **Audio**: output device (defaults to system default), buffer size
+- **Audio**: output device (defaults to system default), buffer size, "Normalize playback volume" toggle
 - **Library**: add, remove, or rescan music and podcast folders independently
+- **Display**: toggle between spinning vinyl artwork and a static square
 - **Misc**: Ask before quitting toggle
-- **Debug**: developer toggles (e.g. nuke `.styl` sidecars)
 
 ## Window Behaviour
 
