@@ -25,6 +25,10 @@ LibraryTableComponent::LibraryTableComponent()
     addAndMakeVisible(table_);
     table_.setModel(this);
     table_.addMouseListener(this, true);
+    // Cross-pane keyboard nav: see keyPressed(KeyListener) below. The
+    // listener fires before the table's built-in arrow / Tab handling, so
+    // returning true from those branches consumes the key.
+    table_.addKeyListener(this);
     // Transparent so LibraryTableComponent::paint() can draw the full-height stripes.
     table_.setColour(juce::ListBox::backgroundColourId,      juce::Colours::transparentBlack);
     table_.setColour(juce::TableListBox::backgroundColourId, juce::Colours::transparentBlack);
@@ -738,6 +742,41 @@ void LibraryTableComponent::setSelectedFiles(const std::vector<juce::File>& file
 void LibraryTableComponent::deselectAll()
 {
     table_.setSelectedRows({}, juce::dontSendNotification);
+}
+
+void LibraryTableComponent::focusTable()
+{
+    // If nothing's selected yet, anchor on row 0 so arrow keys have a
+    // visible starting point. JUCE's TableListBox draws no highlight on a
+    // focus-without-selection state, which would look like the focus jump
+    // did nothing.
+    if (table_.getSelectedRows().isEmpty() && table_.getNumRows() > 0)
+        table_.selectRow(0);
+    table_.grabKeyboardFocus();
+}
+
+bool LibraryTableComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
+{
+    // Don't steal keys while a cell editor is active.
+    if (activeCellEditor_) return false;
+
+    // Left or Shift-Tab: move focus back to the sidebar.
+    if (key == juce::KeyPress::leftKey
+        || (key.getKeyCode() == juce::KeyPress::tabKey && key.getModifiers().isShiftDown()))
+    {
+        if (onMoveFocusToSidebar) onMoveFocusToSidebar();
+        return true;
+    }
+
+    // Right or Tab: move focus to the queue (caller decides whether to
+    // honor it; a no-op when the queue is empty).
+    if (key == juce::KeyPress::rightKey
+        || (key.getKeyCode() == juce::KeyPress::tabKey && ! key.getModifiers().isShiftDown()))
+    {
+        if (onMoveFocusToQueue) onMoveFocusToQueue();
+        return true;
+    }
+    return false;
 }
 
 void LibraryTableComponent::triggerEditInfoForSelection()

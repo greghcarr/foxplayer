@@ -30,6 +30,16 @@ public:
     std::function<void(int sidebarId, juce::String newName)> onRenamePlaylist;
     std::function<void(int sidebarId)>                       onDeletePlaylist;
     std::function<void(int sidebarId)>                       onDuplicatePlaylist;
+
+    // Inline-rename callbacks for the rest of the sidebar's renamable
+    // categories. Each fires from a double-click + commit on the matching
+    // row when the user's input passes the per-category validation in
+    // commitRename(). Receivers are expected to update every track in the
+    // group and refresh the affected sidebar sections.
+    std::function<void(int sidebarId, juce::String newArtist)> onRenameArtist;
+    std::function<void(int sidebarId, juce::String newArtist, juce::String newAlbum)> onRenameAlbum;
+    std::function<void(int sidebarId, juce::String newGenre)>   onRenameGenre;
+    std::function<void(int sidebarId, juce::String newPodcast)> onRenamePodcast;
     // Fired when the user picks "Create Playlist" from an artist/album/genre item.
     // suggestedName is pre-filled from the item label.
     std::function<void(int sidebarId, juce::String suggestedName)> onCreatePlaylistFromItem;
@@ -37,6 +47,22 @@ public:
     // Fired when the user picks "Play Next" or "Add to Queue" from a sidebar item.
     std::function<void(int sidebarId)> onPlayNextFromItem;
     std::function<void(int sidebarId)> onAddToQueueFromItem;
+
+    // Fired when the user presses Right arrow / Tab on a sidebar row,
+    // indicating they want to move keyboard focus into the library view
+    // (or whichever pane the wiring decides). MainComponent grabs focus
+    // on the library table so arrow keys then walk the rows there.
+    std::function<void()> onMoveFocusToLibrary;
+
+    // Fired on Shift-Tab from the sidebar - reverse-cycle entry point that
+    // lands in the queue (when it has rows; the wiring no-ops otherwise).
+    std::function<void()> onMoveFocusToQueue;
+
+    // Fired whenever the sidebar gains JUCE keyboard focus. MainComponent
+    // wires it up to clear library / queue selections so the visual mutex
+    // ("only one pane is the focused pane") holds whether you got here via
+    // mouse, arrow nav, or Tab.
+    std::function<void()> onFocusGained;
 
     // Returns the user's playlists in display order, as (storeId, name)
     // pairs. Used to populate the "Add to Playlist" right-click submenu on
@@ -56,6 +82,17 @@ public:
     int  selectedId() const { return selectedId_; }
     void setSelectedId(int id);
 
+    // Focus is the "this row is the user's currently active selection"
+    // state, separate from selectedId_'s "this row dictates the library
+    // view" state. The active row always renders the indicator bar +
+    // white text; the focused row additionally draws the gray overlay.
+    // The two are mutually exclusive with library / queue selection: if
+    // the user is acting on the library or queue, the sidebar drops its
+    // focus so the visible "selection" only ever lives in one of the
+    // three panes. Future keyboard nav keys off this state.
+    int  focusedId() const { return focusedId_; }
+    void clearFocus();
+
     // Toggles a small spinning indicator next to the LIBRARY heading while
     // the music-folder scanner is running.
     void setLibraryLoading(bool loading);
@@ -71,6 +108,20 @@ public:
     // selected item, or an empty rectangle if no selected item is visible
     // (e.g. it's inside a collapsed section or it has no match).
     juce::Rectangle<int> boundsForSelectedItem() const;
+
+    // Total occlusion height at the viewport top for a row at content-y
+    // `rowTop`. LIBRARY-section rows return 0 (they're never occluded -
+    // they ARE the sticky overlay). Non-LIBRARY rows return the LIBRARY
+    // section height plus the active-section header height, which
+    // matches the actual sticky overlay you see when scrolled mid-section.
+    // Callers use this to nudge a focused row out from behind the
+    // sticky overlay rather than parking it underneath.
+    int  topStickyHeightFor(int rowTop) const;
+
+    // Just the LIBRARY-section height. Used to identify whether a given
+    // row is in the LIBRARY sticky zone (for early-out: those rows are
+    // always visible via the overlay so no scroll is needed).
+    int  libraryStickyHeight() const;
 
     // Replaces the items shown under the Playlists section.
     // Each pair is { sidebarId, displayName }.
@@ -100,6 +151,9 @@ public:
     void mouseMove(const juce::MouseEvent& e) override;
     void mouseExit(const juce::MouseEvent& e) override;
     void mouseDoubleClick(const juce::MouseEvent& e) override;
+    bool keyPressed(const juce::KeyPress& key) override;
+    void focusGained(FocusChangeType) override;
+    void focusLost(FocusChangeType) override;
 
     // juce::DragAndDropTarget
     bool isInterestedInDragSource(const SourceDetails& details) override;
@@ -154,6 +208,10 @@ private:
 
     std::vector<Section> sections_;
     int                  selectedId_     { 1 };
+    // Focused row id - the one that draws the gray overlay. Defaults to
+    // the same value as selectedId_ so the sidebar starts up with focus
+    // on the initial Library row.
+    int                  focusedId_      { 1 };
     int                  dragOverItemId_ { -1 };
     int                  editingItemId_  { -1 };
 

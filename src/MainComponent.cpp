@@ -596,10 +596,11 @@ MainComponent::MainComponent()
         for (auto it = savedSelectionByView_.begin(); it != savedSelectionByView_.end();)
             it = (it->first == activeSidebarId_) ? std::next(it)
                                                  : savedSelectionByView_.erase(it);
-        // Library and queue selection are mutually exclusive: selecting in
-        // one clears the other so the user only ever sees a highlight in the
-        // pane that the delete key would act on.
+        // Library, queue, and sidebar focus are mutually exclusive: selecting
+        // in one clears the others so the user only ever sees a highlight in
+        // the pane that the delete key (and future keyboard nav) would act on.
         queueView_.deselectAll();
+        sidebar_.clearFocus();
     };
 
     libraryTable_.onLibraryChanged = [this] {
@@ -1134,8 +1135,11 @@ MainComponent::MainComponent()
 
     queueView_.onSelectionChanged = [this] {
         // Mirror image of libraryTable_.onSelectionChanged: clear the library
-        // selection when the user picks a queue row.
+        // selection and sidebar focus when the user picks a queue row, so
+        // the delete key (and future keyboard nav) acts unambiguously on
+        // the queue.
         libraryTable_.deselectAll();
+        sidebar_.clearFocus();
     };
 
     queueView_.onTracksDropped = [this](juce::StringArray paths, int insertIndex) {
@@ -1160,7 +1164,49 @@ MainComponent::MainComponent()
     };
 
     // Sidebar callbacks
-    sidebar_.onItemSelected = [this](int id) { showSidebarItem(id); };
+    sidebar_.onItemSelected = [this](int id) {
+        showSidebarItem(id);
+        // Keyboard nav can move the focus to a row that's scrolled
+        // off-screen; mouse clicks already land on visible rows so this
+        // is a no-op there. Async to defer past any layout that
+        // showSidebarItem may have triggered.
+        juce::MessageManager::callAsync([this] { scrollSelectedSidebarItemIntoView(); });
+    };
+
+    // Cross-pane keyboard nav. The sidebar / library / queue route arrow
+    // and Tab keys through these callbacks; MainComponent decides which
+    // pane actually receives focus and whether to show the queue first.
+    auto focusSidebar = [this] {
+        // grabKeyboardFocus() lands JUCE focus on SidebarComponent;
+        // focusGained() then re-asserts the gray-overlay focus indicator.
+        sidebar_.grabKeyboardFocus();
+    };
+    auto focusLibrary = [this] {
+        libraryTable_.focusTable();
+    };
+    auto focusQueueIfPossible = [this] {
+        // No queue rows = nothing to focus. Match the user spec for the
+        // Right / Tab path from the library: silent no-op when empty.
+        if (queue_.size() == 0) return;
+        if (! queueVisible_) toggleQueue();
+        queueView_.focusList();
+    };
+
+    sidebar_.onMoveFocusToLibrary = focusLibrary;
+    sidebar_.onMoveFocusToQueue   = focusQueueIfPossible;
+    libraryTable_.onMoveFocusToSidebar = focusSidebar;
+    libraryTable_.onMoveFocusToQueue   = focusQueueIfPossible;
+    queueView_.onMoveFocusToLibrary    = focusLibrary;
+    queueView_.onMoveFocusToSidebar    = focusSidebar;
+
+    // Sidebar focusGained fires whenever JUCE focus lands on the sidebar
+    // (click, Left arrow back from library, Tab cycle). Mirror the existing
+    // library / queue onSelectionChanged handlers: clear the other panes'
+    // selections so only the focused pane shows a highlight.
+    sidebar_.onFocusGained = [this] {
+        libraryTable_.deselectAll();
+        queueView_.deselectAll();
+    };
     sidebar_.onCreatePlaylistRequested = [this] {
         playlistStore_->createPlaylist("New Playlist");
     };
@@ -1175,6 +1221,215 @@ MainComponent::MainComponent()
     sidebar_.onRenamePlaylist = [this](int sidebarId, juce::String newName) {
         playlistStore_->renamePlaylist(sidebarId - 1000, newName);
     };
+
+    // Bulk-rename helper: walk fullLibrary_, mutate every track that
+    // matches the predicate, persist each one's .styl, push the change to
+    // the library table, then refresh every sidebar section that derives
+    // from the changed metadata. One refresh after the loop instead of N.
+    auto bulkRenameTracks = [this](auto matchFn, auto mutateFn) {
+        bool anyChanged = false;
+        for (auto& t : fullLibrary_)
+        {
+            if (!matchFn(t)) continue;
+            mutateFn(t);
+            StylFile::save(t);
+            libraryTable_.updateTrack(t);
+            anyChanged = true;
+        }
+        if (!anyChanged) return false;
+        refreshSidebarArtists();
+        refreshSidebarAlbums();
+        refreshSidebarGenres();
+        refreshSidebarPodcasts();
+        return true;
+    };
+
+    // Find a sidebar id by scanning a (id -> name) map for a matching name;
+    // returns -1 if not found. Used to remap activeSidebarId_ after a rename
+    // shifts entries in the sorted sidebar list.
+    auto findIdByName = [](const auto& map, const juce::String& name) -> int {
+        for (const auto& [id, n] : map) if (n == name) return id;
+        return -1;
+    };
+
+    sidebar_.onRenameArtist = [this, bulkRenameTracks, findIdByName]
+        (int sidebarId, juce::String newName) {
+            auto it = artistIdToName_.find(sidebarId);
+            if (it == artistIdToName_.end()) return;
+            const juce::String oldName = it->second;
+            if (newName == oldName) return;
+
+            const bool changed = bulkRenameTracks(
+                [&](const TrackInfo& t) { return ! t.isPodcast && t.artist == oldName; },
+                [&](TrackInfo& t)       { t.artist = newName; });
+            if (! changed) return;
+
+            // Stay on the renamed artist's row (its id may have shifted
+            // because the alphabetic position changed; or the rename may
+            // have merged into an existing artist with the same new name).
+            if (activeSidebarId_ == sidebarId
+                || (activeSidebarId_ >= 2000 && activeSidebarId_ < 3000))
+            {
+                const int newId = findIdByName(artistIdToName_, newName);
+                if (newId > 0)
+                {
+                    activeSidebarId_ = newId;
+                    sidebar_.setSelectedId(newId);
+                }
+            }
+            refreshCurrentView();
+
+            // Queue source name fixup: if the now-playing source was this
+            // artist, point it at the renamed entry so "Playing from:" stays
+            // accurate. Same idea for the queue's stored source.
+            if (queue_.hasCurrent())
+            {
+                auto qsrc = queue_.currentSource();
+                if (qsrc.sidebarId >= 2000 && qsrc.sidebarId < 3000 && qsrc.name == oldName)
+                {
+                    const int newId = findIdByName(artistIdToName_, newName);
+                    if (newId > 0)
+                    {
+                        transportBar_.setPlayingFrom(newName, newId);
+                    }
+                }
+            }
+        };
+
+    sidebar_.onRenameAlbum = [this, bulkRenameTracks]
+        (int sidebarId, juce::String newArtist, juce::String newAlbum) {
+            auto it = albumIdToInfo_.find(sidebarId);
+            if (it == albumIdToInfo_.end()) return;
+            const juce::String oldArtist = it->second.artist;
+            const juce::String oldAlbum  = it->second.album;
+            if (newArtist == oldArtist && newAlbum == oldAlbum) return;
+
+            const bool changed = bulkRenameTracks(
+                [&](const TrackInfo& t) {
+                    return ! t.isPodcast && t.artist == oldArtist && t.album == oldAlbum;
+                },
+                [&](TrackInfo& t) {
+                    t.artist = newArtist;
+                    t.album  = newAlbum;
+                });
+            if (! changed) return;
+
+            if (activeSidebarId_ == sidebarId
+                || (activeSidebarId_ >= 3000 && activeSidebarId_ < 4000))
+            {
+                int newId = -1;
+                for (const auto& [id, info] : albumIdToInfo_)
+                    if (info.artist == newArtist && info.album == newAlbum) { newId = id; break; }
+                if (newId > 0)
+                {
+                    activeSidebarId_ = newId;
+                    sidebar_.setSelectedId(newId);
+                }
+            }
+            refreshCurrentView();
+
+            // Queue source: if the now-playing source was this album, point
+            // it at the renamed entry. The label format "Artist - Album"
+            // matches what the sidebar uses.
+            if (queue_.hasCurrent())
+            {
+                auto qsrc = queue_.currentSource();
+                if (qsrc.sidebarId >= 3000 && qsrc.sidebarId < 4000)
+                {
+                    const juce::String oldLabel =
+                        (oldArtist.isNotEmpty() ? oldArtist : juce::String("Unknown Artist"))
+                        + " - " + oldAlbum;
+                    if (qsrc.name == oldLabel)
+                    {
+                        for (const auto& [id, info] : albumIdToInfo_)
+                            if (info.artist == newArtist && info.album == newAlbum)
+                            {
+                                const juce::String newLabel =
+                                    (newArtist.isNotEmpty() ? newArtist : juce::String("Unknown Artist"))
+                                    + " - " + newAlbum;
+                                transportBar_.setPlayingFrom(newLabel, id);
+                                break;
+                            }
+                    }
+                }
+            }
+        };
+
+    sidebar_.onRenameGenre = [this, bulkRenameTracks, findIdByName]
+        (int sidebarId, juce::String newName) {
+            auto it = genreIdToName_.find(sidebarId);
+            if (it == genreIdToName_.end()) return;
+            const juce::String oldName = it->second;
+            if (newName == oldName) return;
+
+            const bool changed = bulkRenameTracks(
+                [&](const TrackInfo& t) { return ! t.isPodcast && t.genre == oldName; },
+                [&](TrackInfo& t)       { t.genre = newName; });
+            if (! changed) return;
+
+            if (activeSidebarId_ == sidebarId
+                || (activeSidebarId_ >= 5000 && activeSidebarId_ < 6000))
+            {
+                const int newId = findIdByName(genreIdToName_, newName);
+                if (newId > 0)
+                {
+                    activeSidebarId_ = newId;
+                    sidebar_.setSelectedId(newId);
+                }
+            }
+            refreshCurrentView();
+
+            if (queue_.hasCurrent())
+            {
+                auto qsrc = queue_.currentSource();
+                if (qsrc.sidebarId >= 5000 && qsrc.sidebarId < 6000 && qsrc.name == oldName)
+                {
+                    const int newId = findIdByName(genreIdToName_, newName);
+                    if (newId > 0)
+                    {
+                        transportBar_.setPlayingFrom(newName, newId);
+                    }
+                }
+            }
+        };
+
+    sidebar_.onRenamePodcast = [this, bulkRenameTracks, findIdByName]
+        (int sidebarId, juce::String newName) {
+            auto it = podcastIdToName_.find(sidebarId);
+            if (it == podcastIdToName_.end()) return;
+            const juce::String oldName = it->second;
+            if (newName == oldName) return;
+
+            const bool changed = bulkRenameTracks(
+                [&](const TrackInfo& t) { return t.isPodcast && t.podcast == oldName; },
+                [&](TrackInfo& t)       { t.podcast = newName; });
+            if (! changed) return;
+
+            if (activeSidebarId_ == sidebarId
+                || (activeSidebarId_ >= 4000 && activeSidebarId_ < 5000))
+            {
+                const int newId = findIdByName(podcastIdToName_, newName);
+                if (newId > 0)
+                {
+                    activeSidebarId_ = newId;
+                    sidebar_.setSelectedId(newId);
+                }
+            }
+            refreshCurrentView();
+
+            if (queue_.hasCurrent())
+            {
+                auto qsrc = queue_.currentSource();
+                if (qsrc.sidebarId >= 4000 && qsrc.sidebarId < 5000 && qsrc.name == oldName)
+                {
+                    const int newId = findIdByName(podcastIdToName_, newName);
+                    if (newId > 0)
+                    {
+                        transportBar_.setPlayingFrom(newName, newId);
+                    }
+                }
+            }
+        };
     sidebar_.onDeletePlaylist = [this](int sidebarId) {
         playlistStore_->deletePlaylist(sidebarId - 1000);
         if (activeSidebarId_ == sidebarId)
@@ -1552,8 +1807,37 @@ void MainComponent::scrollSelectedSidebarItemIntoView()
     const int totalH   = sidebar_.getHeight();
     if (visibleH <= 0 || totalH <= visibleH) return;   // nothing to scroll
 
-    const int centreY = itemBounds.getY() + itemBounds.getHeight() / 2;
-    int targetY = centreY - visibleH / 2;
+    // Two sticky zones overlay the top of the viewport when scrolled:
+    // the LIBRARY section pins at the top, and the active section's
+    // header (e.g. "ARTISTS") pins right below it. A scroll-into-view
+    // nudge has to subtract both occlusion heights so the focused row
+    // ends up below them, not behind them.
+    const int rowTop    = itemBounds.getY();
+    const int rowBottom = rowTop + itemBounds.getHeight();
+    const int libH      = sidebar_.libraryStickyHeight();
+    const int sticky    = sidebar_.topStickyHeightFor(rowTop);
+    const bool inLibrary = (rowBottom <= libH);
+
+    // LIBRARY rows are the sticky overlay - always visible regardless of
+    // scroll. No nudge needed.
+    if (inLibrary) return;
+
+    const int viewTop    = sidebarViewport_.getViewPositionY();
+    const int viewBottom = viewTop + visibleH;
+    const int effTop     = viewTop + sticky;
+
+    // Minimum-movement scroll: leave the row alone if it's already fully
+    // visible (clear of sticky occlusion above and not falling off the
+    // bottom), otherwise nudge just enough to bring its top or bottom
+    // edge onto the viewport.
+    int targetY = viewTop;
+    if (rowTop < effTop)
+        targetY = rowTop - sticky;
+    else if (rowBottom > viewBottom)
+        targetY = rowBottom - visibleH;
+    else
+        return;   // already visible
+
     targetY = juce::jlimit(0, totalH - visibleH, targetY);
     sidebarViewport_.setViewPosition(0, targetY);
 }
@@ -3085,6 +3369,7 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& commands)
     commands.add(cmdFocusSearch);
     commands.add(cmdShowPlayerWindow);
     commands.add(cmdEditInfo);
+    commands.add(cmdToggleQueue);
 }
 
 void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandInfo& info)
@@ -3149,6 +3434,17 @@ void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandI
             info.addDefaultKeypress('f', juce::ModifierKeys::commandModifier);
             break;
 
+        case cmdToggleQueue:
+            info.setInfo("Show Queue",
+                         "Show or hide the play queue panel",
+                         "Window", 0);
+            info.setTicked(queueVisible_);
+            // Plain "Q" - no modifier - so it acts as a quick toggle. JUCE
+            // suppresses this when a TextEditor (search box, inline rename,
+            // etc.) has focus, so it doesn't eat literal q characters.
+            info.addDefaultKeypress('q', juce::ModifierKeys::noModifiers);
+            break;
+
         default: break;
     }
 }
@@ -3184,6 +3480,11 @@ bool MainComponent::perform(const ApplicationCommandTarget::InvocationInfo& info
 
         case cmdEditInfo:
             libraryTable_.triggerEditInfoForSelection();
+            return true;
+
+        case cmdToggleQueue:
+            toggleQueue();
+            menuItemsChanged();   // refresh the Window menu's tick mark
             return true;
 
         default:

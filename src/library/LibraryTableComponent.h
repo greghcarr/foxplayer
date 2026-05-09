@@ -11,7 +11,8 @@ namespace Stylus
 class LibraryTableComponent : public juce::Component,
                                public juce::TableListBoxModel,
                                public juce::DragAndDropTarget,
-                               public juce::TableHeaderComponent::Listener
+                               public juce::TableHeaderComponent::Listener,
+                               public juce::KeyListener
 {
 public:
     LibraryTableComponent();
@@ -185,6 +186,22 @@ public:
 
     // Returns true if at least one row is selected.
     bool hasSelection() const { return table_.getSelectedRows().size() > 0; }
+
+    // Pulls JUCE keyboard focus onto the inner TableListBox so arrow
+    // keys / PageUp / Home etc. drive its row selection. Used to implement
+    // cross-pane keyboard nav (Right arrow from the sidebar).
+    void focusTable();
+
+    // Cross-pane keyboard nav callbacks. Fired when the table has focus
+    // and the user presses an arrow / Tab that should move focus out of
+    // the library. The receiver decides whether (and where) to honor the
+    // request - e.g. the queue request is a no-op when the queue is empty.
+    std::function<void()> onMoveFocusToSidebar;
+    std::function<void()> onMoveFocusToQueue;
+
+    // juce::KeyListener - intercepts Tab / Shift-Tab / Left / Right on
+    // the inner TableListBox before its built-in handling runs.
+    bool keyPressed(const juce::KeyPress& key, juce::Component* origin) override;
 
     // Returns the file paths of all currently selected rows. Used by
     // MainComponent to remember a view's selection across view switches.

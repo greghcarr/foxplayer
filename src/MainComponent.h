@@ -70,6 +70,7 @@ public:
         cmdFocusSearch       = 0x1006,
         cmdShowPlayerWindow  = 0x1007,
         cmdEditInfo          = 0x1008,
+        cmdToggleQueue       = 0x1009,
     };
 
     // Called when the user chooses Window -> Show Player Window. MainWindow

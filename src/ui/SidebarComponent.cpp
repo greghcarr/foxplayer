@@ -19,6 +19,11 @@ namespace
 
 SidebarComponent::SidebarComponent()
 {
+    // Sidebar is itself a focusable pane: arrow keys move focus through
+    // its rows, the gray overlay marks the current focused item, and
+    // clicks grab keyboard focus so Up/Down work without an extra Tab.
+    setWantsKeyboardFocus(true);
+
     musicIconDrawable_    = loadSvg(BinaryData::musicnotesfill_svg,  BinaryData::musicnotesfill_svgSize);
     podcastIconDrawable_  = loadSvg(BinaryData::microphonefill_svg,  BinaryData::microphonefill_svgSize);
     playlistIconDrawable_ = loadSvg(BinaryData::listbulletsfill_svg, BinaryData::listbulletsfill_svgSize);
@@ -127,6 +132,21 @@ void SidebarComponent::setAlbums(const std::vector<std::pair<int, juce::String>>
     repaint();
 }
 
+int SidebarComponent::libraryStickyHeight() const
+{
+    int dummyScroll, libStickyH, dummyIdx;
+    getStickyZone(dummyScroll, libStickyH, dummyIdx);
+    return libStickyH;
+}
+
+int SidebarComponent::topStickyHeightFor(int rowTop) const
+{
+    int dummyScroll, libStickyH, dummyIdx;
+    getStickyZone(dummyScroll, libStickyH, dummyIdx);
+    if (rowTop < libStickyH) return 0;          // LIBRARY row: not occluded
+    return libStickyH + sectionHeaderH;          // active-section header pins below LIBRARY
+}
+
 juce::Rectangle<int> SidebarComponent::boundsForSelectedItem() const
 {
     for (const auto& section : sections_)
@@ -178,6 +198,11 @@ void SidebarComponent::timerCallback()
 void SidebarComponent::setSelectedId(int id)
 {
     selectedId_ = id;
+    // Programmatic nav (called from MainComponent on link clicks, playlist
+    // creation, etc.) means the user has just landed on this view; pull
+    // sidebar focus along with the active state so the selection
+    // indicator lives where the user just navigated.
+    focusedId_ = id;
 
     // Auto-expand the section that owns the selected item, so the user can
     // actually see the selected row when something navigates them to it
@@ -335,19 +360,25 @@ void SidebarComponent::drawSectionItem(juce::Graphics& g,
         return;
     }
 
-    const bool selected = (item.id == selectedId_);
+    // Active row dictates the library view (indicator bar + white text).
+    // Focused row is additionally the user's currently selected pane (gray
+    // overlay on top). The two states are usually the same after a click,
+    // but diverge when the user clicks into the library or queue: the
+    // sidebar item stays "active" but loses focus to the other pane.
+    const bool isActive  = (item.id == selectedId_);
+    const bool isFocused = (item.id == focusedId_);
 
     if (item.id == dragOverItemId_)
     {
         g.setColour(Color::accent.withAlpha(0.25f));
         g.fillRect(rowBounds);
     }
-    if (selected)
+    if (isFocused)
     {
         g.setColour(Color::background);
         g.fillRect(rowBounds);
     }
-    if (selected)
+    if (isActive)
     {
         g.setColour(Color::accent);
         g.fillRect(rowBounds.withWidth(indicatorW));
@@ -369,7 +400,7 @@ void SidebarComponent::drawSectionItem(juce::Graphics& g,
     {
         auto tinted = iconDrawable->createCopy();
         tinted->replaceColour(juce::Colours::black,
-                              selected ? Color::textPrimary : Color::textSecondary);
+                              isActive ? Color::textPrimary : Color::textSecondary);
         tinted->drawWithin(g,
                            juce::Rectangle<float>((float)iconX, (float)iconY,
                                                   (float)iconDim, (float)iconDim),
@@ -379,7 +410,7 @@ void SidebarComponent::drawSectionItem(juce::Graphics& g,
 
     const int labelX = iconX + iconDim + iconGap;
     const bool isDim = (item.id == UIConstants::noGenreId);
-    g.setColour(selected ? Color::textPrimary
+    g.setColour(isActive ? Color::textPrimary
                 : isDim  ? Color::textDim
                          : Color::textSecondary);
     g.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)
@@ -559,6 +590,15 @@ void SidebarComponent::resized()
 
 void SidebarComponent::mouseDown(const juce::MouseEvent& e)
 {
+    // If a rename is in progress, any click outside the inline editor (the
+    // editor is a child component, so its own clicks are handled there
+    // before this mouseDown fires) should commit-or-revert the pending edit
+    // before we resolve the new click as a row select. Without this, the
+    // user's typed text would only flush on Enter / Escape / focus-loss,
+    // leaving the editor stranded over the freshly-selected row.
+    if (inlineEditor_)
+        commitRename();
+
     // Check sticky zones before the normal layout-based hit test.
     int scrollY, libStickyH, activeSectionIdx;
     getStickyZone(scrollY, libStickyH, activeSectionIdx);
@@ -870,9 +910,23 @@ void SidebarComponent::mouseDoubleClick(const juce::MouseEvent& e)
         if (section.collapsed) continue;
         for (const auto& item : section.items)
         {
-            if (item.id >= 1000 && item.id < 2000 && item.bounds.contains(e.x, e.y))
+            if (! item.bounds.contains(e.x, e.y)) continue;
+
+            // Renamable rows: playlists, artists, albums, podcasts, and
+            // user-set genres. The "(no genre)" row at noGenreId is
+            // reserved as a bucket label and not user-editable.
+            const int id = item.id;
+            const bool isRenamable =
+                   (id >= 1000 && id < 2000)                 // playlists
+                || (id >= 2000 && id < 3000)                 // artists
+                || (id >= 3000 && id < 4000)                 // albums
+                || (id >= 4000 && id < 5000)                 // podcasts
+                || (id >= 5000 && id < 6000
+                    && id != UIConstants::noGenreId);        // genres
+
+            if (isRenamable)
             {
-                startRename(item.id);
+                startRename(id);
                 return;
             }
         }
@@ -881,10 +935,142 @@ void SidebarComponent::mouseDoubleClick(const juce::MouseEvent& e)
 
 void SidebarComponent::selectId(int id)
 {
-    if (id == selectedId_) return;
+    // Always claim sidebar focus on a user click - even when the click
+    // lands on the already-active row, that's the user telling us the
+    // sidebar is now their focused pane (so library / queue selection
+    // should drop). Repaint after focus changes too. Pulling JUCE
+    // keyboard focus along makes Up/Down arrows immediately navigate the
+    // sidebar without needing a Tab first.
+    grabKeyboardFocus();
+    const bool focusChanged = (focusedId_ != id);
+    focusedId_ = id;
+    if (id == selectedId_)
+    {
+        if (focusChanged) repaint();
+        return;
+    }
     selectedId_ = id;
     repaint();
     if (onItemSelected) onItemSelected(id);
+}
+
+void SidebarComponent::clearFocus()
+{
+    if (focusedId_ == -1) return;
+    focusedId_ = -1;
+    repaint();
+}
+
+void SidebarComponent::focusGained(FocusChangeType)
+{
+    // If the user tabs / shift-tabs into the sidebar (or any other path
+    // that lands JUCE focus here without going through selectId), restore
+    // the visual focus indicator. Otherwise focused state stays on
+    // whatever selectId already set.
+    if (focusedId_ == -1)
+    {
+        focusedId_ = selectedId_;
+        repaint();
+    }
+    // Tell MainComponent the sidebar has become the focused pane so it
+    // can clear library / queue selections - keeps the visual mutex true
+    // regardless of how focus arrived (click, arrow nav back, Tab).
+    if (onFocusGained) onFocusGained();
+}
+
+void SidebarComponent::focusLost(FocusChangeType)
+{
+    // Sidebar is no longer the focused pane: drop the gray overlay so the
+    // active row only shows the indicator bar + white text. The selection
+    // mutex with library / queue is now keyboard-driven too: clicking
+    // (or tabbing) into either of those steals focus and lands here.
+    if (focusedId_ != -1)
+    {
+        focusedId_ = -1;
+        repaint();
+    }
+}
+
+bool SidebarComponent::keyPressed(const juce::KeyPress& key)
+{
+    // Don't intercept while inline-renaming - the editor wants the keys.
+    if (inlineEditor_) return false;
+
+    // Build the linear list of navigable rows in their visible order:
+    // skip section headers, skip items inside collapsed sections, skip
+    // pseudo-rows like "+ New Playlist" (id < 0).
+    std::vector<int> navIds;
+    navIds.reserve(64);
+    for (const auto& s : sections_)
+    {
+        if (s.collapsible && s.collapsed) continue;
+        for (const auto& item : s.items)
+            if (item.id > 0) navIds.push_back(item.id);
+    }
+    if (navIds.empty()) return false;
+
+    auto findIdx = [&](int id) -> int {
+        for (size_t i = 0; i < navIds.size(); ++i)
+            if (navIds[i] == id) return (int)i;
+        return -1;
+    };
+
+    // Anchor on the currently focused row; fall back to the active row,
+    // then to the first nav id, so a fresh-focus arrow press has a
+    // sensible starting point.
+    int idx = findIdx(focusedId_);
+    if (idx < 0) idx = findIdx(selectedId_);
+    if (idx < 0) idx = 0;
+
+    const int last = (int)navIds.size() - 1;
+
+    if (key == juce::KeyPress::upKey)
+    {
+        if (idx > 0) selectId(navIds[idx - 1]);
+        return true;
+    }
+    if (key == juce::KeyPress::downKey)
+    {
+        if (idx < last) selectId(navIds[idx + 1]);
+        return true;
+    }
+    if (key == juce::KeyPress::pageUpKey)
+    {
+        constexpr int pageStep = 8;
+        selectId(navIds[juce::jmax(0, idx - pageStep)]);
+        return true;
+    }
+    if (key == juce::KeyPress::pageDownKey)
+    {
+        constexpr int pageStep = 8;
+        selectId(navIds[juce::jmin(last, idx + pageStep)]);
+        return true;
+    }
+    if (key == juce::KeyPress::homeKey)
+    {
+        selectId(navIds.front());
+        return true;
+    }
+    if (key == juce::KeyPress::endKey)
+    {
+        selectId(navIds.back());
+        return true;
+    }
+    if (key == juce::KeyPress::rightKey
+        || (key.getKeyCode() == juce::KeyPress::tabKey && ! key.getModifiers().isShiftDown()))
+    {
+        // Right or Tab: hand keyboard focus to the library so arrow keys
+        // then walk its rows. Sidebar's focusLost drops the gray overlay.
+        if (onMoveFocusToLibrary) onMoveFocusToLibrary();
+        return true;
+    }
+    if (key.getKeyCode() == juce::KeyPress::tabKey && key.getModifiers().isShiftDown())
+    {
+        // Shift-Tab: reverse-cycle into the queue (no-op if it's empty).
+        if (onMoveFocusToQueue) onMoveFocusToQueue();
+        return true;
+    }
+    return false;
 }
 
 void SidebarComponent::startRename(int sidebarId)
@@ -945,15 +1131,46 @@ void SidebarComponent::commitRename()
 {
     if (!inlineEditor_) return;
 
-    const juce::String newName = inlineEditor_->getText().trim();
+    const juce::String newName  = inlineEditor_->getText().trim();
+    const juce::String original = editingOriginalName_;
     const int id = editingItemId_;
     editingItemId_ = -1;
     inlineEditor_.reset();
     repaint();
 
-    if (newName.isNotEmpty() && onRenamePlaylist)
-        onRenamePlaylist(id, newName);
-    // empty input: silently revert (store is unchanged)
+    // Empty input or no actual change: silently revert.
+    if (newName.isEmpty() || newName == original) return;
+
+    if (id >= 1000 && id < 2000)
+    {
+        if (onRenamePlaylist) onRenamePlaylist(id, newName);
+    }
+    else if (id >= 2000 && id < 3000)
+    {
+        if (onRenameArtist) onRenameArtist(id, newName);
+    }
+    else if (id >= 3000 && id < 4000)
+    {
+        // Album label is "Artist - Album". Split at the first " - " (space-
+        // dash-space) so the artist part can contain hyphens. If the input
+        // doesn't contain that exact separator, or either side is empty
+        // after trimming, treat the input as invalid and silently revert
+        // - per the user spec for the album rename.
+        const int sep = newName.indexOf(" - ");
+        if (sep <= 0) return;
+        const juce::String newArtist = newName.substring(0, sep).trim();
+        const juce::String newAlbum  = newName.substring(sep + 3).trim();
+        if (newArtist.isEmpty() || newAlbum.isEmpty()) return;
+        if (onRenameAlbum) onRenameAlbum(id, newArtist, newAlbum);
+    }
+    else if (id >= 4000 && id < 5000)
+    {
+        if (onRenamePodcast) onRenamePodcast(id, newName);
+    }
+    else if (id >= 5000 && id < 6000 && id != UIConstants::noGenreId)
+    {
+        if (onRenameGenre) onRenameGenre(id, newName);
+    }
 }
 
 void SidebarComponent::cancelRename()

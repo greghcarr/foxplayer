@@ -23,6 +23,7 @@ QueueView::QueueView()
     list_.getVerticalScrollBar().setColour(juce::ScrollBar::backgroundColourId, Color::tableBackground);
     list_.getVerticalScrollBar().setColour(juce::ScrollBar::trackColourId,      Color::tableBackground);
     addAndMakeVisible(list_);
+    list_.addKeyListener(this);
 }
 
 void QueueView::refresh(const PlayQueue& queue)
@@ -250,6 +251,32 @@ void QueueView::deselectAll()
     suppressSelectionCallback_ = true;
     list_.setSelectedRows(juce::SparseSet<int>{}, juce::dontSendNotification);
     suppressSelectionCallback_ = false;
+}
+
+void QueueView::focusList()
+{
+    if (list_.getSelectedRow() < 0 && ! items_.empty())
+        list_.selectRow(0);
+    list_.grabKeyboardFocus();
+}
+
+bool QueueView::keyPressed(const juce::KeyPress& key, juce::Component*)
+{
+    // Left or Shift-Tab: jump back to the library. The queue stays open.
+    if (key == juce::KeyPress::leftKey
+        || (key.getKeyCode() == juce::KeyPress::tabKey && key.getModifiers().isShiftDown()))
+    {
+        if (onMoveFocusToLibrary) onMoveFocusToLibrary();
+        return true;
+    }
+
+    // Tab (no shift): continue the forward cycle to the sidebar.
+    if (key.getKeyCode() == juce::KeyPress::tabKey && ! key.getModifiers().isShiftDown())
+    {
+        if (onMoveFocusToSidebar) onMoveFocusToSidebar();
+        return true;
+    }
+    return false;
 }
 
 bool QueueView::isInterestedInDragSource(const SourceDetails& details)

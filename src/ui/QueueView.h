@@ -11,7 +11,8 @@ namespace Stylus
 // Slides in from the right edge of MainComponent.
 class QueueView : public juce::Component,
                   public juce::ListBoxModel,
-                  public juce::DragAndDropTarget
+                  public juce::DragAndDropTarget,
+                  public juce::KeyListener
 {
 public:
     QueueView();
@@ -58,6 +59,20 @@ public:
     // insertIndex is the position in the live queue at which to insert
     // (0 = top, items_.size() = append). Negative => append.
     std::function<void(juce::StringArray paths, int insertIndex)> onTracksDropped;
+
+    // Cross-pane keyboard nav callbacks. Fired from the inner ListBox's
+    // KeyListener so they run before the list's built-in arrow / Tab
+    // handling.
+    std::function<void()> onMoveFocusToLibrary;
+    std::function<void()> onMoveFocusToSidebar;
+
+    // Pulls JUCE keyboard focus onto the inner ListBox so arrows / Home /
+    // End drive its selection. Used to implement cross-pane keyboard nav
+    // (Right / Tab from the library or sidebar Shift-Tab).
+    void focusList();
+
+    // juce::KeyListener
+    bool keyPressed(const juce::KeyPress& key, juce::Component* origin) override;
 
     // juce::DragAndDropTarget
     bool isInterestedInDragSource(const SourceDetails& details) override;
