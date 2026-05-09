@@ -37,7 +37,9 @@ src/
     AlbumArtExtractor.h        : JUCE-side: calls platform bridge, falls back to folder art
     AlbumArtExtractor.cpp      : JUCE-side implementation (no platform code here)
     AlbumArtExtractor.mm       : macOS: pure ObjC++ AVFoundation extraction (no JUCE types)
-    AlbumArtExtractor_Win.cpp  : Windows: stub returning nullptr (folder-art fallback handles it)
+    AlbumArtExtractor_Win.cpp  : Windows: Shell IPropertyStore + PKEY_ThumbnailStream
+    MediaFoundationReader.h/.cpp : Windows-only AudioFormatReader subclass wrapping IMFSourceReader
+                                    (AAC / Apple Lossless / WMA decode via OS codecs)
   analysis/
     BpmDetector.h/.cpp         : BPM detection
     KeyDetector.h/.cpp         : Musical key detection
@@ -62,9 +64,9 @@ src/
     MacWindowHelper.h/.mm      : macOS: native NSWindow activation; Dock-reopen swizzle + appDidBecomeActive
     MacWindowHelper_Win.cpp    : Windows: no-op stubs (toFront() in MainWindow handles activation)
     NowPlayingBridge.h/.mm     : macOS: MPNowPlayingInfoCenter + MPRemoteCommandCenter (media keys, lock screen)
-    NowPlayingBridge_Win.cpp   : Windows: no-op stub; SMTC bridge is the planned replacement
+    NowPlayingBridge_Win.cpp   : Windows: SMTC via C++/WinRT (media flyout, lock screen, media keys)
     StatusBarItem.h/.mm        : macOS: menu-bar status item with quick controls
-    StatusBarItem_Win.cpp      : Windows: no-op stub; Shell_NotifyIcon is the planned replacement
+    StatusBarItem_Win.cpp      : Windows: Shell_NotifyIcon system-tray entry + context menu
     RecordSpinnerLayer.h       : Spinning-disc overlay; base class differs per platform (see header)
     RecordSpinnerLayer.mm      : macOS: NSViewComponent + CALayer GPU rotation
     RecordSpinnerLayer_Win.cpp : Windows: juce::Component + Timer-driven affine-rotation paint
@@ -91,13 +93,17 @@ One codebase, two platforms. Don't fork; don't keep a long-lived "windows" branc
 
 The Mac-helper free functions (`Stylus_activateAndShowWindow`, `Stylus_setDockReopenCallback`, etc.) are declared in `MacWindowHelper.h` with no platform guard, so call sites in `MainWindow.h` stay clean. The Windows `_Win.cpp` provides empty implementations; the actual activation on Windows is `toFront(true)` (guarded `#if ! JUCE_MAC` in `MainWindow::showWindow()`).
 
-**What's stubbed but not yet implemented on Windows** (functional gaps, not crash risks):
-- `NowPlayingBridge_Win.cpp` — no-op. SMTC (Windows.Media.SystemMediaTransportControls via C++/WinRT) is the planned replacement; would restore media keys + lock-screen Now Playing.
-- `StatusBarItem_Win.cpp` — no-op. `Shell_NotifyIcon` is the planned replacement.
-- `AlbumArtExtractor_Win.cpp` — returns nullptr. Folder/sidecar art still works via the cross-platform fallback in `AlbumArtExtractor.cpp`. TagLib or the Windows Property System (`IPropertyStore` + `PKEY_*`) would restore embedded-art reads.
-- **Menu bar** — `setMacMainMenu` is the macOS native menu bar; on Windows, MainComponent (a `MenuBarModel`) has no host yet. Hosting a `MenuBarComponent` inside MainComponent on non-Mac is the planned fix.
-- **Audio codecs** — `registerBasicFormats()` includes `CoreAudioFormat` on macOS (gives MP3/AAC/ALAC/AIFF/WAV); Windows gets only MP3/WAV/AIFF/FLAC/Ogg. AAC/ALAC/M4A files won't load until MediaFoundation (or FFmpeg) is wired into `AudioEngine`.
-- `.styl` sidecar files are not actually hidden on Windows (NTFS doesn't honor the dot-prefix convention; would need `SetFileAttributes(FILE_ATTRIBUTE_HIDDEN)`).
+**What runs on Windows** (parity with the macOS feature set unless noted):
+- `NowPlayingBridge_Win.cpp` — wires SMTC (Windows.Media.SystemMediaTransportControls) via C++/WinRT. Media keys, the small media flyout above the volume slider, and the lock-screen Now Playing card all drive the same play / pause / next / previous callbacks. SMTC is HWND-bound on the desktop, so initialisation is deferred to the first call once MainWindow's peer exists.
+- `StatusBarItem_Win.cpp` — `Shell_NotifyIcon` system-tray entry with a "Show Stylus" / "Quit Stylus" context menu and a message-only HWND for callbacks. The icon is pulled from the .exe's first icon resource (juceaide bakes the app icon in). State-aware play / pause / square glyphs like the macOS version are not yet implemented; `setState()` is a no-op.
+- `AlbumArtExtractor_Win.cpp` — reads embedded art via the Windows Shell property system (`IPropertyStore` + `PKEY_ThumbnailStream`). Covers MP3 / MP4 / M4A / AAC / FLAC / WMA without any third-party metadata library. Ogg Vorbis isn't reliably handled by the stock shell handler; the cross-platform folder/sidecar fallback in `AlbumArtExtractor.cpp` covers it.
+- `MediaFoundationReader.h/.cpp` — Windows-only `juce::AudioFormatReader` subclass that wraps an `IMFSourceReader` configured for 32-bit float PCM with `SetCurrentPosition` for seek. `AudioEngine::loadTrack` falls back to it when the standard `AudioFormatManager` returns nullptr, so AAC / Apple Lossless / WMA play back via the OS-provided codecs (no FFmpeg dependency).
+- **Menu bar** — `MenuBarComponent` hosted inside `MainComponent` when `! JUCE_MAC`, bound to MainComponent's `MenuBarModel` impl. Renders the same File / Window menus that `setMacMainMenu` installs into the system menu on Mac. Preferences moves into File on Windows because there's no Apple-style application menu.
+- `.styl` sidecars are marked `FILE_ATTRIBUTE_HIDDEN` after each `replaceWithText` so Explorer doesn't show them. macOS hides them implicitly via the dot-prefix.
+
+**What's deliberately not done yet:**
+- Tray-icon state glyph (`StatusBarItem::setState` is a no-op on Windows; macOS swaps in different play / pause / square images).
+- TagLib-grade Ogg / WAV / AIFF embedded-art reads; the shell handlers don't expose those, so a per-format reader (or TagLib) is the only way.
 
 ### Format registration
 `registerBasicFormats()` already includes CoreAudioFormat on macOS: do not call `registerFormat(new CoreAudioFormat(), ...)` separately or JUCE will assert on the duplicate.
