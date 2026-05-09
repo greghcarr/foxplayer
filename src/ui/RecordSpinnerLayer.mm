@@ -40,9 +40,20 @@ static const CGFloat kInactiveDimAlpha = 0.5;
         self.layer.masksToBounds = NO;
 
         _discLayer = [CALayer layer];
-        _discLayer.contentsGravity = kCAGravityResize;
+        // Use ResizeAspect, not Resize: the disc image is always square, but
+        // the host view's bounds can end up slightly non-square due to
+        // subpixel rounding between JUCE's int coordinates and AppKit's
+        // float coordinates. Resize would stretch the square image to fill,
+        // so even a tiny non-squareness in bounds renders the rotating disc
+        // as a slowly-eccentric oval. ResizeAspect preserves the image's
+        // own aspect ratio regardless of bounds.
+        _discLayer.contentsGravity = kCAGravityResizeAspect;
         _discLayer.anchorPoint     = CGPointMake(0.5, 0.5);
-        _discLayer.frame           = self.bounds;
+        // Set bounds + position rather than frame: once the layer has a
+        // rotation transform applied (during spin or after pause), the frame
+        // property is undefined per Apple's docs and re-deriving bounds
+        // through the inverse transform introduces scale drift each call.
+        _discLayer.bounds          = CGRectMake(0, 0, self.bounds.size.width, self.bounds.size.height);
         _discLayer.position        = CGPointMake(NSMidX(self.bounds), NSMidY(self.bounds));
         [self.layer addSublayer:_discLayer];
         // Initial scale; refined in viewDidChangeBackingProperties once the
@@ -117,7 +128,11 @@ static const CGFloat kInactiveDimAlpha = 0.5;
     [super setFrame:frame];
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    _discLayer.frame    = self.bounds;
+    // Avoid setting _discLayer.frame: with a rotation transform applied, the
+    // frame setter back-computes bounds via the inverse transform and the
+    // round-trip slowly skews the bounds, making the disc look oval after
+    // many resize/layout passes.
+    _discLayer.bounds   = CGRectMake(0, 0, self.bounds.size.width, self.bounds.size.height);
     _discLayer.position = CGPointMake(NSMidX(self.bounds), NSMidY(self.bounds));
     [CATransaction commit];
 }
