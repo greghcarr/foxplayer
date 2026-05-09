@@ -21,8 +21,10 @@ AudioEngine::AudioEngine()
     // Background reader thread for AudioTransportSource. Decouples disk I/O
     // and decoding from the audio callback so a busy CPU/disk or an OS
     // priority dip (Cmd-Tab, Mission Control, Spotlight) can't starve the
-    // audio thread into a dropout.
-    readAheadThread_.startThread(juce::Thread::Priority::high);
+    // audio thread into a dropout. Highest non-realtime priority - the
+    // analysis threads are pushed to `background` so they yield to this one
+    // on disk / CPU contention while a track is playing.
+    readAheadThread_.startThread(juce::Thread::Priority::highest);
 
     // Wire: deviceManager -> sourcePlayer -> transportSource.
     deviceManager_.addAudioCallback(&sourcePlayer_);

@@ -35,7 +35,7 @@ void AnalysisEngine::enqueue(const TrackInfo& track)
     if (onTrackQueued) onTrackQueued(track);
 
     if (!isThreadRunning())
-        startThread(juce::Thread::Priority::low);
+        startThread(juce::Thread::Priority::background);
 }
 
 void AnalysisEngine::enqueueAll(const std::vector<TrackInfo>& tracks)
@@ -57,7 +57,7 @@ void AnalysisEngine::enqueueAll(const std::vector<TrackInfo>& tracks)
             onTrackQueued(t);
 
     if (!queue_.empty() && !isThreadRunning())
-        startThread(juce::Thread::Priority::low);
+        startThread(juce::Thread::Priority::background);
 }
 
 void AnalysisEngine::enqueueLufsOnly(const TrackInfo& track)
@@ -76,7 +76,7 @@ void AnalysisEngine::enqueueLufsOnly(const TrackInfo& track)
     // explicit user-driven enqueue / enqueueAll paths announce themselves.
 
     if (!isThreadRunning())
-        startThread(juce::Thread::Priority::low);
+        startThread(juce::Thread::Priority::background);
 }
 
 void AnalysisEngine::cancelAll()

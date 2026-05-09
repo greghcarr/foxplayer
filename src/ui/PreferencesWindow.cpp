@@ -11,7 +11,13 @@ using namespace UIConstants;
 // AudioPreferencesPanel
 // ============================================================================
 
-static constexpr int kBufferSizes[] = { 32, 64, 128, 256, 512, 1024, 2048 };
+// Buffer sizes the user can pick from. The bigger end (4096 / 8192) is a
+// safety net for systems where 2048 still glitches under load: bigger
+// buffers give the read-ahead thread proportionally more time to catch up
+// before the audio callback drains. The cost is added playback latency
+// (~85 ms at 4096 / ~170 ms at 8192 vs ~10 ms at 512), but for casual
+// listening that's invisible.
+static constexpr int kBufferSizes[] = { 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192 };
 static constexpr int kDefaultBufferSize = 512;
 static constexpr const char* kBufferSizeKey = "audio.bufferSize";
 

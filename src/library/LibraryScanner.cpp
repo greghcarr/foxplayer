@@ -39,7 +39,7 @@ void LibraryScanner::scanFolders(std::vector<juce::File> musicFolders,
         + juce::String((int) musicRoots_.size()) + " music root(s), "
         + juce::String((int) podcastRoots_.size()) + " podcast root(s)");
     if (! musicRoots_.empty() || ! podcastRoots_.empty())
-        startThread(juce::Thread::Priority::low);
+        startThread(juce::Thread::Priority::background);
     else if (onScanComplete)
         juce::MessageManager::callAsync([this] { if (onScanComplete) onScanComplete(0); });
 }
