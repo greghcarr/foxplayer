@@ -249,7 +249,13 @@ AnalysisLogWindow::AnalysisLogWindow()
     setContentOwned(c, true);
 
     centreWithSize(700, 420);
+
+    // See PreferencesWindow constructor: pre-create the peer with the
+    // HWND hidden so the dark title bar is in place before the user ever
+    // sees the window, avoiding a white flash on first show.
     setVisible(false);
+    addToDesktop(getDesktopWindowStyleFlags());
+    applyDarkTitleBar(*this);
 }
 
 void AnalysisLogWindow::closeButtonPressed()

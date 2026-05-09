@@ -735,7 +735,15 @@ PreferencesWindow::PreferencesWindow(juce::AudioDeviceManager& dm,
     prefsComponent_ = content;
     setContentOwned(content, true);
     centreWithSize(640, 480);
+
+    // Pre-create the OS peer with the HWND hidden, then flip it to the
+    // Win11 dark title bar before any user-visible setVisible(true). If
+    // we wait until show time, the OS first paints the default light
+    // title bar and then our DwmSetWindowAttribute call retro-darkens it,
+    // which reads as a brief white flash.
     setVisible(false);
+    addToDesktop(getDesktopWindowStyleFlags());
+    applyDarkTitleBar(*this);
 }
 
 void PreferencesWindow::closeButtonPressed()

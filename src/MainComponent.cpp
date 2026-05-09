@@ -2126,6 +2126,15 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track,
     editInfoLockOverlay_.toFront(false);
     resized();
 
+    // Force the overlay's dim to render BEFORE the OS dialog window is
+    // shown below: setVisible on the overlay only queues a repaint, and
+    // dw->setVisible(true) blocks the message loop while creating the
+    // HWND. Without this flush the dialog pops up over an undimmed
+    // background and the dim catches up a frame later, which reads as
+    // sluggish.
+    if (auto* peer = getPeer())
+        peer->performAnyPendingRepaintsNow();
+
     // Closes the dialog window and, optionally, hides the overlay.
     juce::Component::SafePointer<MainComponent> safeThis(this);
     auto closeDialog = [safeThis](bool hideOverlay) {
@@ -2195,8 +2204,14 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track,
         };
     }
 
-    dw->setVisible(true);
+    // Pre-create the peer with the HWND hidden, set the dark title bar,
+    // then show. Without this dance the dialog appears with the default
+    // light title bar for one frame before our DwmSetWindowAttribute
+    // call darkens it.
+    dw->setVisible(false);
+    dw->addToDesktop(dw->getDesktopWindowStyleFlags());
     applyDarkTitleBar(*dw);
+    dw->setVisible(true);
 }
 
 void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
@@ -2212,6 +2227,11 @@ void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
     editInfoLockOverlay_.setVisible(true);
     editInfoLockOverlay_.toFront(false);
     resized();
+
+    // See comment in showSongInfoEditor: flush pending repaints so the
+    // dim lands on-screen before the OS dialog window blocks the loop.
+    if (auto* peer = getPeer())
+        peer->performAnyPendingRepaintsNow();
 
     juce::Component::SafePointer<MainComponent> safeThis(this);
     auto closeDialog = [safeThis] {
@@ -2237,8 +2257,12 @@ void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
 
     editor->onDismiss = closeDialog;
     dw->onDismiss     = closeDialog;
-    dw->setVisible(true);
+
+    // See showSongInfoEditor: pre-create peer hidden, set dark, then show.
+    dw->setVisible(false);
+    dw->addToDesktop(dw->getDesktopWindowStyleFlags());
     applyDarkTitleBar(*dw);
+    dw->setVisible(true);
 }
 
 void MainComponent::setupAudioEngineCallbacks()
@@ -2926,17 +2950,23 @@ void MainComponent::showPreferences()
         libPanel->setFolders(musicFolders_);
         libPanel->setPodcastFolders(podcastFolders_);
     }
+    // Show the lock overlay on the main window FIRST. It dims the content
+    // and captures clicks so the user can't interact with anything
+    // underneath, but exposes its own "Open Preferences" / "Close
+    // Preferences" buttons. Showing it before the dialog (and flushing
+    // pending repaints below) means the dim is already on screen when the
+    // OS pops up the Preferences window — without that ordering, the
+    // bright background flashes briefly.
+    prefsLockOverlay_.setVisible(true);
+    prefsLockOverlay_.toFront(false);
+    resized();
+    if (auto* peer = getPeer())
+        peer->performAnyPendingRepaintsNow();
+
     preferencesWindow_->setVisible(true);
     preferencesWindow_->toFront(true);
     // Preferences floats above the main window so the user can't hide it.
     preferencesWindow_->setAlwaysOnTop(true);
-
-    // Show the lock overlay on the main window. It dims the content and
-    // captures clicks so the user can't interact with anything underneath,
-    // but exposes its own "Open Preferences" / "Close Preferences" buttons.
-    prefsLockOverlay_.setVisible(true);
-    prefsLockOverlay_.toFront(false);
-    resized();
 
     // Refresh the menu so "Preferences..." disables while the window is open.
     menuItemsChanged();
@@ -3424,17 +3454,29 @@ void MainComponent::requestQuit(std::function<void()> onConfirmed)
         dismiss(true, onConfirmed);
     };
 
-    dlg->addToDesktop(juce::ComponentPeer::windowHasTitleBar
-                    | juce::ComponentPeer::windowHasDropShadow
-                    | juce::ComponentPeer::windowIsTemporary);
-    dlg->setVisible(true);
-    dlg->setCentrePosition(getScreenBounds().getCentreX(), getScreenBounds().getCentreY());
-    applyDarkTitleBar(*dlg);
-
     activeQuitDialog_ = dlg;
+
+    // Overlay first so the dim is in flight before the OS dialog window
+    // is created below; flushing pending repaints synchronously (rather
+    // than waiting for the next vsync) keeps the dialog from popping up
+    // over an undimmed background.
     quitLockOverlay_.setVisible(true);
     quitLockOverlay_.toFront(false);
     resized();
+    if (auto* peer = getPeer())
+        peer->performAnyPendingRepaintsNow();
+
+    // juce::Component default-constructs with isVisible() == true, so
+    // hide before adding to desktop or the HWND is created with WS_VISIBLE
+    // and the default light title bar flashes for a frame before our
+    // DwmSetWindowAttribute call lands.
+    dlg->setVisible(false);
+    dlg->addToDesktop(juce::ComponentPeer::windowHasTitleBar
+                    | juce::ComponentPeer::windowHasDropShadow
+                    | juce::ComponentPeer::windowIsTemporary);
+    applyDarkTitleBar(*dlg);
+    dlg->setCentrePosition(getScreenBounds().getCentreX(), getScreenBounds().getCentreY());
+    dlg->setVisible(true);
 }
 
 } // namespace Stylus
