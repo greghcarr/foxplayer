@@ -1666,6 +1666,15 @@ juce::String TransportBar::formatSeconds(double secs) const
 
 void TransportBar::mouseDown(const juce::MouseEvent& e)
 {
+    // We registered as a mouse listener on all nested children (for hover
+    // state refresh), so this fires for clicks on child buttons too - and
+    // the MouseEvent's coordinates are then relative to the child, not us.
+    // Album-art / seek / link hit-testing must only run for direct clicks
+    // on TransportBar; otherwise a click at (25, 25) on the centered play
+    // button would land inside albumArtBounds_ at (~6, 6, 80, 80) and
+    // wrongly mark the album art as pressed.
+    if (e.originalComponent != this) return;
+
     // Speaker/mute click works regardless of whether a track is loaded.
     if (!speakerBounds_.isEmpty() && speakerBounds_.contains(e.x, e.y))
     {
@@ -1751,6 +1760,11 @@ void TransportBar::mouseDrag(const juce::MouseEvent& e)
 
 void TransportBar::mouseUp(const juce::MouseEvent& e)
 {
+    // Mirror the guard in mouseDown: only respond to direct mouseUp on the
+    // bar itself, not events forwarded from child components via the
+    // addMouseListener(this, true) registration.
+    if (e.originalComponent != this) return;
+
     if (albumArtPressed_)
     {
         const bool wasClick = e.mouseWasClicked();
