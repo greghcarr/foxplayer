@@ -1,6 +1,10 @@
 #include "AudioEngine.h"
 #include "../Constants.h"
 
+#if JUCE_WINDOWS
+ #include "MediaFoundationReader.h"
+#endif
+
 namespace Stylus
 {
 
@@ -150,6 +154,16 @@ void AudioEngine::loadTrack(const TrackInfo& track)
 
     DBG("AudioEngine::loadTrack - creating reader for: " + track.file.getFullPathName());
     auto* reader = formatManager_.createReaderFor(track.file);
+
+   #if JUCE_WINDOWS
+    // JUCE's basic formats on Windows cover MP3 / WAV / AIFF / FLAC / Ogg.
+    // For AAC / Apple Lossless / WMA we fall through to a Media Foundation
+    // reader, which uses the OS-provided codecs. This keeps Apple-Music
+    // libraries playable without bundling FFmpeg.
+    if (reader == nullptr)
+        reader = MediaFoundation::createReaderForFile(track.file);
+   #endif
+
     if (reader == nullptr)
     {
         DBG("AudioEngine::loadTrack - ERROR: no reader for file (unsupported format or missing file)");

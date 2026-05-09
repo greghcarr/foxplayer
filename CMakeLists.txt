@@ -88,6 +88,7 @@ else()
         src/ui/MacWindowHelper_Win.cpp
         src/ui/NowPlayingBridge_Win.cpp
         src/ui/RecordSpinnerLayer_Win.cpp
+        src/audio/MediaFoundationReader.cpp
     )
 endif()
 
