@@ -2345,9 +2345,8 @@ void MainComponent::paint(juce::Graphics& g)
     // Paint the menu-bar background colour across the full top strip even
     // in the leading gap before the first menu item, so the dark chrome
     // (title bar, leading pad, menu items) all reads as one continuous band.
-    constexpr int menuBarH = 28;
     g.setColour(juce::Colour(0xff202020));
-    g.fillRect(0, 0, getWidth(), menuBarH);
+    g.fillRect(0, 0, getWidth(), UIConstants::menuBarHeight);
    #endif
 }
 
@@ -2560,13 +2559,12 @@ void MainComponent::resized()
     // "File" doesn't sit flush against the window's left edge; the gap
     // matches the inter-item gap so the bar reads as evenly spaced. The
     // strip-coloured fill behind the leading gap is drawn in paint().
-    constexpr int menuBarH      = 28;
     // Each menu-bar item carries half of getMenuBarItemWidth's +14 padding
     // on its leading side (i.e. ~7 px of internal pad before its text),
     // so the OUTER offset is half the inter-item gap to make the visual
     // distance "screen edge → File text" equal "File text → Window text".
     constexpr int menuLeadingPx = 7;
-    auto topStrip = bounds.removeFromTop(menuBarH);
+    auto topStrip = bounds.removeFromTop(UIConstants::menuBarHeight);
     menuBar_.setBounds(topStrip.withTrimmedLeft(menuLeadingPx));
    #endif
 

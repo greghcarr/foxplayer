@@ -15,6 +15,19 @@ namespace Stylus::UIConstants
     static constexpr int miniModeWidth       = 460;   // transport bar switches to mini layout below this width
     static constexpr int compactHeight       = 150;   // at-or-below this height the library/sidebar are effectively hidden
 
+    // Height of the JUCE-rendered in-window menu bar strip. macOS uses the
+    // OS menu bar via setMacMainMenu so the in-window strip is absent there
+    // (constant is 0). On other platforms the strip steals this many px
+    // off the top of MainComponent's bounds; client-side layout values
+    // that are reasoned about WITHOUT a menu bar (minWindowHeight,
+    // transportBarHeight) need to add this to stay correct in mini-player
+    // and other tight-vertical layouts.
+   #if JUCE_MAC
+    static constexpr int menuBarHeight       = 0;
+   #else
+    static constexpr int menuBarHeight       = 28;
+   #endif
+
     // Transport bar
     static constexpr int transportBarHeight  = 108;
 

@@ -26,7 +26,23 @@ public:
         setFullScreen(true);
 #else
         setResizable(true, true);
-        setResizeLimits(UIConstants::minWindowWidth, UIConstants::minWindowHeight,
+        // Add the menu-bar reserve to the minimum height so the transport
+        // bar still gets its full 108 px in mini-player mode (the bar's
+        // internal layout assumes that height; squeezing it cuts off the
+        // top and bottom and offsets the spinning disc). menuBarHeight is
+        // 0 on macOS, so this collapses to the original minimum there.
+        //
+        // The extra +16 on top of menuBarHeight is breathing room: with
+        // just the bar's height added, the buffer above the transport bar
+        // shrinks to whatever the minWindowHeight constant carved out
+        // (currently 27 px), and visually the transport bar feels glued
+        // to the menu strip. The extra 16 puts the disc and buttons in a
+        // more natural position when the user shrinks all the way down.
+        constexpr int extraMiniBufferPx = (UIConstants::menuBarHeight > 0) ? 16 : 0;
+        setResizeLimits(UIConstants::minWindowWidth,
+                        UIConstants::minWindowHeight
+                            + UIConstants::menuBarHeight
+                            + extraMiniBufferPx,
                         4000, 3000);
         centreWithSize(getWidth(), getHeight());
 #endif
