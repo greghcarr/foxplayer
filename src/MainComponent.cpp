@@ -236,6 +236,20 @@ MainComponent::MainComponent()
         queue_.appendTracks(std::move(tracks), source);
     };
 
+    libraryTable_.getPlaylistsForMenu = [this] {
+        std::vector<std::pair<int, juce::String>> out;
+        for (const auto& p : playlistStore_->all())
+            out.emplace_back(p.id, p.name);
+        return out;
+    };
+    libraryTable_.onAddToPlaylistRequested =
+        [this](std::vector<TrackInfo> tracks, int playlistStoreId) {
+            juce::StringArray paths;
+            for (const auto& t : tracks)
+                paths.add(t.file.getFullPathName());
+            handleTracksDroppedOnPlaylist(1000 + playlistStoreId, paths);
+        };
+
     libraryTable_.onPlayNextRequested = [this](std::vector<TrackInfo> tracks) {
         PlayQueue::QueueSource source;
         source.sidebarId = activeSidebarId_;
@@ -1027,6 +1041,23 @@ MainComponent::MainComponent()
         sortTracksForSidebar(tracks, sidebarId);
         queue_.appendTracks(std::move(tracks), { sourceNameForSidebar(sidebarId), sidebarId });
     };
+
+    sidebar_.getPlaylistsForMenu = [this] {
+        std::vector<std::pair<int, juce::String>> out;
+        for (const auto& p : playlistStore_->all())
+            out.emplace_back(p.id, p.name);
+        return out;
+    };
+    sidebar_.onAddToPlaylistFromItem =
+        [this, sortTracksForSidebar](int sourceSidebarId, int destPlaylistStoreId) {
+            auto tracks = getTracksForSidebar(sourceSidebarId);
+            if (tracks.empty()) return;
+            sortTracksForSidebar(tracks, sourceSidebarId);
+            juce::StringArray paths;
+            for (const auto& t : tracks)
+                paths.add(t.file.getFullPathName());
+            handleTracksDroppedOnPlaylist(1000 + destPlaylistStoreId, paths);
+        };
 
     refreshSidebarPlaylists();
 

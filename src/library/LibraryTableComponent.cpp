@@ -848,9 +848,23 @@ void LibraryTableComponent::cellClicked(int row, int col, const juce::MouseEvent
     const bool canGoToAlbum   = singleSelect && !clickedTrack.isPodcast && clickedTrack.album.isNotEmpty();
     const bool canGoToPodcast = singleSelect &&  clickedTrack.isPodcast && clickedTrack.podcast.isNotEmpty();
 
+    // Build the "Add to Playlist" submenu. Each entry uses an id derived from
+    // the playlist's store id (offset by kAddToPlaylistBase so it never
+    // collides with the static menu items below). We omit the submenu
+    // entirely if there are no playlists so the menu doesn't show a dead
+    // "Add to Playlist >" parent with nothing under it.
+    std::vector<std::pair<int, juce::String>> playlistsForMenu;
+    if (getPlaylistsForMenu) playlistsForMenu = getPlaylistsForMenu();
+    juce::PopupMenu addToPlaylistSubMenu;
+    constexpr int kAddToPlaylistBase = 10000;
+    for (const auto& [storeId, name] : playlistsForMenu)
+        addToPlaylistSubMenu.addItem(kAddToPlaylistBase + storeId, name);
+
     juce::PopupMenu menu;
     menu.addItem(14, "Play Next");
     menu.addItem(6,  "Add to Queue");
+    if (! playlistsForMenu.empty())
+        menu.addSubMenu("Add to Playlist", addToPlaylistSubMenu);
     menu.addSeparator();
     menu.addItem(5, "Edit Info",  !mixedType);
     menu.addItem(8, "Clear Info", !mixedType);
@@ -920,6 +934,10 @@ void LibraryTableComponent::cellClicked(int row, int col, const juce::MouseEvent
             }
             else if (result == 14)
                 { if (onPlayNextRequested) onPlayNextRequested(selectedTracks); }
+            else if (result >= kAddToPlaylistBase) {
+                const int storeId = result - kAddToPlaylistBase;
+                if (onAddToPlaylistRequested) onAddToPlaylistRequested(selectedTracks, storeId);
+            }
         });
 }
 

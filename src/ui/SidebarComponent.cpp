@@ -660,9 +660,23 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                         // library view follows.
                         selectId(item.id);
 
+                        // "Add to Playlist" submenu: every other playlist
+                        // (omit the source so the user can't add a playlist
+                        // to itself, which would just duplicate every track).
+                        std::vector<std::pair<int, juce::String>> playlistsForMenu;
+                        if (getPlaylistsForMenu) playlistsForMenu = getPlaylistsForMenu();
+                        const int sourceStoreId = item.id - 1000;
+                        juce::PopupMenu addToPlaylistSubMenu;
+                        constexpr int kAddToPlaylistBase = 10000;
+                        for (const auto& [storeId, name] : playlistsForMenu)
+                            if (storeId != sourceStoreId)
+                                addToPlaylistSubMenu.addItem(kAddToPlaylistBase + storeId, name);
+
                         juce::PopupMenu menu;
                         menu.addItem(1, "Play Next");
                         menu.addItem(2, "Add to Queue");
+                        if (addToPlaylistSubMenu.getNumItems() > 0)
+                            menu.addSubMenu("Add to Playlist", addToPlaylistSubMenu);
                         menu.addSeparator();
                         menu.addItem(3, "Rename Playlist");
                         menu.addItem(4, "Duplicate Playlist");
@@ -682,6 +696,8 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                                     onDuplicatePlaylist(capturedId);
                                 else if (result == 5 && onDeletePlaylist)
                                     onDeletePlaylist(capturedId);
+                                else if (result >= 10000 && onAddToPlaylistFromItem)
+                                    onAddToPlaylistFromItem(capturedId, result - 10000);
                             });
                     }
                     else if (e.mods.isPopupMenu() && (
@@ -694,9 +710,20 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                         selectId(item.id);
 
                         const bool isPodcast = (item.id >= 4000 && item.id < 5000);
+
+                        // "Add to Playlist" submenu (only for non-podcast
+                        // groups, since playlists hold music tracks).
+                        std::vector<std::pair<int, juce::String>> playlistsForMenu;
+                        if (!isPodcast && getPlaylistsForMenu) playlistsForMenu = getPlaylistsForMenu();
+                        juce::PopupMenu addToPlaylistSubMenu;
+                        for (const auto& [storeId, name] : playlistsForMenu)
+                            addToPlaylistSubMenu.addItem(10000 + storeId, name);
+
                         juce::PopupMenu menu;
                         menu.addItem(1, "Play Next");
                         menu.addItem(2, "Add to Queue");
+                        if (addToPlaylistSubMenu.getNumItems() > 0)
+                            menu.addSubMenu("Add to Playlist", addToPlaylistSubMenu);
                         if (!isPodcast)
                             menu.addItem(3, "Create Playlist");
                         const int capturedId     = item.id;
@@ -711,6 +738,8 @@ void SidebarComponent::mouseDown(const juce::MouseEvent& e)
                                     onAddToQueueFromItem(capturedId);
                                 else if (result == 3 && onCreatePlaylistFromItem)
                                     onCreatePlaylistFromItem(capturedId, label);
+                                else if (result >= 10000 && onAddToPlaylistFromItem)
+                                    onAddToPlaylistFromItem(capturedId, result - 10000);
                             });
                     }
                     else if (!e.mods.isPopupMenu())

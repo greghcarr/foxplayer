@@ -38,6 +38,17 @@ public:
     std::function<void(int sidebarId)> onPlayNextFromItem;
     std::function<void(int sidebarId)> onAddToQueueFromItem;
 
+    // Returns the user's playlists in display order, as (storeId, name)
+    // pairs. Used to populate the "Add to Playlist" right-click submenu on
+    // sidebar items. If unset or returns empty, the submenu is omitted.
+    std::function<std::vector<std::pair<int, juce::String>>()> getPlaylistsForMenu;
+
+    // Fired when the user picks a playlist under "Add to Playlist" from a
+    // sidebar item's right-click menu. The receiver should append every
+    // track collected from the source sidebar item to the destination
+    // playlist (matching drag-and-drop semantics).
+    std::function<void(int sourceSidebarId, int destPlaylistStoreId)> onAddToPlaylistFromItem;
+
     // Fired when the user drags a playlist item to a new position.
     // newOrder contains the playlist sidebar IDs (1000+storeId) in the new order.
     std::function<void(std::vector<int>)> onPlaylistsReordered;

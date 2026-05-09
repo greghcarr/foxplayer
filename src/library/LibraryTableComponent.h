@@ -108,6 +108,17 @@ public:
     // Called when the user chooses "Add to Queue" from the context menu.
     std::function<void(std::vector<TrackInfo>)> onAddToQueueRequested;
 
+    // Returns the user's playlists in display order, as (storeId, name)
+    // pairs. Used to populate the "Add to Playlist" right-click submenu.
+    // If unset or returns empty, the submenu is omitted from the menu.
+    std::function<std::vector<std::pair<int, juce::String>>()> getPlaylistsForMenu;
+
+    // Called when the user picks a playlist under "Add to Playlist".
+    // The receiver should append the selected tracks to the given playlist
+    // (matching the drag-and-drop add-to-playlist UX, including the
+    // single-track duplicate warning).
+    std::function<void(std::vector<TrackInfo>, int playlistStoreId)> onAddToPlaylistRequested;
+
     // Called when the user chooses "Play Next" from the context menu.
     // Receivers should insert the tracks immediately after the currently
     // playing one rather than appending to the end of the queue.
