@@ -1,16 +1,25 @@
 # Stylus
 
-A personal music and podcast player for macOS, built with C++17 and JUCE 8.
+A personal music and podcast player for **macOS and Windows 11**, built with C++17 and JUCE 8.
 
 ## Requirements
 
-- macOS (Apple Silicon or Intel)
+### macOS
+
+- Apple Silicon or Intel
 - Xcode Command Line Tools
 - CMake 3.22 or later
 
-JUCE 8.0.4 is downloaded automatically at configure time via CMake FetchContent, no manual installation needed.
+### Windows 11
+
+- Visual Studio 2022 with the "Desktop development with C++" workload (MSVC v14.4x + Windows 10/11 SDK)
+- CMake 3.22 or later
+
+JUCE 8.0.4 is downloaded automatically at configure time via CMake FetchContent on both platforms; no manual installation needed.
 
 ## Build
+
+### macOS
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Debug
@@ -24,7 +33,20 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ```
 
+### Windows
+
+Visual Studio uses a multi-config generator, so the configuration is selected at build time rather than configure time:
+
+```powershell
+cmake -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Debug --parallel
+```
+
+For a release build, swap `--config Debug` for `--config Release`.
+
 ## Launch
+
+### macOS
 
 ```bash
 open build/Stylus_artefacts/Debug/Stylus.app
@@ -32,12 +54,21 @@ open build/Stylus_artefacts/Debug/Stylus.app
 
 Or double-click the `.app` in Finder after building.
 
+### Windows
+
+```powershell
+& "build\Stylus_artefacts\Debug\Stylus.exe"
+```
+
+Or double-click `Stylus.exe` in Explorer at `build\Stylus_artefacts\Debug\`.
+
 ## Features
 
 ### Library
+
 - Recursive folder scanning for music and podcasts (multiple roots supported)
 - On-disk library cache so the app starts with the previous library visible while a fresh scan runs in the background
-- Supports MP3, AAC, ALAC, FLAC, WAV, AIFF, OGG, Opus via CoreAudio
+- Supports MP3, FLAC, WAV, AIFF, OGG, Opus on both platforms; AAC, ALAC, M4A via CoreAudio on macOS and via Media Foundation on Windows
 - Search, multi-column sort, hidden tracks
 - Columns: Title, Artist, Album, Genre, Time, BPM, Key, Plays, Format, Date Added (each sortable, hideable, resizable)
 - Column visibility, width, and order persist per view mode
@@ -46,20 +77,23 @@ Or double-click the `.app` in Finder after building.
 - Per-view selection memory: each sidebar view remembers its own selection by file path; switching views shows nothing selected unless that view had a prior selection, returning restores it
 
 ### Playback
+
 - Play, pause, seek, volume, mute
 - Spinning CD artwork with embedded album art, falls back to a "now playing" label
+- Embedded album art read via AVFoundation on macOS and via the Windows Shell property system on Windows; folder / `cover.jpg` / sidecar fallback on both
 - Clickable artist, title, and "Playing from" links in the transport bar for quick navigation
 - Previous / next / shuffle / repeat (off, repeat all, repeat one)
 - Pressing previous within the first 3 seconds restarts the current track
 - Automatic track advance at end of song
 - Per-track play count, incremented when playback begins
-- Mini-player mode: shrink the window past the threshold and the transport bar reflows to a compact centred layout, the library / sidebar collapse out of view
+- Mini-player mode: shrink the window past the threshold and the transport bar reflows to a compact centred layout; the library / sidebar collapse out of view
 - Always-on-top pin button (toggle on the right edge of the transport bar)
-- Media key support (play / pause / next / prev) and macOS "Now Playing" integration
-- System tray (status bar) item with quick controls
+- Media keys + lock-screen / Now Playing surface integration: macOS uses MPNowPlayingInfoCenter + MPRemoteCommandCenter, Windows uses SystemMediaTransportControls (the small media flyout above the volume slider, the lock screen, Bluetooth headset controls)
+- System-tray / status-bar icon with a "Show / Quit" context menu
 
 ### Queue
-- Resizable side panel (drag the left edge), min = sidebar minimum width, max = 40% of window width
+
+- Resizable side panel (drag the left edge); min = sidebar minimum width, max = 40% of window width
 - "Up Next" header reads "Play Queue"
 - Toggling shuffle moves the currently playing track to index 0 and Fisher-Yates shuffles everything else; toggling off restores the original order with the playing track at its original position
 - After shuffle / unshuffle, the panel scrolls so the playing track is vertically centred
@@ -69,34 +103,39 @@ Or double-click the `.app` in Finder after building.
 - Queue toggle button auto-hides when the queue is empty
 
 ### Playlists
+
 - Create, rename, delete playlists
 - Drag tracks from the library onto a playlist in the sidebar
 - Drag rows within a playlist to reorder
 - Drag playlists in the sidebar to reorder them
 
 ### Metadata
+
 - Per-track Edit Info dialog (title, artist, album, genre, year, track number)
 - Bulk editing across multiple selected tracks of the same type, with prefix/suffix helpers
 - "Clear Info" resets fields to embedded tag values
 - "Look up on Apple Music" auto-fills metadata from the iTunes Search API, with undo
 - "Look up Album Art" fetches and embeds cover art, with undo
-- Batch Apple Music lookups (multi-select) update silently in the background, single lookups follow the track to its new position
+- Batch Apple Music lookups (multi-select) update silently in the background; single lookups follow the track to its new position
 - Network failures are auto-retried after a delay, with a circuit-breaker after consecutive failures
-- Metadata persists in hidden `.styl` JSON sidecar files alongside each audio file
+- Metadata persists in hidden `.styl` JSON sidecar files alongside each audio file (dot-prefixed and `FILE_ATTRIBUTE_HIDDEN` on Windows so they stay out of Explorer's way)
 - Tab through fields auto-selects all text in the focused field
 - Edit Info Next / Previous re-reads the current sorted order at click time, so a lookup that re-sorts the row still navigates to the correct neighbour
 
 ### Analysis
+
 - On-demand BPM and musical key detection via right-click
 - Analysis log window with queued / running / completed state per track
 - Background analysis only writes BPM / key / LUFS to disk (it re-loads the styl first), so concurrent user edits are never clobbered
 
 ### Audio
+
 - Output device selection in Preferences (follows system default automatically)
 - Buffer size selection
 - Persistent volume and mute across launches
 
 ### Podcast Support
+
 - Separate podcast folder scanning
 - Episode-number auto-detection from filenames (multiple heuristic patterns)
 - Show name auto-detected from album tag or parent folder
@@ -106,11 +145,12 @@ Or double-click the `.app` in Finder after building.
 
 Right-clicking one or more tracks in the library shows:
 
-- **Edit Info**: open the metadata editor (also Cmd-R)
+- **Edit Info**: open the metadata editor (also Cmd/Ctrl-R)
 - **Look up on Apple Music**: auto-fill metadata, with undo
 - **Look up Album Art**: fetch and embed cover art, with undo
 - **Look up on Podcast Index**: fetch podcast episode metadata (podcasts only)
 - **Add to Queue**: append to the current play queue
+- **Add to Playlist**: append to an existing playlist or create a new one
 - **Go to Artist / Album / Genre / Podcast**: jump to the track's sidebar view
 - **Analyze**: queue BPM and key detection
 - **Hide / Show**: toggle track visibility in the library
@@ -118,20 +158,22 @@ Right-clicking one or more tracks in the library shows:
 
 ## Keyboard Shortcuts
 
+The modifier is **Cmd** on macOS and **Ctrl** on Windows; JUCE auto-translates.
+
 | Shortcut | Action |
 |---|---|
 | Space | Play / Pause |
-| Cmd-, | Open Preferences |
-| Cmd-F | Focus search box |
-| Cmd-R | Edit Info for the current selection |
-| Shift-Cmd-L | Toggle Analysis Log window |
-| Shift-Cmd-P | Toggle Always on Top |
+| Cmd/Ctrl-, | Open Preferences |
+| Cmd/Ctrl-F | Focus search box |
+| Cmd/Ctrl-R | Edit Info for the current selection |
+| Shift-Cmd/Ctrl-L | Toggle Analysis Log window |
+| Shift-Cmd/Ctrl-P | Toggle Always on Top |
 | Enter | Play selected track |
 | Delete | Hide selected track(s) from library |
 
 ## Preferences
 
-Open with **Cmd-,** or via the File menu.
+Open with **Cmd/Ctrl-,** or via the **File** menu (the **Stylus** application menu on macOS).
 
 - **Audio**: output device (defaults to system default), buffer size
 - **Library**: add, remove, or rescan music and podcast folders independently
@@ -140,9 +182,16 @@ Open with **Cmd-,** or via the File menu.
 
 ## Window Behaviour
 
-- **Closing the window** hides it instead of quitting (App-style). Cmd-Q (or "Quit Stylus" from the app menu) actually quits.
+### macOS
+
+- **Closing the window** hides it instead of quitting (app-style). Cmd-Q (or "Quit Stylus" from the app menu) actually quits.
 - **Clicking the Dock icon** while a window is hidden re-shows it on the display under the mouse cursor.
 - **Clicking the Dock icon** while the window is visible on another macOS Space switches to that Space rather than dragging the window to the active Space.
+
+### Windows
+
+- **Closing the window** quits the app via the standard quit-confirmation flow (matching the OS convention; closing a music player's main window shouldn't leave music playing in the background).
+- **Title bar** uses Win11's immersive dark variant so it matches the dark JUCE-rendered window body instead of clashing with the rest of the UI.
 
 ## Session Persistence
 
@@ -160,4 +209,4 @@ Playback never auto-resumes on launch, by design.
 
 ## Architecture Reference
 
-See [CLAUDE.md](CLAUDE.md) for the internal architecture reference (audio pipeline, file layout, key patterns, conventions).
+See [CLAUDE.md](CLAUDE.md) for the internal architecture reference (audio pipeline, file layout, key patterns, cross-platform structure, conventions).
