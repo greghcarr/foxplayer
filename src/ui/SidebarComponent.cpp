@@ -961,6 +961,12 @@ void SidebarComponent::clearFocus()
     repaint();
 }
 
+bool SidebarComponent::isTypeAheadActive() const
+{
+    return typeAheadBuffer_.isNotEmpty()
+        && (juce::Time::currentTimeMillis() - typeAheadLastKeyMs_) < kTypeAheadTimeoutMs;
+}
+
 void SidebarComponent::focusGained(FocusChangeType)
 {
     // If the user tabs / shift-tabs into the sidebar (or any other path
@@ -1057,10 +1063,14 @@ bool SidebarComponent::keyPressed(const juce::KeyPress& key)
         return true;
     }
     if (key == juce::KeyPress::rightKey
+        || key == juce::KeyPress::returnKey
         || (key.getKeyCode() == juce::KeyPress::tabKey && ! key.getModifiers().isShiftDown()))
     {
-        // Right or Tab: hand keyboard focus to the library so arrow keys
-        // then walk its rows. Sidebar's focusLost drops the gray overlay.
+        // Right, Enter, or Tab: hand keyboard focus to the library so arrow
+        // keys then walk its rows. Sidebar's focusLost drops the gray
+        // overlay. (Enter never reaches this branch while an inline rename
+        // is active - the early-return at the top of keyPressed routes it
+        // to the editor.)
         if (onMoveFocusToLibrary) onMoveFocusToLibrary();
         return true;
     }
@@ -1070,6 +1080,137 @@ bool SidebarComponent::keyPressed(const juce::KeyPress& key)
         if (onMoveFocusToQueue) onMoveFocusToQueue();
         return true;
     }
+
+    // Type-ahead search: a printable letter (no Cmd / Alt / Ctrl) jumps
+    // the cursor to the first item in the user's current section whose
+    // label starts with the accumulated buffer. Subsequent keypresses
+    // within kTypeAheadTimeoutMs extend the buffer; after the timeout the
+    // next letter starts over fresh. Done before the Alt+arrow handler
+    // below so plain letter input is never swallowed by it (Alt+L etc.
+    // are still routed to Alt-handling instead because of the modifier
+    // check). Returns true to consume the key whether or not a match
+    // exists; otherwise the system would beep on no-match keys.
+    {
+        const auto& mods    = key.getModifiers();
+        const auto  textCh  = key.getTextCharacter();
+        const bool  printable = ! mods.isCommandDown() && ! mods.isAltDown()
+                              && ! mods.isCtrlDown()  && textCh > 0
+                              && juce::CharacterFunctions::isPrintable(textCh);
+        if (printable)
+        {
+            const auto now = juce::Time::currentTimeMillis();
+            if ((now - typeAheadLastKeyMs_) > kTypeAheadTimeoutMs)
+                typeAheadBuffer_.clear();
+            typeAheadBuffer_   += juce::String::charToString(textCh);
+            typeAheadLastKeyMs_ = now;
+
+            // Find the user's current section by walking sections_ for
+            // the focused / selected id; only items in that section are
+            // searched so type-ahead doesn't hop the user across panels.
+            const int anchorId = (focusedId_ > 0) ? focusedId_ : selectedId_;
+            int sectionIdx = -1;
+            for (size_t i = 0; i < sections_.size(); ++i)
+                for (const auto& it : sections_[i].items)
+                    if (it.id == anchorId) { sectionIdx = (int) i; break; }
+
+            if (sectionIdx >= 0)
+            {
+                for (const auto& it : sections_[(size_t) sectionIdx].items)
+                {
+                    if (it.id <= 0) continue;   // skip "+ New Playlist" etc.
+                    if (it.label.startsWithIgnoreCase(typeAheadBuffer_))
+                    {
+                        selectId(it.id);
+                        break;
+                    }
+                }
+            }
+            return true;
+        }
+    }
+
+    // Cmd + Up / Down: jump to the first / last navigable item of the
+    // user's current section. Stays inside the section the cursor is in
+    // - section-crossing is what Option+Up / Option+Down does.
+    if (key.getModifiers().isCommandDown()
+        && ! key.getModifiers().isAltDown()
+        && (key.getKeyCode() == juce::KeyPress::upKey
+         || key.getKeyCode() == juce::KeyPress::downKey))
+    {
+        const int anchorId = (focusedId_ > 0) ? focusedId_ : selectedId_;
+        for (const auto& sec : sections_)
+        {
+            bool inThisSection = false;
+            for (const auto& it : sec.items)
+                if (it.id == anchorId) { inThisSection = true; break; }
+            if (! inThisSection) continue;
+
+            const bool wantLast = (key.getKeyCode() == juce::KeyPress::downKey);
+            int targetId = -1;
+            for (auto it = sec.items.begin(); it != sec.items.end(); ++it)
+            {
+                if (it->id <= 0) continue;
+                targetId = it->id;
+                if (! wantLast) break;     // first navigable: stop on the first match
+                // last navigable: keep walking; the last assignment wins
+            }
+            if (targetId > 0) selectId(targetId);
+            return true;
+        }
+        return false;
+    }
+
+    // Option/Alt + Up / Down: jump to the first item of the previous /
+    // next section, collapsing the current section and expanding the
+    // target. No wrap-around: at the first / last section the keypress
+    // is a silent no-op. NOTE: `key == juce::KeyPress::upKey` returns
+    // false when any modifier is held (JUCE's int-form operator== only
+    // matches bare keys), so we compare the raw keycode here.
+    if (key.getModifiers().isAltDown()
+        && (key.getKeyCode() == juce::KeyPress::upKey
+         || key.getKeyCode() == juce::KeyPress::downKey))
+    {
+        const int direction = (key.getKeyCode() == juce::KeyPress::downKey) ? +1 : -1;
+
+        // Locate the section the cursor is currently sitting in. Prefer
+        // focusedId_ (where the gray overlay is); fall back to selectedId_
+        // when focus is fresh and focusedId_ hasn't been set yet.
+        const int anchorId = (focusedId_ > 0) ? focusedId_ : selectedId_;
+        int currentSection = -1;
+        for (size_t i = 0; i < sections_.size(); ++i)
+            for (const auto& it : sections_[i].items)
+                if (it.id == anchorId) { currentSection = (int) i; break; }
+        if (currentSection < 0) return false;   // no anchor, can't move
+
+        // Walk to the first section in `direction` that has at least one
+        // navigable row (id > 0). Sections without items don't count -
+        // jumping into an empty heading would leave focusedId_ stuck.
+        int targetSection = -1;
+        for (int j = currentSection + direction;
+             j >= 0 && j < (int) sections_.size();
+             j += direction)
+        {
+            const auto& sec = sections_[(size_t) j];
+            for (const auto& it : sec.items)
+                if (it.id > 0) { targetSection = j; break; }
+            if (targetSection >= 0) break;
+        }
+        if (targetSection < 0) return true;     // boundary - silent no-op
+
+        // Collapse the section we're leaving (only if collapsible: the
+        // LIBRARY section stays open) and expand the one we're entering.
+        if (sections_[(size_t) currentSection].collapsible)
+            sections_[(size_t) currentSection].collapsed = true;
+        if (sections_[(size_t) targetSection].collapsible)
+            sections_[(size_t) targetSection].collapsed = false;
+        layoutItems();
+
+        // Land on the first navigable row of the target section.
+        for (const auto& it : sections_[(size_t) targetSection].items)
+            if (it.id > 0) { selectId(it.id); break; }
+        return true;
+    }
+
     return false;
 }
 

@@ -282,6 +282,13 @@ private:
     // last track if the deleted rows were at the end. -1 = no pending.
     int                      pendingDeleteTarget_ { -1 };
 
+    // Snapshot of the row selection captured when the user navigates away
+    // via the keyboard (Left / Right / Tab / Shift-Tab) so focusTable() can
+    // restore the cursor on return. Stored as file paths so a sort or
+    // filter that shifts row indices while we're in another pane doesn't
+    // strand the memory on a stale row.
+    std::vector<juce::File>  savedSelectionForRefocus_;
+
     std::vector<TrackInfo>   tracks_;          // full library
     std::vector<TrackInfo*>  filteredTracks_;  // pointers into tracks_ for current view
     juce::File               playingFile_;     // currently playing file (ground truth for highlight)

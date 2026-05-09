@@ -145,7 +145,6 @@ private:
     // Applies a new podcast folder list (analogous to setMusicFolders).
     void setPodcastFolders(std::vector<juce::File> folders);
     void incrementPlayCount(const juce::File& file);
-    void deleteStylFilesInLibrary();
 
     // Drag-and-drop: add tracks to a playlist, with duplicate warning for single tracks.
     void handleTracksDroppedOnPlaylist(int sidebarId, const juce::StringArray& paths);
@@ -187,6 +186,7 @@ private:
     LoadingIndicator       loadingIndicator_;
     juce::DrawableButton   queueButton_ { "queueToggle", juce::DrawableButton::ImageFitted };
     TransportButton        pinButton_;
+    TransportButton        normalizeButton_;
 
     // Full-bleed overlay shown while the Preferences window is open. Dims the
     // main content, blocks clicks from reaching anything beneath, and offers
@@ -480,15 +480,12 @@ private:
     StylusMenuBar                       menuBar_ { this };
    #endif
 
-    struct SidebarTooltipWindow : public juce::TooltipWindow {
-        SidebarTooltipWindow(juce::Component* p, int ms) : TooltipWindow(p, ms) {}
-        juce::String getTipFor(juce::Component& c) override {
-            if (dynamic_cast<SidebarComponent*>(&c) != nullptr)
-                return juce::TooltipWindow::getTipFor(c);
-            return {};
-        }
-    };
-    SidebarTooltipWindow                tooltipWindow_ { this, 600 };
+    // Plain JUCE TooltipWindow: any TooltipClient / SettableTooltipClient in
+    // this component's hierarchy can deliver a tooltip. (An earlier version
+    // gated this to SidebarComponent only, which suppressed the transport
+    // bar's pin / normalize / speaker tooltips by silently swallowing the
+    // lookup for any other component.)
+    juce::TooltipWindow                 tooltipWindow_ { this, 600 };
 
     void checkFolderAccessibility();
 

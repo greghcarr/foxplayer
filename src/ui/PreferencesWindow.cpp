@@ -43,6 +43,37 @@ AudioPreferencesPanel::AudioPreferencesPanel(juce::AudioDeviceManager& dm,
     bufferCombo_.onChange = [this] { applySelectedBufferSize(); };
     addAndMakeVisible(bufferCombo_);
 
+    // Volume-normalisation toggle. Gated default off so unanalysed
+    // libraries don't see a behaviour change until they explicitly opt in.
+    const bool normalizeOn = [&] {
+        if (auto* s = appProps_.getUserSettings())
+            return s->getBoolValue(kNormalizeVolumeKey, false);
+        return false;
+    }();
+    normalizeVolumeToggle_.setButtonText("Normalize playback volume");
+    normalizeVolumeToggle_.setToggleState(normalizeOn, juce::dontSendNotification);
+    normalizeVolumeToggle_.setColour(juce::ToggleButton::textColourId,         Color::textPrimary);
+    normalizeVolumeToggle_.setColour(juce::ToggleButton::tickColourId,         Color::accent);
+    normalizeVolumeToggle_.setColour(juce::ToggleButton::tickDisabledColourId, Color::textSecondary);
+    normalizeVolumeToggle_.onClick = [this] {
+        const bool on = normalizeVolumeToggle_.getToggleState();
+        if (auto* s = appProps_.getUserSettings())
+            s->setValue(kNormalizeVolumeKey, on);
+        if (onNormalizeVolumeChanged) onNormalizeVolumeChanged(on);
+    };
+    addAndMakeVisible(normalizeVolumeToggle_);
+
+    normalizeVolumeDescription_.setText(
+        "Quieter tracks are turned up and louder ones turned down so songs "
+        "play at a similar level. Tracks that haven't been analysed for "
+        "loudness yet play at their original volume.",
+        juce::dontSendNotification);
+    normalizeVolumeDescription_.setColour(juce::Label::textColourId, Color::textSecondary);
+    normalizeVolumeDescription_.setFont(juce::Font(juce::FontOptions().withHeight(12.0f)));
+    normalizeVolumeDescription_.setJustificationType(juce::Justification::topLeft);
+    normalizeVolumeDescription_.setMinimumHorizontalScale(1.0f);   // wrap, don't shrink
+    addAndMakeVisible(normalizeVolumeDescription_);
+
     rebuildDeviceList();
     rebuildBufferList();
     lastDefaultName_ = currentDefaultDeviceName();
@@ -218,6 +249,11 @@ void AudioPreferencesPanel::changeListenerCallback(juce::ChangeBroadcaster*)
     rebuildDeviceList();
 }
 
+void AudioPreferencesPanel::setNormalizeVolumeChecked(bool on)
+{
+    normalizeVolumeToggle_.setToggleState(on, juce::dontSendNotification);
+}
+
 void AudioPreferencesPanel::paint(juce::Graphics& g)
 {
     g.fillAll(Color::background);
@@ -238,6 +274,17 @@ void AudioPreferencesPanel::resized()
     bufferLabel_.setBounds(row2.removeFromLeft(140));
     row2.removeFromLeft(8);
     bufferCombo_.setBounds(row2);
+
+    bounds.removeFromTop(20);
+
+    // Toggle + indented description below it. Indent matches the toggle's
+    // checkbox + gap so the description visually aligns with the label.
+    normalizeVolumeToggle_.setBounds(bounds.removeFromTop(28));
+    bounds.removeFromTop(2);
+    constexpr int descriptionIndent = 24;
+    auto descArea = bounds.removeFromTop(48);
+    descArea.removeFromLeft(descriptionIndent);
+    normalizeVolumeDescription_.setBounds(descArea);
 }
 
 // ============================================================================
@@ -570,43 +617,6 @@ void MiscPreferencesPanel::resized()
 }
 
 // ============================================================================
-// DebugPreferencesPanel
-// ============================================================================
-
-static constexpr const char* kDeleteSidecarsKey = "debug.deleteSidecarsOnShutdown";
-
-DebugPreferencesPanel::DebugPreferencesPanel(juce::ApplicationProperties& props)
-    : props_(props)
-{
-    const bool current = [&] {
-        if (auto* s = props_.getUserSettings())
-            return s->getBoolValue(kDeleteSidecarsKey, false);
-        return false;
-    }();
-
-    deleteSidecarsToggle_.setButtonText("Delete all sidecar files in Library on shutdown");
-    deleteSidecarsToggle_.setToggleState(current, juce::dontSendNotification);
-    deleteSidecarsToggle_.setColour(juce::ToggleButton::textColourId,       Color::textPrimary);
-    deleteSidecarsToggle_.setColour(juce::ToggleButton::tickColourId,       Color::accent);
-    deleteSidecarsToggle_.setColour(juce::ToggleButton::tickDisabledColourId, Color::textSecondary);
-    deleteSidecarsToggle_.onClick = [this] {
-        if (auto* s = props_.getUserSettings())
-            s->setValue(kDeleteSidecarsKey, deleteSidecarsToggle_.getToggleState());
-    };
-    addAndMakeVisible(deleteSidecarsToggle_);
-}
-
-void DebugPreferencesPanel::paint(juce::Graphics& g)
-{
-    g.fillAll(Color::background);
-}
-
-void DebugPreferencesPanel::resized()
-{
-    deleteSidecarsToggle_.setBounds(getLocalBounds().reduced(24).removeFromTop(32));
-}
-
-// ============================================================================
 // PreferencesComponent
 // ============================================================================
 
@@ -618,18 +628,15 @@ PreferencesComponent::PreferencesComponent(juce::AudioDeviceManager& dm,
     items_.push_back({ Category::Library, "Library", {} });
     items_.push_back({ Category::Display, "Display", {} });
     items_.push_back({ Category::Misc,    "Misc",    {} });
-    items_.push_back({ Category::Debug,   "Debug",   {} });
 
     audioPanel_   = std::make_unique<AudioPreferencesPanel>(deviceManager_, appProperties_);
     libraryPanel_ = std::make_unique<LibraryPreferencesPanel>();
     displayPanel_ = std::make_unique<DisplayPreferencesPanel>(appProperties);
     miscPanel_    = std::make_unique<MiscPreferencesPanel>(appProperties);
-    debugPanel_   = std::make_unique<DebugPreferencesPanel>(appProperties);
     addChildComponent(*libraryPanel_);
     addChildComponent(*audioPanel_);
     addChildComponent(*displayPanel_);
     addChildComponent(*miscPanel_);
-    addChildComponent(*debugPanel_);
 
     showPanel(current_);
     setSize(640, 480);
@@ -642,7 +649,6 @@ void PreferencesComponent::showPanel(Category c)
     if (libraryPanel_) libraryPanel_->setVisible(c == Category::Library);
     if (displayPanel_) displayPanel_->setVisible(c == Category::Display);
     if (miscPanel_)    miscPanel_->setVisible(c == Category::Misc);
-    if (debugPanel_)   debugPanel_->setVisible(c == Category::Debug);
     repaint();
 }
 
@@ -701,7 +707,6 @@ void PreferencesComponent::resized()
     if (libraryPanel_) libraryPanel_->setBounds(content);
     if (displayPanel_) displayPanel_->setBounds(content);
     if (miscPanel_)    miscPanel_->setBounds(content);
-    if (debugPanel_)   debugPanel_->setBounds(content);
 }
 
 void PreferencesComponent::mouseDown(const juce::MouseEvent& e)
@@ -767,6 +772,11 @@ LibraryPreferencesPanel* PreferencesWindow::libraryPanel()
 DisplayPreferencesPanel* PreferencesWindow::displayPanel()
 {
     return prefsComponent_ != nullptr ? &prefsComponent_->displayPanel() : nullptr;
+}
+
+AudioPreferencesPanel* PreferencesWindow::audioPanel()
+{
+    return prefsComponent_ != nullptr ? &prefsComponent_->audioPanel() : nullptr;
 }
 
 void PreferencesWindow::showLibraryCategory()

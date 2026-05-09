@@ -276,7 +276,41 @@ MainComponent::MainComponent()
     pinButton_.icon        = TransportButton::Icon::Pin;
     pinButton_.toggleStyle = true;
     pinButton_.onClick     = [this] { toggleAlwaysOnTop(); };
+    pinButton_.setTooltip("Always on top");
     addAndMakeVisible(pinButton_);
+
+    // Normalize-volume toggle button. Mirrors the pin button on the bottom
+    // side of the speaker icon: pin sits in the upper third of the
+    // transport bar, the speaker in the middle, and this in the lower third.
+    // Click toggles the same setting the Audio preferences exposes; both UIs
+    // stay in sync via the wiring below.
+    normalizeButton_.icon        = TransportButton::Icon::Normalize;
+    normalizeButton_.toggleStyle = true;
+    normalizeButton_.setTooltip("Normalize playback volume");
+    normalizeButton_.onClick     = [this] {
+        const bool on = ! engine_.isVolumeNormalizationEnabled();
+        engine_.setVolumeNormalizationEnabled(on);
+        normalizeButton_.toggleState = on ? 1 : 0;
+        normalizeButton_.repaint();
+        // Persist + sync the prefs panel toggle so opening Preferences shows
+        // the matching state. The panel reads the setting on its next layout
+        // and any open panel's toggle is updated directly.
+        if (auto* s = appProperties_.getUserSettings())
+            s->setValue(AudioPreferencesPanel::kNormalizeVolumeKey, on);
+        if (auto* audPanel = preferencesWindow_->audioPanel())
+            audPanel->setNormalizeVolumeChecked(on);
+        // Mirror the panel-side behaviour: when toggling on with a track
+        // already loaded that hasn't been analysed for loudness, kick off a
+        // one-shot LUFS measurement so the offset takes effect on the
+        // current playback rather than waiting for the next track.
+        if (on)
+        {
+            const auto& t = engine_.currentTrack();
+            if (t.lufs == 0.0f && t.file.existsAsFile())
+                analysisEngine_.enqueueLufsOnly(t);
+        }
+    };
+    addAndMakeVisible(normalizeButton_);
 
     // Sidebar resize handle: thin component at the right edge of the sidebar.
     sidebarDivider_.currentWidth = [this] { return sidebarWidth_; };
@@ -968,6 +1002,35 @@ MainComponent::MainComponent()
         transportBar_.setUseStaticAlbumArt(
             s->getBoolValue(DisplayPreferencesPanel::kUseStaticAlbumArtKey, false));
 
+    // Wire the Audio panel: forwards "Normalize playback volume" toggles
+    // straight to the engine, which mixes the per-track LUFS-based offset
+    // with the user volume on the next loadTrack and live on toggle.
+    if (auto* audPanel = preferencesWindow_->audioPanel())
+    {
+        audPanel->onNormalizeVolumeChanged = [this](bool on) {
+            engine_.setVolumeNormalizationEnabled(on);
+            // Keep the transport-bar mirror button in sync.
+            normalizeButton_.toggleState = on ? 1 : 0;
+            normalizeButton_.repaint();
+            // When normalisation flips on with a track already loaded that
+            // hasn't been analysed for loudness, kick off a one-shot LUFS
+            // measurement so the toggle takes effect on the current
+            // playback rather than waiting for the next track.
+            if (on)
+            {
+                const auto& t = engine_.currentTrack();
+                if (t.lufs == 0.0f && t.file.existsAsFile())
+                    analysisEngine_.enqueueLufsOnly(t);
+            }
+        };
+    }
+    if (auto* s = appProperties_.getUserSettings())
+    {
+        const bool normOn = s->getBoolValue(AudioPreferencesPanel::kNormalizeVolumeKey, false);
+        engine_.setVolumeNormalizationEnabled(normOn);
+        normalizeButton_.toggleState = normOn ? 1 : 0;
+    }
+
     // Analysis callbacks - feed both the library and the log window.
     analysisEngine_.onTrackQueued = [this](TrackInfo t) {
         if (analysisLogWindow_) analysisLogWindow_->log().trackQueued(t);
@@ -991,6 +1054,19 @@ MainComponent::MainComponent()
                 break;
             }
         }
+        // Push the result to the engine when it targets the currently-
+        // playing track. A non-zero value updates the per-track gain
+        // offset; a zero value tells the engine analysis ran but couldn't
+        // produce a measurement, so the -3 dB pre-roll falls back to
+        // unity rather than holding for the rest of the track.
+        if (engine_.currentTrack().file == analysed.file)
+        {
+            if (analysed.lufs != 0.0f)
+                engine_.updateCurrentTrackLufs(analysed.lufs);
+            else
+                engine_.markLufsAnalysisFailed();
+        }
+
         if (analysisLogWindow_) analysisLogWindow_->log().trackAnalysed(analysed);
     };
 
@@ -1178,10 +1254,20 @@ MainComponent::MainComponent()
     // pane actually receives focus and whether to show the queue first.
     auto focusSidebar = [this] {
         // grabKeyboardFocus() lands JUCE focus on SidebarComponent;
-        // focusGained() then re-asserts the gray-overlay focus indicator.
+        // focusGained() then re-asserts the gray-overlay focus indicator
+        // and clears library / queue visual selection via the wired
+        // onFocusGained handler.
         sidebar_.grabKeyboardFocus();
     };
     auto focusLibrary = [this] {
+        // Explicit visual mutex: clear queue / sidebar highlight so only
+        // the library shows a selected row once it gains focus. The
+        // onSelectionChanged-based mutex doesn't catch this path because
+        // focusTable restores via setSelectedFiles (dontSendNotification)
+        // and may not call selectRow at all if the saved selection is
+        // already the visible one.
+        queueView_.deselectAll();
+        sidebar_.clearFocus();
         libraryTable_.focusTable();
     };
     auto focusQueueIfPossible = [this] {
@@ -1189,6 +1275,11 @@ MainComponent::MainComponent()
         // Right / Tab path from the library: silent no-op when empty.
         if (queue_.size() == 0) return;
         if (! queueVisible_) toggleQueue();
+        // Same explicit mutex as focusLibrary - the queue's focusList may
+        // not call selectRow (when the saved row is already current) and
+        // therefore wouldn't fire onSelectionChanged on its own.
+        libraryTable_.deselectAll();
+        sidebar_.clearFocus();
         queueView_.focusList();
     };
 
@@ -1638,9 +1729,6 @@ MainComponent::~MainComponent()
     // memory at quit time.
     if (auto* props = appProperties_.getUserSettings())
     {
-        if (props->getBoolValue("debug.deleteSidecarsOnShutdown", false))
-            deleteStylFilesInLibrary();
-
         const bool ok = props->save();
         DBG("Destructor save -> " + props->getFile().getFullPathName()
             + (ok ? " (save ok)" : " (save FAILED)"));
@@ -2380,19 +2468,6 @@ void MainComponent::handleTracksDroppedOnPlaylist(int sidebarId,
     playlistStore_->addTracksToPlaylist(storeId, pathVec);
 }
 
-void MainComponent::deleteStylFilesInLibrary()
-{
-    std::vector<juce::File> allFolders = musicFolders_;
-    allFolders.insert(allFolders.end(), podcastFolders_.begin(), podcastFolders_.end());
-
-    for (const auto& folder : allFolders)
-    {
-        if (!folder.isDirectory()) continue;
-        for (const auto& f : folder.findChildFiles(juce::File::findFiles, true, ".*.styl"))
-            f.deleteFile();
-    }
-}
-
 void MainComponent::incrementPlayCount(const juce::File& file)
 {
     for (auto& t : fullLibrary_)
@@ -2574,6 +2649,16 @@ void MainComponent::setupAudioEngineCallbacks()
         const std::string artist = t.isPodcast ? t.podcast.toStdString() : t.artist.toStdString();
         const std::string title  = t.displayTitle().toStdString();
         nowPlaying_.setTrackInfo(title, artist, t.durationSecs);
+
+        // Lazy LUFS-on-first-play: when the user has volume normalisation
+        // enabled, every track they play that hasn't been analysed for
+        // loudness yet kicks off a background measurement so the engine
+        // can apply a gain offset within a second or two. Once measured,
+        // the result is saved to .styl and applied via the onTrackAnalysed
+        // hook above. Applies to podcasts too: with normalisation on, the
+        // user wants consistent levels regardless of content type.
+        if (engine_.isVolumeNormalizationEnabled() && track.lufs == 0.0f)
+            analysisEngine_.enqueueLufsOnly(track);
     };
 
     engine_.onTrackFinished = [this] {
@@ -2944,6 +3029,16 @@ void MainComponent::resized()
 
     pinButton_.setBounds(pinX, pinY, pinSize, pinSize);
     pinButton_.toFront(false);
+
+    // Normalize button: mirror image of the pin in the bottom third, so the
+    // speaker icon sits between the two right-side mod toggles. Slightly
+    // larger than the pin so the sliders + green checkmark composition has
+    // enough room to read clearly without crowding.
+    constexpr int normSize = 21;
+    const int normX = getWidth() - speakerCentreFromRight - normSize / 2 - 1;
+    const int normY = transportBar_.getY() + 2 * thirdH + (thirdH - normSize) / 2 - 5;
+    normalizeButton_.setBounds(normX, normY, normSize, normSize);
+    normalizeButton_.toFront(false);
 
     // Empty-state prompts centered in the library area.
     emptyPromptLabel_.setBounds(bounds.withSizeKeepingCentre(400, 40));
@@ -3442,7 +3537,13 @@ void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandI
             // Plain "Q" - no modifier - so it acts as a quick toggle. JUCE
             // suppresses this when a TextEditor (search box, inline rename,
             // etc.) has focus, so it doesn't eat literal q characters.
+            // Also stand down while the sidebar is mid-type-ahead so a
+            // user typing letters to jump to a Q-starting row gets the
+            // letter appended to the search buffer instead of toggling
+            // the queue. The command re-activates as soon as the
+            // type-ahead window times out (1 s of no input).
             info.addDefaultKeypress('q', juce::ModifierKeys::noModifiers);
+            info.setActive(! sidebar_.isTypeAheadActive());
             break;
 
         default: break;

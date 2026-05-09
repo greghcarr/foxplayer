@@ -50,14 +50,24 @@ void TransportButton::paint(juce::Graphics& g)
     const float cy = h * 0.5f;
     const float r  = d * 0.5f;
 
-    const bool isMod = (icon == Icon::Shuffle || icon == Icon::Repeat || icon == Icon::Pin);
+    const bool isMod = (icon == Icon::Shuffle || icon == Icon::Repeat
+                     || icon == Icon::Pin     || icon == Icon::Normalize);
 
     juce::Colour iconColor;
     if (isMod)
     {
         // Floating icon, no circle background.
         if (icon == Icon::Pin)
-            iconColor = (toggleState == 0) ? juce::Colour(0xff606060) : juce::Colour(0xffcc3333);
+            // Off tone matches the unmuted speaker (textDim), keeping the
+            // right-edge mods one visual family at rest.
+            iconColor = (toggleState == 0) ? Color::textDim : juce::Colour(0xffcc3333);
+        else if (icon == Icon::Normalize)
+            // Off: very dim so it reads as inactive. On: matches the speaker
+            // and pin's resting tone (textDim) so all three right-edge mods
+            // look like one family at full brightness when their feature
+            // is engaged. The green checkmark is the additional "on" cue.
+            iconColor = (toggleState == 0) ? juce::Colour(0xff404040)
+                                           : Color::textDim;
         else
             iconColor = (toggleState == 0) ? juce::Colour(0xff606060) : Color::accent;
     }
@@ -114,6 +124,8 @@ void TransportButton::paint(juce::Graphics& g)
         break;
     case Icon::Pin:
         svgData = BinaryData::pushpinsimplefill_svg;    svgSize = BinaryData::pushpinsimplefill_svgSize; break;
+    case Icon::Normalize:
+        svgData = BinaryData::slidersfill_svg;          svgSize = BinaryData::slidersfill_svgSize;       break;
     }
 
     if (svgData == nullptr) return;
@@ -144,6 +156,44 @@ void TransportButton::paint(juce::Graphics& g)
             juce::Rectangle<float>(cx - iconSize * 0.5f, cy - iconSize * 0.5f, iconSize, iconSize),
             juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize,
             1.0f);
+    }
+
+    // Normalize button "on" state: a green check-fill drawn over the dim
+    // waveform icon. The check shape itself has no background (it's just
+    // the stroke) so the icon stays visible around it; the check is also
+    // drawn at less than full opacity so the icon shows through the parts
+    // it does overlap. Built lazily and cached so paint stays cheap.
+    if (icon == Icon::Normalize && toggleState != 0)
+    {
+        if (! checkOverlayCache_)
+        {
+            // Use the "fat" variant (check-fat-fill) rather than check-fill:
+            // check-fill is a checkbox shape (rounded rect + check cutout),
+            // which renders as a green frame with a transparent check
+            // inside. check-fat-fill is just the chunky check stroke on
+            // its own with no frame, so the underlying icon stays visible
+            // around it.
+            const auto xmlStr = juce::String::createStringFromData(
+                BinaryData::checkfatfill_svg, BinaryData::checkfatfill_svgSize);
+            if (auto xml = juce::XmlDocument::parse(xmlStr))
+                if (auto drawable = juce::Drawable::createFromSVG(*xml))
+                {
+                    // Distinct "on / approved" green, independent of any
+                    // app-accent colour change.
+                    drawable->replaceColour(juce::Colours::black, juce::Colour(0xff3ec25e));
+                    checkOverlayCache_ = std::move(drawable);
+                }
+        }
+        if (checkOverlayCache_)
+        {
+            const float overlaySize = d * 0.85f;
+            checkOverlayCache_->drawWithin(
+                g,
+                juce::Rectangle<float>(cx - overlaySize * 0.5f, cy - overlaySize * 0.5f,
+                                       overlaySize, overlaySize),
+                juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize,
+                0.78f);    // partial opacity so the waveform shows through
+        }
     }
 
     if (!isEnabled())
@@ -372,43 +422,23 @@ static void drawRoundedAlbumArt(juce::Graphics& g,
                             juce::Rectangle<int> bounds,
                             const juce::Image& art)
 {
-    constexpr float cornerR = 6.0f;
-    const auto boundsF = bounds.toFloat();
-
+    // Static album-art slot is a square with right-angle corners (no
+    // rounding), so both the art-present and no-art cases just draw plain
+    // rectangles. The function name is kept for minimal-diff reasons -
+    // see ensureShadowImage for the matching sharp-corner shadow shape.
     if (art.isValid())
     {
-        // Drop shadow pre-rendered by TransportBar::paint, see ensureShadowImage().
-        juce::Path clip;
-        clip.addRoundedRectangle(boundsF, cornerR);
-        g.saveState();
-        g.reduceClipRegion(clip);
         g.drawImage(art,
                     bounds.getX(), bounds.getY(),
                     bounds.getWidth(), bounds.getHeight(),
                     0, 0, art.getWidth(), art.getHeight());
-        g.restoreState();
         return;
     }
 
-    // No-art placeholder: dashed rounded rectangle, ported from the iOS
-    // app's DashedSquarePlaceholder. Inset from the slot, transparent fill,
-    // dashed border in mid-grey. The caller is expected to skip the drop
-    // shadow when the placeholder is shown so the empty interior reads as
-    // "no artwork" rather than "shadow halo around an empty box".
-    constexpr float inset             = 8.0f;
-    constexpr float strokeW           = 2.0f;
-    constexpr float placeholderCorner = 3.0f;
-    constexpr float dashes[]          = { 3.0f, 3.0f };
-
-    juce::Path path;
-    path.addRoundedRectangle(boundsF.reduced(inset), placeholderCorner);
-
-    juce::Path dashed;
-    juce::PathStrokeType stroke(strokeW);
-    stroke.createDashedStroke(dashed, path, dashes, juce::numElementsInArray(dashes));
-
-    g.setColour(Color::textSecondary);
-    g.fillPath(dashed);
+    // No-art placeholder: solid square in the header-background tone, same
+    // shape as the art-present case so the slot stays visually consistent.
+    g.setColour(Color::headerBackground);
+    g.fillRect(bounds);
 }
 
 // Parses an SVG binary resource and returns a tinted Drawable.
@@ -554,10 +584,13 @@ TransportBar::TransportBar(AudioEngine& engine)
         if (onRepeatToggled) onRepeatToggled(repeatButton_.toggleState);
     };
 
-    // Listen to mouse moves on this component AND all nested children (volume
-    // slider, transport buttons). With this, refreshHoverState() runs only on
-    // actual mouse activity rather than being polled at 30 Hz.
-    addMouseListener(this, true);
+    // Forward mouseMove / mouseExit from this component AND all nested
+    // children (volume slider, transport buttons) into refreshHoverState()
+    // via a small dedicated forwarder. Using a separate listener instead
+    // of registering `this` keeps direct mouseDown / mouseUp events from
+    // firing twice (virtual + listener-self) - which silently broke the
+    // speaker-icon mute toggle.
+    addMouseListener(&hoverForwarder_, true);
 
     // The animation timer is now started/stopped on demand via
     // updateTimerState(), only running while audio is actually playing.
@@ -911,21 +944,15 @@ void TransportBar::paint(juce::Graphics& g)
     if (!albumArtBounds_.isEmpty() && hasTrack_)
     {
         // Rounded-rect shadow for podcasts and for static music art; ellipse
-        // shadow only for the spinning vinyl disc.
-        const bool roundedShape  = currentTrack_.isPodcast || useStaticAlbumArt_;
-        const bool isPlaceholder = roundedShape && ! albumArt_.isValid();
-
-        // Skip the shadow when we're rendering the dashed-border placeholder:
-        // it has a transparent interior, so a shadow would draw a halo around
-        // an empty box.
-        if (! isPlaceholder)
-        {
-            ensureShadowImage(albumArtBounds_, roundedShape);
-            if (shadowImage_.isValid())
-                g.drawImageAt(shadowImage_,
-                              albumArtBounds_.getX() - shadowMargin,
-                              albumArtBounds_.getY() - shadowMargin);
-        }
+        // shadow only for the spinning vinyl disc. Solid placeholder squares
+        // get the same shadow treatment as art-present, so the empty slot
+        // still feels grounded against the bar background.
+        const bool roundedShape = currentTrack_.isPodcast || useStaticAlbumArt_;
+        ensureShadowImage(albumArtBounds_, roundedShape);
+        if (shadowImage_.isValid())
+            g.drawImageAt(shadowImage_,
+                          albumArtBounds_.getX() - shadowMargin,
+                          albumArtBounds_.getY() - shadowMargin);
 
         if (currentTrack_.isPodcast || useStaticAlbumArt_)
             drawRoundedAlbumArt(g, albumArtBounds_, albumArt_);
@@ -1540,7 +1567,7 @@ void TransportBar::ensureShadowImage(juce::Rectangle<int> artBounds, bool isPodc
     if (cd)
         shape.addEllipse(shapeBounds);
     else
-        shape.addRoundedRectangle(shapeBounds, 6.0f);
+        shape.addRectangle(shapeBounds);   // sharp corners to match the static-art slot
 
     juce::DropShadow(juce::Colours::black.withAlpha(0.85f),
                      shadowRadius, {}).drawForPath(g, shape);
@@ -1586,6 +1613,21 @@ void TransportBar::updateTimerState()
 void TransportBar::mouseMove(const juce::MouseEvent& /*e*/)
 {
     refreshHoverState();
+}
+
+juce::String TransportBar::getTooltip()
+{
+    // Speaker / mute icon: drawn directly by paint(), not a child component,
+    // so we drive its tooltip from the live mouse position. The label
+    // mirrors the action the click would perform: when output is silent
+    // (muted, or slider at zero) the click unmutes; otherwise it mutes.
+    const auto pos = getMouseXYRelative();
+    if (! speakerBounds_.isEmpty() && speakerBounds_.contains(pos))
+    {
+        const bool silent = muted_ || volumeSlider_.getValue() <= 0.0;
+        return silent ? "Unmute" : "Mute";
+    }
+    return {};
 }
 
 void TransportBar::mouseExit(const juce::MouseEvent& /*e*/)
@@ -1666,13 +1708,11 @@ juce::String TransportBar::formatSeconds(double secs) const
 
 void TransportBar::mouseDown(const juce::MouseEvent& e)
 {
-    // We registered as a mouse listener on all nested children (for hover
-    // state refresh), so this fires for clicks on child buttons too - and
-    // the MouseEvent's coordinates are then relative to the child, not us.
-    // Album-art / seek / link hit-testing must only run for direct clicks
-    // on TransportBar; otherwise a click at (25, 25) on the centered play
-    // button would land inside albumArtBounds_ at (~6, 6, 80, 80) and
-    // wrongly mark the album art as pressed.
+    // Defensive: only react to direct clicks on the bar itself. Hover
+    // forwarding is wired via a separate HoverForwarder listener so child
+    // events no longer reach this method, but if anything ever changes
+    // and a child forward starts firing, this gate stops it from
+    // misinterpreting child-relative coordinates as bar-relative ones.
     if (e.originalComponent != this) return;
 
     // Speaker/mute click works regardless of whether a track is loaded.

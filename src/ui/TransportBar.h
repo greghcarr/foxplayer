@@ -11,10 +11,11 @@ namespace Stylus
 {
 
 // Circular transport control button with a vector-drawn icon.
-class TransportButton : public juce::Component
+class TransportButton : public juce::Component,
+                        public juce::SettableTooltipClient
 {
 public:
-    enum class Icon { Prev, Play, Pause, Next, Shuffle, Repeat, Pin };
+    enum class Icon { Prev, Play, Pause, Next, Shuffle, Repeat, Pin, Normalize };
 
     Icon icon        { Icon::Play };
     int  toggleState { 0 };   // 0=off, 1=on, 2=on-alt (repeat-one)
@@ -54,12 +55,18 @@ private:
     };
     mutable SvgCache svgCache_;
 
+    // Lazy-built green checkmark drawn over the Normalize icon when it's
+    // in the "on" state. One-shot cache: built on first paint after
+    // construction, then reused for every subsequent on-state paint.
+    mutable std::unique_ptr<juce::Drawable> checkOverlayCache_;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TransportButton)
 };
 
 // ----------------------------------------------------------------------------
 
 class TransportBar : public juce::Component,
+                     public juce::TooltipClient,
                      private juce::Timer
 {
 public:
@@ -168,6 +175,31 @@ private:
     void mouseUp(const juce::MouseEvent& e) override;
     void mouseMove(const juce::MouseEvent& e) override;
     void mouseExit(const juce::MouseEvent& e) override;
+
+    // juce::TooltipClient. Non-button hit zones (currently just the
+    // speaker / mute icon) are drawn directly by paint(), so the tooltip
+    // window asks us via this hook and we look up a string by position.
+    juce::String getTooltip() override;
+
+    // Forwards mouseMove / mouseExit from TransportBar's children up to
+    // refreshHoverState so the hover indicators don't get stale when the
+    // pointer is over a child (volume slider, transport buttons). Lives
+    // as a tiny standalone listener instead of having TransportBar
+    // listen to its own events: registering `this` as a listener with
+    // includeChildren=true causes JUCE to call our mouseDown / mouseUp
+    // twice per direct click (once via the virtual mechanism, once via
+    // the listener mechanism), which silently broke state-toggle
+    // handlers like the speaker mute click.
+    class HoverForwarder : public juce::MouseListener
+    {
+    public:
+        explicit HoverForwarder(TransportBar& b) : bar_(b) {}
+        void mouseMove(const juce::MouseEvent&) override { bar_.refreshHoverState(); }
+        void mouseExit(const juce::MouseEvent&) override { bar_.refreshHoverState(); }
+    private:
+        TransportBar& bar_;
+    };
+    HoverForwarder hoverForwarder_ { *this };
     double seekBarNormalizedX(int x) const;
 
     // Recomputes hover state from the current mouse position and repaints if

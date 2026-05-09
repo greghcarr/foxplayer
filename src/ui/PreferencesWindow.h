@@ -16,12 +16,25 @@ class AudioPreferencesPanel : public juce::Component,
                                private juce::Timer
 {
 public:
+    static constexpr const char* kNormalizeVolumeKey = "audio.normalizeVolume";
+
     AudioPreferencesPanel(juce::AudioDeviceManager& deviceManager,
                           juce::ApplicationProperties& appProperties);
     ~AudioPreferencesPanel() override;
 
     void paint(juce::Graphics& g) override;
     void resized() override;
+
+    // Fired when the user flips the "Normalize playback volume" toggle.
+    // The initial state is loaded from ApplicationProperties at construction
+    // time, so MainComponent can skip re-reading it from disk.
+    std::function<void(bool)> onNormalizeVolumeChanged;
+
+    // External setter so the same option's mirror toggle (the small
+    // equalizer-icon button in the transport-bar strip) can keep this
+    // panel's checkbox in sync. dontSendNotification is used so the
+    // round-trip doesn't fire onNormalizeVolumeChanged back at the caller.
+    void setNormalizeVolumeChecked(bool on);
 
 private:
     void rebuildDeviceList();
@@ -49,6 +62,9 @@ private:
 
     juce::Label    bufferLabel_;
     juce::ComboBox bufferCombo_;
+
+    juce::ToggleButton normalizeVolumeToggle_;
+    juce::Label        normalizeVolumeDescription_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPreferencesPanel)
 };
@@ -158,24 +174,6 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiscPreferencesPanel)
 };
 
-// ---- Debug panel -------------------------------------------------------------
-// Developer toggles that persist to ApplicationProperties.
-class DebugPreferencesPanel : public juce::Component
-{
-public:
-    explicit DebugPreferencesPanel(juce::ApplicationProperties& props);
-
-    void paint(juce::Graphics& g) override;
-    void resized() override;
-
-private:
-    juce::ApplicationProperties& props_;
-
-    juce::ToggleButton deleteSidecarsToggle_;
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DebugPreferencesPanel)
-};
-
 // ---- Sidebar + panel host ----------------------------------------------------
 // Left-hand category list + right-hand content area. Add a new category by
 // extending the Category enum and wiring a new panel in PreferencesComponent.
@@ -190,7 +188,7 @@ public:
     void mouseDown(const juce::MouseEvent& e) override;
 
 private:
-    enum class Category { Audio, Library, Display, Misc, Debug };
+    enum class Category { Audio, Library, Display, Misc };
 
     struct SidebarItem
     {
@@ -216,11 +214,11 @@ private:
     std::unique_ptr<LibraryPreferencesPanel> libraryPanel_;
     std::unique_ptr<DisplayPreferencesPanel> displayPanel_;
     std::unique_ptr<MiscPreferencesPanel>    miscPanel_;
-    std::unique_ptr<DebugPreferencesPanel>   debugPanel_;
 
 public:
     LibraryPreferencesPanel& libraryPanel() { return *libraryPanel_; }
     DisplayPreferencesPanel& displayPanel() { return *displayPanel_; }
+    AudioPreferencesPanel&   audioPanel()   { return *audioPanel_; }
 
 private:
 
@@ -250,6 +248,11 @@ public:
     // Direct access to the display panel so MainComponent can wire up the
     // album-art-mode change callback.
     DisplayPreferencesPanel* displayPanel();
+
+    // Direct access to the audio panel so MainComponent can wire up the
+    // volume-normalisation callback (loaded state is delivered via the
+    // panel's initial onNormalizeVolumeChanged invocation handled there).
+    AudioPreferencesPanel*   audioPanel();
 
     // Opens Preferences and navigates straight to the Library tab.
     void showLibraryCategory();

@@ -92,6 +92,12 @@ private:
     // -1 = no pending.
     int           pendingDeleteTarget_ { -1 };
 
+    // Row index of the most recent selection saved when the user navigates
+    // away via the keyboard (Left / Right / Tab / Shift-Tab). Restored
+    // by focusList() so returning to the queue lands on the same row
+    // rather than back at 0. -1 = none saved.
+    int           savedSelectedRowForRefocus_ { -1 };
+
     std::vector<TrackInfo> items_;
     int playingIndex_ { -1 };
     // -1 when no library drag is active. Otherwise: the live-queue index at

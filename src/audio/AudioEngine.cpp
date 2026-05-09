@@ -106,7 +106,133 @@ void AudioEngine::stop()
 void AudioEngine::setVolume(float gain)
 {
     volume_ = juce::jlimit(0.0f, 1.0f, gain);
-    transportSource_.setGain(volume_);
+    // Volume slider should feel responsive: apply instantly, no fade.
+    applyCombinedGain(false);
+}
+
+void AudioEngine::setVolumeNormalizationEnabled(bool enabled)
+{
+    if (normalizeVolume_ == enabled) return;
+    normalizeVolume_ = enabled;
+    // Normalisation toggle is a global decision the user makes - fade the
+    // transition so an active track doesn't lurch between levels.
+    applyCombinedGain(true);
+}
+
+void AudioEngine::updateCurrentTrackLufs(float lufs)
+{
+    if (currentTrack_.lufs == lufs && lufsKnown_) return;
+    currentTrack_.lufs = lufs;
+    lufsKnown_ = true;
+    // Lazy LUFS just landed mid-track: fade from pre-roll to the measured
+    // level so the correction reads as a smooth settle, not a jump.
+    applyCombinedGain(true);
+}
+
+void AudioEngine::markLufsAnalysisFailed()
+{
+    if (lufsKnown_) return;   // already settled
+    lufsKnown_ = true;        // we now know there's no measurement
+    // Same rationale as updateCurrentTrackLufs: fade pre-roll back to
+    // unity rather than snapping.
+    applyCombinedGain(true);
+}
+
+float AudioEngine::computeTargetGain() const
+{
+    // Target loudness: -14 LUFS, the streaming-platform standard (Apple
+    // Music / Spotify / YouTube Music all normalise around this). A track
+    // measured at -14 plays through at unity; quieter tracks get amplified,
+    // louder ones attenuated.
+    constexpr float kTargetLufs = -14.0f;
+    // Cap the boost / cut so a wildly miscalibrated lufs value can't push
+    // the gain into clipping or near-silence. ±6 dB matches what most
+    // streaming services apply in practice.
+    constexpr float kMaxGainLin = 2.0f;     // +6 dB
+    constexpr float kMinGainLin = 0.5f;     // -6 dB
+
+    // When normalisation is on but the current track hasn't been analysed
+    // yet, pre-roll at -3 dB instead of unity. Most loud-mastered tracks
+    // will land near this once the lazy LUFS measurement arrives, so the
+    // ramp from pre-roll to final is small and unobtrusive.
+    constexpr float kPreAnalysisOffset = 0.7079f;   // 10^(-3/20) = -3 dB
+
+    float trackOffset = 1.0f;
+    if (normalizeVolume_)
+    {
+        if (currentTrack_.lufs != 0.0f)
+        {
+            const float dB = kTargetLufs - currentTrack_.lufs;
+            trackOffset    = std::pow(10.0f, dB / 20.0f);
+            trackOffset    = juce::jlimit(kMinGainLin, kMaxGainLin, trackOffset);
+        }
+        else if (! lufsKnown_)
+        {
+            trackOffset = kPreAnalysisOffset;
+        }
+        // else: lufsKnown_ true with lufs==0 means analysis ran but
+        // produced no value (file unreadable / decode failure / silent
+        // track). Fall through to unity.
+    }
+    return volume_ * trackOffset;
+}
+
+void AudioEngine::applyCombinedGain(bool smooth)
+{
+    const float target = computeTargetGain();
+
+    if (! smooth)
+    {
+        // Immediate path: stop any in-progress ramp and snap to target.
+        // JUCE's setGain still ramps internally over one audio block
+        // (~10 ms), so even the "instant" branch isn't a hard click.
+        rampTimer_.stopTimer();
+        currentGain_ = target;
+        transportSource_.setGain(target);
+        return;
+    }
+
+    // Smooth path: nothing to do if we're already at the target.
+    if (std::abs(target - currentGain_) < 1.0e-5f)
+    {
+        rampTimer_.stopTimer();
+        return;
+    }
+
+    // (Re)start the ramp from the live gain - cleanly handles a new ramp
+    // arriving mid-fade by treating wherever we are right now as the new
+    // start point.
+    rampStartGain_   = currentGain_;
+    rampTargetGain_  = target;
+    rampStartTimeMs_ = juce::Time::currentTimeMillis();
+    if (! rampTimer_.isTimerRunning())
+        rampTimer_.startTimerHz(60);
+}
+
+void AudioEngine::stepRamp()
+{
+    const auto elapsed = juce::Time::currentTimeMillis() - rampStartTimeMs_;
+    float t = (float) elapsed / (float) kRampDurationMs;
+    if (t >= 1.0f)
+    {
+        t = 1.0f;
+        rampTimer_.stopTimer();
+    }
+
+    // Smoothstep ease-in-out so the ramp visibly accelerates and
+    // decelerates rather than starting and ending abruptly.
+    const float eased = t * t * (3.0f - 2.0f * t);
+
+    // Interpolate in log (dB) space: a perceptually even fade between two
+    // gains. Floors at -120 dB to keep std::log10(0) out of play.
+    constexpr float kFloorDb = -120.0f;
+    const float dbStart  = (rampStartGain_  > 0.0f) ? std::log10(rampStartGain_)  * 20.0f : kFloorDb;
+    const float dbTarget = (rampTargetGain_ > 0.0f) ? std::log10(rampTargetGain_) * 20.0f : kFloorDb;
+    const float db       = dbStart + (dbTarget - dbStart) * eased;
+    const float g        = std::pow(10.0f, db / 20.0f);
+
+    currentGain_ = g;
+    transportSource_.setGain(g);
 }
 
 void AudioEngine::seekToNormalized(double position)
@@ -176,6 +302,11 @@ void AudioEngine::loadTrack(const TrackInfo& track)
         + " length=" + juce::String(reader->lengthInSamples));
 
     currentTrack_ = track;
+    // Tracks loaded with a non-zero LUFS already have a definitive measurement.
+    // Tracks with lufs==0 are "unknown" - lazy analysis is expected to land
+    // (or report a failure) shortly. applyCombinedGain reads this to decide
+    // pre-roll vs measured vs unity.
+    lufsKnown_ = (currentTrack_.lufs != 0.0f);
     readerSource_ = std::make_unique<juce::AudioFormatReaderSource>(reader, true);
     transportSource_.setSource(readerSource_.get(),
                                Constants::audioReadAheadBufferSize,
@@ -183,6 +314,13 @@ void AudioEngine::loadTrack(const TrackInfo& track)
                                reader->sampleRate);
     trackLoaded_ = true;
     loading_ = false;
+    // Lock in the per-track gain (user volume * LUFS offset if normalisation
+    // is on) for the freshly-loaded track. Done after setSource so the
+    // gain applies to the new transport state, not the unloaded one.
+    // Instant: the transport hasn't started yet, so there's nothing to
+    // fade from anyway, and a cross-track fade would be a separate
+    // feature with different semantics.
+    applyCombinedGain(/*smooth=*/ false);
     DBG("AudioEngine::loadTrack, done");
 }
 

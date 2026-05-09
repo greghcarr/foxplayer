@@ -93,6 +93,12 @@ public:
     int  focusedId() const { return focusedId_; }
     void clearFocus();
 
+    // True while the user is mid-type-ahead in the sidebar (a printable
+    // letter was pressed within the timeout window). MainComponent's Q
+    // command consults this so a Q typed during type-ahead extends the
+    // search buffer instead of toggling the queue panel.
+    bool isTypeAheadActive() const;
+
     // Toggles a small spinning indicator next to the LIBRARY heading while
     // the music-folder scanner is running.
     void setLibraryLoading(bool loading);
@@ -214,6 +220,15 @@ private:
     int                  focusedId_      { 1 };
     int                  dragOverItemId_ { -1 };
     int                  editingItemId_  { -1 };
+
+    // Type-ahead search state. Letters typed while the sidebar has focus
+    // append to typeAheadBuffer_ and jump the cursor to the first item in
+    // the active section whose label starts with the buffer (case-
+    // insensitive). After kTypeAheadTimeoutMs of inactivity the next
+    // letter resets the buffer.
+    juce::String         typeAheadBuffer_;
+    juce::int64          typeAheadLastKeyMs_ { 0 };
+    static constexpr int kTypeAheadTimeoutMs = 1000;
 
     // Playlist drag-reorder state
     int                  reorderDragId_       { -1 };  // sidebar ID being dragged

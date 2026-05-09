@@ -37,8 +37,12 @@ LibraryTableComponent::LibraryTableComponent()
     table_.addMouseListener(this, true);
     // Cross-pane keyboard nav: see keyPressed(KeyListener) below. The
     // listener fires before the table's built-in arrow / Tab handling, so
-    // returning true from those branches consumes the key.
+    // returning true from those branches consumes the key. The same
+    // listener is also installed on the search box so its Down arrow can
+    // jump focus to the table's first row (and Up from row 0 jumps back
+    // up to the search box).
     table_.addKeyListener(this);
+    searchBox_.addKeyListener(this);
     // Transparent so LibraryTableComponent::paint() can draw the full-height stripes.
     table_.setColour(juce::ListBox::backgroundColourId,      juce::Colours::transparentBlack);
     table_.setColour(juce::TableListBox::backgroundColourId, juce::Colours::transparentBlack);
@@ -756,24 +760,78 @@ void LibraryTableComponent::deselectAll()
 
 void LibraryTableComponent::focusTable()
 {
-    // If nothing's selected yet, anchor on row 0 so arrow keys have a
-    // visible starting point. JUCE's TableListBox draws no highlight on a
-    // focus-without-selection state, which would look like the focus jump
-    // did nothing.
+    // Restore the row selection captured the last time the user navigated
+    // away from the library so they land back on the same track they were
+    // pointing at, not on row 0. The mutex still clears the visible
+    // highlight on the *other* panes when this triggers onSelectionChanged
+    // - savedSelectionForRefocus_ on those panes is independent of their
+    // visible selection, so their position is preserved too.
+    if (! savedSelectionForRefocus_.empty())
+    {
+        setSelectedFiles(savedSelectionForRefocus_);
+    }
     if (table_.getSelectedRows().isEmpty() && table_.getNumRows() > 0)
-        table_.selectRow(0);
+        table_.selectRow(0);   // saved files weren't in the current view; anchor on row 0
     table_.grabKeyboardFocus();
 }
 
-bool LibraryTableComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
+bool LibraryTableComponent::keyPressed(const juce::KeyPress& key, juce::Component* origin)
 {
     // Don't steal keys while a cell editor is active.
     if (activeCellEditor_) return false;
+
+    // Search box ↔ table vertical traversal. Down from the search box lands
+    // on the first matching row (anchoring on row 0 if nothing's selected
+    // yet). Up from row 0 of the table jumps back into the search box.
+    if (origin == &searchBox_)
+    {
+        if (key.getKeyCode() == juce::KeyPress::downKey
+            && ! key.getModifiers().isAnyModifierKeyDown())
+        {
+            if (filteredTracks_.empty()) return false;
+            if (table_.getSelectedRow() < 0)
+                table_.selectRow(0);
+            table_.grabKeyboardFocus();
+            return true;
+        }
+        return false;   // let TextEditor handle everything else
+    }
+
+    // Below this point keys come from the inner table.
+
+    // Up arrow from row 0: pop into the search box rather than no-op'ing
+    // at the top. Save the selection for refocus, then clear the visible
+    // highlight so the table doesn't appear "still selected" while the
+    // search box has focus - same visual mutex applied to cross-pane nav.
+    if (key.getKeyCode() == juce::KeyPress::upKey
+        && ! key.getModifiers().isAnyModifierKeyDown()
+        && table_.getSelectedRow() == 0)
+    {
+        savedSelectionForRefocus_ = selectedFiles();
+        deselectAll();
+        searchBox_.grabKeyboardFocus();
+        return true;
+    }
+
+    // Cmd + Up / Down: jump to the first / last row of the table.
+    if (key.getModifiers().isCommandDown()
+        && ! key.getModifiers().isAltDown()
+        && (key.getKeyCode() == juce::KeyPress::upKey
+         || key.getKeyCode() == juce::KeyPress::downKey))
+    {
+        const int rowCount = (int) filteredTracks_.size();
+        if (rowCount == 0) return true;
+        const int target = (key.getKeyCode() == juce::KeyPress::downKey) ? rowCount - 1 : 0;
+        table_.selectRow(target);
+        table_.scrollToEnsureRowIsOnscreen(target);
+        return true;
+    }
 
     // Left or Shift-Tab: move focus back to the sidebar.
     if (key == juce::KeyPress::leftKey
         || (key.getKeyCode() == juce::KeyPress::tabKey && key.getModifiers().isShiftDown()))
     {
+        savedSelectionForRefocus_ = selectedFiles();
         if (onMoveFocusToSidebar) onMoveFocusToSidebar();
         return true;
     }
@@ -783,6 +841,7 @@ bool LibraryTableComponent::keyPressed(const juce::KeyPress& key, juce::Componen
     if (key == juce::KeyPress::rightKey
         || (key.getKeyCode() == juce::KeyPress::tabKey && ! key.getModifiers().isShiftDown()))
     {
+        savedSelectionForRefocus_ = selectedFiles();
         if (onMoveFocusToQueue) onMoveFocusToQueue();
         return true;
     }
@@ -1300,11 +1359,12 @@ void LibraryTableComponent::selectedRowsChanged(int /*lastRowSelected*/)
     if (onSelectionChanged) onSelectionChanged();
 }
 
-juce::String LibraryTableComponent::getCellTooltip(int row, int col)
+juce::String LibraryTableComponent::getCellTooltip(int /*row*/, int /*col*/)
 {
-    juce::ignoreUnused(col);
-    if (row >= 0 && row < static_cast<int>(filteredTracks_.size()))
-        return filteredTracks_[static_cast<size_t>(row)]->file.getFullPathName();
+    // No per-row tooltip. Showing the file path felt noisy in normal use,
+    // and the bookkeeping for non-noisy text (e.g. truncated cell content)
+    // isn't worth carrying when the user already has Edit Info / Show in
+    // Finder for the same details.
     return {};
 }
 

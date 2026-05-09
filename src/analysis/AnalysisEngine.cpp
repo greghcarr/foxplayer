@@ -1,6 +1,7 @@
 #include "AnalysisEngine.h"
 #include "BpmDetector.h"
 #include "KeyDetector.h"
+#include "LufsDetector.h"
 #include "audio/StylFile.h"
 
 namespace Stylus
@@ -19,13 +20,16 @@ AnalysisEngine::~AnalysisEngine()
 
 void AnalysisEngine::enqueue(const TrackInfo& track)
 {
-    // Skip if the sidecar already has both BPM and key.
-    if (track.bpm > 0.0 && track.musicalKey.isNotEmpty())
+    // Skip if the sidecar already has BPM, key, AND loudness - all three
+    // outputs of a Full analysis. A track missing only one of them still
+    // gets requeued; the per-step gates inside analyseOne will skip the
+    // already-filled measurements.
+    if (track.bpm > 0.0 && track.musicalKey.isNotEmpty() && track.lufs != 0.0f)
         return;
 
     {
         juce::ScopedLock sl(queueLock_);
-        queue_.push_back(track);
+        queue_.push_back({ track, Mode::Full });
     }
 
     if (onTrackQueued) onTrackQueued(track);
@@ -41,9 +45,9 @@ void AnalysisEngine::enqueueAll(const std::vector<TrackInfo>& tracks)
         juce::ScopedLock sl(queueLock_);
         for (const auto& t : tracks)
         {
-            if (t.bpm > 0.0 && t.musicalKey.isNotEmpty())
+            if (t.bpm > 0.0 && t.musicalKey.isNotEmpty() && t.lufs != 0.0f)
                 continue;
-            queue_.push_back(t);
+            queue_.push_back({ t, Mode::Full });
             added.push_back(t);
         }
     }
@@ -53,6 +57,25 @@ void AnalysisEngine::enqueueAll(const std::vector<TrackInfo>& tracks)
             onTrackQueued(t);
 
     if (!queue_.empty() && !isThreadRunning())
+        startThread(juce::Thread::Priority::low);
+}
+
+void AnalysisEngine::enqueueLufsOnly(const TrackInfo& track)
+{
+    // No-op when LUFS is already measured.
+    if (track.lufs != 0.0f) return;
+
+    {
+        juce::ScopedLock sl(queueLock_);
+        queue_.push_back({ track, Mode::LufsOnly });
+    }
+
+    // The lazy-on-first-play hook is silent in the Analysis Log: not firing
+    // onTrackQueued / onTrackStarted keeps it out of the log so a casual
+    // play-through doesn't spam the developer-facing window. Only the
+    // explicit user-driven enqueue / enqueueAll paths announce themselves.
+
+    if (!isThreadRunning())
         startThread(juce::Thread::Priority::low);
 }
 
@@ -75,29 +98,35 @@ void AnalysisEngine::run()
 {
     while (!threadShouldExit())
     {
-        TrackInfo track;
+        QueueEntry entry;
         {
             juce::ScopedLock sl(queueLock_);
             if (queue_.empty()) break;
-            track = queue_.front();
+            entry = queue_.front();
             queue_.pop_front();
         }
 
-        analyseOne(track);
+        analyseOne(entry.track, entry.mode);
     }
 }
 
-void AnalysisEngine::analyseOne(TrackInfo track)
+void AnalysisEngine::analyseOne(TrackInfo track, Mode mode)
 {
-    DBG("AnalysisEngine - analysing: " + track.file.getFileName());
+    DBG("AnalysisEngine - analysing: " + track.file.getFileName()
+        + (mode == Mode::LufsOnly ? " (lufs-only)" : ""));
 
-    juce::MessageManager::callAsync([this, t = track]() mutable {
-        if (onTrackStarted) onTrackStarted(std::move(t));
-    });
+    // Only the user-driven Full path announces itself in the log. The
+    // lazy LufsOnly path runs silently.
+    if (mode == Mode::Full)
+    {
+        juce::MessageManager::callAsync([this, t = track]() mutable {
+            if (onTrackStarted) onTrackStarted(std::move(t));
+        });
+    }
 
     bool changed = false;
 
-    if (track.bpm <= 0.0)
+    if (mode == Mode::Full && track.bpm <= 0.0)
     {
         const double bpm = BpmDetector::detect(track.file, formatManager_, {});
         if (bpm > 0.0)
@@ -110,7 +139,7 @@ void AnalysisEngine::analyseOne(TrackInfo track)
 
     if (threadShouldExit()) return;
 
-    if (track.musicalKey.isEmpty())
+    if (mode == Mode::Full && track.musicalKey.isEmpty())
     {
         const juce::String key = KeyDetector::detect(track.file, formatManager_, {});
         if (key.isNotEmpty())
@@ -118,6 +147,20 @@ void AnalysisEngine::analyseOne(TrackInfo track)
             track.musicalKey = key;
             changed = true;
             DBG("AnalysisEngine - Key: " + key);
+        }
+    }
+
+    if (threadShouldExit()) return;
+
+    if (track.lufs == 0.0f)
+    {
+        const float lufs = LufsDetector::detect(track.file, formatManager_,
+                                                [this] { return threadShouldExit(); });
+        if (lufs != 0.0f)
+        {
+            track.lufs = lufs;
+            changed = true;
+            DBG("AnalysisEngine - LUFS: " + juce::String(lufs, 2));
         }
     }
 

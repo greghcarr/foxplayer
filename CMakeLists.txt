@@ -23,6 +23,7 @@ set(STYLUS_CORE_SOURCES
     src/audio/StylFile.cpp
     src/analysis/BpmDetector.cpp
     src/analysis/KeyDetector.cpp
+    src/analysis/LufsDetector.cpp
     src/analysis/AnalysisEngine.cpp
     src/analysis/AppleMusicLookup.cpp
     src/library/LibraryScanner.cpp
@@ -148,6 +149,8 @@ juce_add_binary_data(StylusIcons
         resources/icons/speaker-x-fill.svg
         resources/icons/queue-fill.svg
         resources/icons/pushpin-simple-fill.svg
+        resources/icons/sliders-fill.svg
+        resources/icons/check-fat-fill.svg
         resources/icons/music-notes-fill.svg
         resources/icons/list-bullets-fill.svg
         resources/icons/user-fill.svg

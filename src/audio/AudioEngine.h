@@ -36,6 +36,31 @@ public:
     void  setVolume(float gain);
     float volume() const { return volume_; }
 
+    // When enabled, each track's playback gain is offset based on its
+    // measured integrated loudness (LUFS) so different songs play at a
+    // similar level. Tracks with no LUFS measurement (lufs == 0) play
+    // unchanged. The user volume slider still scales the result; this
+    // sits underneath it as a per-track multiplier.
+    void  setVolumeNormalizationEnabled(bool enabled);
+    bool  isVolumeNormalizationEnabled() const { return normalizeVolume_; }
+
+    // Read-only access to the loaded track. MainComponent uses this to
+    // recognise late LUFS analysis results that target the playing file.
+    const TrackInfo& currentTrack() const { return currentTrack_; }
+
+    // Push an updated LUFS value for the currently-loaded track and
+    // re-apply the combined gain. Called when lazy LUFS analysis finishes
+    // for the track that's still playing, so the user hears the new level
+    // ramp in (via JUCE's setGain ramp) without a track reload.
+    void updateCurrentTrackLufs(float lufs);
+
+    // Mark the currently-loaded track's LUFS analysis as definitively
+    // unavailable - measurement ran but couldn't produce a value (file
+    // unreadable, all-silence, decode failure). Applied combined gain
+    // falls back to unity for this track instead of staying in the -3 dB
+    // pre-roll forever.
+    void markLufsAnalysisFailed();
+
     bool isPlaying()  const;
     bool isPaused()   const;
 
@@ -59,6 +84,33 @@ private:
     void loadTrack(const TrackInfo& track);
     void unloadCurrentReader();
 
+    // Pushes (user volume * per-track LUFS-based offset) to the transport.
+    // Called from setVolume / setVolumeNormalizationEnabled / loadTrack so
+    // the audible level always reflects the latest combination. When
+    // `smooth` is true the change ramps over kRampDurationMs in dB-space
+    // (used for normalisation-driven transitions); when false it's
+    // applied immediately (volume-slider drags, track changes).
+    void applyCombinedGain(bool smooth = false);
+
+    // Computes the target gain based on user volume + normalisation state.
+    // Pure function over the engine's current state; used by both the
+    // immediate path and the ramp timer.
+    float computeTargetGain() const;
+
+    // Drives the per-tick gain interpolation when a smooth ramp is active.
+    void stepRamp();
+
+    // Ticks the gain ramp on the message thread. Inner class because
+    // juce::Timer is abstract and we already inherit ChangeListener.
+    class RampTimer : public juce::Timer
+    {
+    public:
+        explicit RampTimer(AudioEngine& e) : engine_(e) {}
+        void timerCallback() override { engine_.stepRamp(); }
+    private:
+        AudioEngine& engine_;
+    };
+
     // juce::ChangeListener, fired by AudioTransportSource when state changes.
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
 
@@ -78,6 +130,23 @@ private:
     bool        trackLoaded_   { false };
     bool        loading_       { false }; // true while loadTrack() is running
     float       volume_        { 1.0f };
+    bool        normalizeVolume_ { false };
+    // True once we have a definitive answer about the loaded track's
+    // loudness - either a measured LUFS value or a confirmed analysis
+    // failure. While false, applyCombinedGain pre-rolls at -3 dB; once
+    // true, gain settles to either the measured offset or unity.
+    bool        lufsKnown_     { false };
+
+    // Ramp state. currentGain_ is the gain that's actually live on the
+    // transport. When a smooth ramp is requested, the timer interpolates
+    // from rampStartGain_ to rampTargetGain_ in log space (perceptually
+    // even fade) over kRampDurationMs.
+    float       currentGain_      { 1.0f };
+    float       rampStartGain_    { 1.0f };
+    float       rampTargetGain_   { 1.0f };
+    juce::int64 rampStartTimeMs_  { 0 };
+    static constexpr int kRampDurationMs = 2000;
+    RampTimer   rampTimer_ { *this };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioEngine)
 };

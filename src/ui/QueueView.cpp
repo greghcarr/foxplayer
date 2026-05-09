@@ -255,8 +255,16 @@ void QueueView::deselectAll()
 
 void QueueView::focusList()
 {
-    if (list_.getSelectedRow() < 0 && ! items_.empty())
-        list_.selectRow(0);
+    // Restore the row that was selected the last time the user navigated
+    // away from the queue, so coming back lands on the same track. Falls
+    // through to row 0 if nothing was saved or the saved row is out of
+    // range (e.g. tracks were removed while we were elsewhere).
+    int target = savedSelectedRowForRefocus_;
+    if (target < 0 || target >= (int) items_.size())
+        target = items_.empty() ? -1 : 0;
+
+    if (target >= 0 && list_.getSelectedRow() != target)
+        list_.selectRow(target);
     list_.grabKeyboardFocus();
 }
 
@@ -266,6 +274,7 @@ bool QueueView::keyPressed(const juce::KeyPress& key, juce::Component*)
     if (key == juce::KeyPress::leftKey
         || (key.getKeyCode() == juce::KeyPress::tabKey && key.getModifiers().isShiftDown()))
     {
+        savedSelectedRowForRefocus_ = list_.getSelectedRow();
         if (onMoveFocusToLibrary) onMoveFocusToLibrary();
         return true;
     }
@@ -273,7 +282,22 @@ bool QueueView::keyPressed(const juce::KeyPress& key, juce::Component*)
     // Tab (no shift): continue the forward cycle to the sidebar.
     if (key.getKeyCode() == juce::KeyPress::tabKey && ! key.getModifiers().isShiftDown())
     {
+        savedSelectedRowForRefocus_ = list_.getSelectedRow();
         if (onMoveFocusToSidebar) onMoveFocusToSidebar();
+        return true;
+    }
+
+    // Cmd + Up / Down: jump to the first / last row of the queue.
+    if (key.getModifiers().isCommandDown()
+        && ! key.getModifiers().isAltDown()
+        && (key.getKeyCode() == juce::KeyPress::upKey
+         || key.getKeyCode() == juce::KeyPress::downKey))
+    {
+        const int rowCount = (int) items_.size();
+        if (rowCount == 0) return true;
+        const int target = (key.getKeyCode() == juce::KeyPress::downKey) ? rowCount - 1 : 0;
+        list_.selectRow(target);
+        list_.scrollToEnsureRowIsOnscreen(target);
         return true;
     }
     return false;
