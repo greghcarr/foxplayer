@@ -1,9 +1,11 @@
 #include "MainComponent.h"
+#include "Constants.h"
 #include "UIConstants.h"
 #include "audio/StylFile.h"
 #include "ui/SongInfoEditor.h"
 #include "ui/PlatformChrome.h"
 #include <algorithm>
+#include <filesystem>
 #include <set>
 
 namespace Stylus
@@ -12,6 +14,25 @@ namespace Stylus
 using namespace UIConstants;
 
 static constexpr int orphanCheckIntervalMs = 30'000;
+
+// Resolves symlinks (and any "/foo/../bar" relative segments) so dedup
+// comparisons treat two paths pointing at the same physical file as equal.
+// Returns the original juce::File when canonicalization fails (file doesn't
+// exist, permission error, broken symlink, etc.) so dedup is best-effort
+// rather than silently allowing duplicates through.
+static juce::File canonicalizeFile(const juce::File& f)
+{
+    try
+    {
+        auto canonical = std::filesystem::weakly_canonical(
+            std::filesystem::path(f.getFullPathName().toStdString()));
+        return juce::File(juce::String(canonical.string()));
+    }
+    catch (...)
+    {
+        return f;
+    }
+}
 
 // Global LookAndFeel: pointer cursor on TextButton, light-red hover on "Quit",
 // and (on Windows) flat dark menu styling that matches the immersive title
@@ -416,7 +437,7 @@ MainComponent::MainComponent()
             AppleMusicLookup::artworkSidecarFor(t.file).deleteFile();
             updateTrackInLibrary(t);
         }
-        LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
+        LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_, individualTracks_);
     };
 
     // Right-click Go-to handlers. Skip the navigation when already in the
@@ -844,7 +865,7 @@ MainComponent::MainComponent()
         // Wrapped in try/catch so a write error never breaks the scan flow.
         try
         {
-            const bool ok = LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
+            const bool ok = LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_, individualTracks_);
             DBG("LibraryCache::save -> " + juce::String((int) ok));
         }
         catch (...)
@@ -1661,10 +1682,13 @@ MainComponent::MainComponent()
     if (auto* libPanel = preferencesWindow_->libraryPanel())
         libPanel->setPodcastFolders(podcastFolders_);
 
+    // Restore saved loose tracks (drag-dropped or "Open With" added).
+    individualTracks_ = loadSavedIndividualTracks();
+
     // Restore saved music folders (or show the empty prompt if none).
     auto savedFolders = loadSavedMusicFolders();
 
-    if (! savedFolders.empty())
+    if (! savedFolders.empty() || ! individualTracks_.empty())
     {
         // Try the on-disk library cache first so the UI populates instantly
         // (sidebar / library table / queue restore) without waiting for the
@@ -1673,11 +1697,19 @@ MainComponent::MainComponent()
         std::vector<TrackInfo>   cachedTracks;
         std::vector<juce::File>  cachedFolders;
         std::vector<juce::File>  cachedPodcastFolders;
+        std::vector<juce::File>  cachedIndividualTracks;
         bool cacheUsed = false;
         try
         {
-            if (LibraryCache::tryLoad(cachedTracks, cachedFolders, cachedPodcastFolders)
-                && cachedFolders == savedFolders)
+            // Cache is only reusable when ALL three input lists match the
+            // current state. If any list has changed (folder added/removed,
+            // loose file added since last save), fall through to a fresh
+            // scan instead of showing a stale snapshot.
+            if (LibraryCache::tryLoad(cachedTracks, cachedFolders,
+                                       cachedPodcastFolders, cachedIndividualTracks)
+                && cachedFolders          == savedFolders
+                && cachedPodcastFolders   == podcastFolders_
+                && cachedIndividualTracks == individualTracks_)
             {
                 DBG("LibraryCache loaded "
                     + juce::String((int) cachedTracks.size()) + " tracks");
@@ -2327,6 +2359,22 @@ void MainComponent::setPodcastFolders(std::vector<juce::File> folders)
 {
     podcastFolders_ = std::move(folders);
     savePodcastFolders();
+
+    // Drop any loose tracks now covered by a podcast root so the scanner
+    // doesn't double-handle them. Mirrors the music-root cleanup in
+    // addMusicFolderRoots.
+    const auto before = individualTracks_.size();
+    individualTracks_.erase(
+        std::remove_if(individualTracks_.begin(), individualTracks_.end(),
+            [this](const juce::File& f) {
+                for (const auto& r : podcastFolders_)
+                    if (f.isAChildOf(r)) return true;
+                return false;
+            }),
+        individualTracks_.end());
+    if (individualTracks_.size() != before)
+        saveIndividualTracks();
+
     // Rescan everything through the normal music-folder path (keepLibrary=true
     // so the current library stays visible while the background scan runs, and
     // scanReplacingCachedLibrary_ is set so batches go to scanBuffer_ instead
@@ -2533,7 +2581,7 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track,
             StylFile::save(t);
             updateTrackInLibrary(t);
         }
-        LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
+        LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_, individualTracks_);
     };
 
     editor->onLookupRequested = [this](const TrackInfo& t, std::function<void(bool, TrackInfo)> cb) {
@@ -2627,7 +2675,7 @@ void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
             StylFile::save(t);
             updateTrackInLibrary(t);
         }
-        LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_);
+        LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_, individualTracks_);
     };
 
     editor->onDismiss = closeDialog;
@@ -3124,7 +3172,7 @@ void MainComponent::setMusicFolders(std::vector<juce::File> folders, bool keepLi
         refreshSidebarPodcasts();
     }
 
-    if (musicFolders_.empty())
+    if (musicFolders_.empty() && individualTracks_.empty())
     {
         loadingIndicator_.setVisible(false);
         sidebar_.setLibraryLoading(false);
@@ -3147,7 +3195,7 @@ void MainComponent::setMusicFolders(std::vector<juce::File> folders, bool keepLi
 
     scanReplacingCachedLibrary_ = keepLibrary;
     scanBuffer_.clear();
-    scanner_.scanFolders(musicFolders_, podcastFolders_);
+    scanner_.scanFolders(musicFolders_, podcastFolders_, individualTracks_);
 }
 
 
@@ -3187,6 +3235,319 @@ std::vector<juce::File> MainComponent::loadSavedMusicFolders()
         result.emplace_back(legacy);
 
     return result;
+}
+
+void MainComponent::saveIndividualTracks()
+{
+    auto* props = appProperties_.getUserSettings();
+    if (props == nullptr) return;
+
+    juce::StringArray paths;
+    for (const auto& f : individualTracks_)
+        paths.add(f.getFullPathName());
+    props->setValue("individualTracks", paths.joinIntoString("\n"));
+}
+
+std::vector<juce::File> MainComponent::loadSavedIndividualTracks()
+{
+    std::vector<juce::File> result;
+    auto* props = appProperties_.getUserSettings();
+    if (props == nullptr) return result;
+
+    const juce::String joined = props->getValue("individualTracks");
+    if (joined.isEmpty()) return result;
+
+    juce::StringArray paths;
+    paths.addTokens(joined, "\n", "");
+    bool removedAny = false;
+    for (const auto& p : paths)
+    {
+        if (p.isEmpty()) continue;
+        const juce::File f(p);
+        // Drop entries whose file is no longer on disk. Without this they'd
+        // accumulate forever (the scanner silently skips missing files, but
+        // the path would still ride in individualTracks_ across launches).
+        if (! f.existsAsFile())
+        {
+            removedAny = true;
+            continue;
+        }
+        result.push_back(f);
+    }
+    if (removedAny)
+    {
+        // Persist the pruned list immediately so a subsequent crash doesn't
+        // re-resurrect the stale entries on the next launch.
+        juce::StringArray remaining;
+        for (const auto& f : result) remaining.add(f.getFullPathName());
+        props->setValue("individualTracks", remaining.joinIntoString("\n"));
+    }
+    return result;
+}
+
+std::vector<juce::File> MainComponent::collectAudioFilesUnder(const juce::File& folder)
+{
+    std::vector<juce::File> out;
+    if (! folder.isDirectory()) return out;
+
+    juce::Array<juce::File> all;
+    folder.findChildFiles(all, juce::File::findFiles, true);
+    for (const auto& f : all)
+    {
+        // Skip hidden segments (any path component starting with '.') and
+        // unsupported extensions, matching LibraryScanner's behaviour.
+        bool hidden = false;
+        juce::File cur = f;
+        while (cur != folder)
+        {
+            if (cur.getFileName().startsWith(".")) { hidden = true; break; }
+            cur = cur.getParentDirectory();
+        }
+        if (hidden) continue;
+        if (! Constants::supportedExtensions.contains(
+                f.getFileExtension().trimCharactersAtStart(".").toLowerCase()))
+            continue;
+        out.push_back(f);
+    }
+    return out;
+}
+
+int MainComponent::addIndividualTracks(const std::vector<juce::File>& files)
+{
+    // Cache canonicalised paths up front so repeated comparisons against the
+    // existing lists don't re-resolve symlinks for each candidate. The
+    // canonical path is used purely for dedup; the original juce::File is
+    // what we store and show to the user.
+    auto canonOf = [](const juce::File& f) { return canonicalizeFile(f); };
+
+    std::vector<juce::File> canonExisting;
+    canonExisting.reserve(individualTracks_.size());
+    for (const auto& e : individualTracks_) canonExisting.push_back(canonOf(e));
+
+    std::vector<juce::File> canonMusicRoots;
+    canonMusicRoots.reserve(musicFolders_.size());
+    for (const auto& r : musicFolders_)    canonMusicRoots.push_back(canonOf(r));
+
+    std::vector<juce::File> canonPodcastRoots;
+    canonPodcastRoots.reserve(podcastFolders_.size());
+    for (const auto& r : podcastFolders_)  canonPodcastRoots.push_back(canonOf(r));
+
+    int added = 0;
+    for (const auto& f : files)
+    {
+        if (! f.existsAsFile()) continue;
+        if (! Constants::supportedExtensions.contains(
+                f.getFileExtension().trimCharactersAtStart(".").toLowerCase()))
+            continue;
+
+        // Skip if already in the loose list (handles duplicates within the
+        // same drop too), or already covered by a music or podcast root —
+        // the scanner would otherwise emit them via the folder pass, and
+        // letting the file linger in individualTracks_ would persist a
+        // ghost entry that never produces a TrackInfo. Canonicalising both
+        // sides handles symlinks: a file dropped via its symlinked path is
+        // recognised as the same physical track already in the library.
+        const juce::File canonF = canonOf(f);
+
+        bool dup = false;
+        for (const auto& e : canonExisting)
+            if (e == canonF) { dup = true; break; }
+        if (dup) continue;
+        for (const auto& r : canonMusicRoots)
+            if (canonF.isAChildOf(r)) { dup = true; break; }
+        if (dup) continue;
+        for (const auto& r : canonPodcastRoots)
+            if (canonF.isAChildOf(r)) { dup = true; break; }
+        if (dup) continue;
+
+        individualTracks_.push_back(f);
+        canonExisting.push_back(canonF);     // keep the cache in sync for
+                                              // the next iteration's dedup
+        ++added;
+    }
+    if (added > 0)
+        saveIndividualTracks();
+    return added;
+}
+
+int MainComponent::addMusicFolderRoots(const std::vector<juce::File>& roots)
+{
+    int added = 0;
+    for (const auto& r : roots)
+    {
+        if (! r.isDirectory()) continue;
+
+        bool dup = false;
+        for (const auto& existing : musicFolders_)
+            if (existing == r) { dup = true; break; }
+        if (dup) continue;
+
+        musicFolders_.push_back(r);
+        ++added;
+    }
+    if (added > 0)
+    {
+        saveMusicFolders();
+
+        // Drop any individual tracks that are now covered by one of the new
+        // roots so the scanner doesn't double-emit them.
+        const auto before = individualTracks_.size();
+        individualTracks_.erase(
+            std::remove_if(individualTracks_.begin(), individualTracks_.end(),
+                [this](const juce::File& f) {
+                    for (const auto& r : musicFolders_)
+                        if (f.isAChildOf(r)) return true;
+                    return false;
+                }),
+            individualTracks_.end());
+        if (individualTracks_.size() != before)
+            saveIndividualTracks();
+    }
+    return added;
+}
+
+bool MainComponent::isInterestedInFileDrag(const juce::StringArray& files)
+{
+    for (const auto& p : files)
+    {
+        const juce::File f(p);
+        if (f.isDirectory()) return true;
+        if (Constants::supportedExtensions.contains(
+                f.getFileExtension().trimCharactersAtStart(".").toLowerCase()))
+            return true;
+    }
+    return false;
+}
+
+void MainComponent::filesDropped(const juce::StringArray& files, int /*x*/, int /*y*/)
+{
+    handleExternalPaths(files, /*startPlayback*/ false);
+}
+
+void MainComponent::handleExternalPaths(const juce::StringArray& paths, bool startPlayback)
+{
+    std::vector<juce::File> folders;
+    std::vector<juce::File> audioFiles;
+    for (const auto& p : paths)
+    {
+        const juce::File f(p);
+        if (f.isDirectory())
+            folders.push_back(f);
+        else if (f.existsAsFile()
+                 && Constants::supportedExtensions.contains(
+                        f.getFileExtension().trimCharactersAtStart(".").toLowerCase()))
+            audioFiles.push_back(f);
+    }
+
+    juce::File playbackTarget;
+    if (startPlayback && ! audioFiles.empty())
+        playbackTarget = audioFiles.front();
+
+    // Commit loose audio files immediately - they're not gated by the
+    // folder prompt. A mixed drop (file + folder) where the user cancels
+    // the folder prompt should still keep the file. Playback also fires
+    // here so it doesn't wait on the prompt being answered.
+    if (! audioFiles.empty() || playbackTarget != juce::File{})
+        commitDroppedTracks(audioFiles, /*newRoots*/ {}, playbackTarget);
+
+    // Folders go through the choice dialog independently. No files are
+    // passed along (those were already handled above) and the playback
+    // target is cleared so the prompt doesn't re-fire playback.
+    if (! folders.empty())
+        promptForFolderDrop(std::move(folders), /*files*/ {}, juce::File{});
+}
+
+void MainComponent::promptForFolderDrop(std::vector<juce::File> folders,
+                                         std::vector<juce::File> filesAlreadyQueued,
+                                         juce::File              startPlaybackPath)
+{
+    juce::String message;
+    if (folders.size() == 1)
+    {
+        message = "\"" + folders.front().getFileName() + "\"\n\n"
+                  "Add this folder to your library so its contents stay in sync, "
+                  "or just import the audio files inside as loose tracks?";
+    }
+    else
+    {
+        message = juce::String((int) folders.size())
+                  + " folders dropped.\n\n"
+                  "Add them to your library so their contents stay in sync, "
+                  "or just import the audio files inside as loose tracks?";
+    }
+
+    juce::AlertWindow::showAsync(
+        juce::MessageBoxOptions()
+            .withIconType(juce::MessageBoxIconType::QuestionIcon)
+            .withTitle(folders.size() == 1 ? "Add Folder" : "Add Folders")
+            .withMessage(message)
+            .withButton("Add as Library Folder")
+            .withButton("Add Files Only")
+            .withButton("Cancel")
+            .withAssociatedComponent(this),
+        [this, droppedFolders = std::move(folders),
+               loose          = std::move(filesAlreadyQueued),
+               playbackPath   = startPlaybackPath](int result) mutable {
+            if (result == 3 || result == 0) return;  // Cancel / dismissed
+
+            if (result == 1)
+            {
+                commitDroppedTracks(loose, droppedFolders, playbackPath);
+                return;
+            }
+
+            // Add Files Only: walk each folder, collect audio files, fold into
+            // the loose-files list. Folder roots stay untouched.
+            for (const auto& folder : droppedFolders)
+            {
+                auto contained = collectAudioFilesUnder(folder);
+                loose.insert(loose.end(), contained.begin(), contained.end());
+            }
+            commitDroppedTracks(loose, /*newRoots*/ {}, playbackPath);
+        });
+}
+
+void MainComponent::commitDroppedTracks(const std::vector<juce::File>& looseFiles,
+                                         const std::vector<juce::File>& newRoots,
+                                         const juce::File&              startPlaybackPath)
+{
+    bool changed = false;
+
+    if (! newRoots.empty())
+    {
+        if (addMusicFolderRoots(newRoots) > 0)
+            changed = true;
+    }
+
+    if (! looseFiles.empty())
+    {
+        if (addIndividualTracks(looseFiles) > 0)
+            changed = true;
+    }
+
+    if (changed)
+    {
+        // Single rescan covers both the new roots and the new loose files.
+        setMusicFolders(musicFolders_, /*keepLibrary*/ true);
+    }
+
+    if (startPlaybackPath != juce::File{} && startPlaybackPath.existsAsFile())
+    {
+        // Build a quick TrackInfo synchronously so playback starts immediately
+        // instead of waiting for the background rescan to land. The scanner
+        // will produce a proper TrackInfo for the same file shortly; the
+        // library view will pick that one up naturally.
+        TrackInfo t = LibraryScanner::buildTrackInfoWithTimeout(
+            startPlaybackPath, /*isPodcast*/ false);
+
+        PlayQueue::QueueSource source;
+        source.sidebarId = 1;
+        source.name      = "Dropped Track";
+
+        std::vector<TrackInfo> single { t };
+        queue_.setTracks(std::move(single), 0, source);
+        playCurrentQueueItem();
+    }
 }
 
 juce::String MainComponent::sourceNameForSidebar(int sidebarId) const

@@ -19,13 +19,18 @@ public:
 
     static bool save(const std::vector<TrackInfo>& tracks,
                      const std::vector<juce::File>& musicFolders,
-                     const std::vector<juce::File>& podcastFolders);
+                     const std::vector<juce::File>& podcastFolders,
+                     const std::vector<juce::File>& individualTracks = {});
 
     // Loads the cache. Returns true and fills output parameters if the file
     // exists and parses cleanly. Returns false on missing file or any error.
+    // outIndividualTracks is populated from the cache so callers can detect
+    // a mismatch against their current loose-files list and bypass the cache
+    // when it's stale.
     static bool tryLoad(std::vector<TrackInfo>& outTracks,
                         std::vector<juce::File>& outMusicFolders,
-                        std::vector<juce::File>& outPodcastFolders);
+                        std::vector<juce::File>& outPodcastFolders,
+                        std::vector<juce::File>& outIndividualTracks);
 };
 
 } // namespace Stylus

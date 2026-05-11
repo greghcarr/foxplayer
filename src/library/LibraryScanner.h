@@ -19,9 +19,13 @@ public:
     // Scans music and podcast folders. Music files found under a podcast
     // folder are excluded from the music scan. Podcast files get isPodcast=true
     // and their podcast field set from the album tag or parent folder name.
+    // individualMusicFiles are loose audio files added outside the folder
+    // hierarchy (e.g. via drag-and-drop or Finder "Open With"); they're scanned
+    // as music with no folder-based artist/album inference.
     // Calling this with a new set cancels any scan already in progress.
     void scanFolders(std::vector<juce::File> musicFolders,
-                     std::vector<juce::File> podcastFolders = {});
+                     std::vector<juce::File> podcastFolders = {},
+                     std::vector<juce::File> individualMusicFiles = {});
     void cancelScan();
     bool isScanning() const;
 
@@ -35,6 +39,17 @@ public:
     // heuristics as the scanner. Returns 0 if no number can be found.
     static int guessEpisodeNumber(const juce::String& filenameStem);
 
+    // Wraps a TrackInfo build on a detached worker thread with a 15 s per-file
+    // timeout, so a malformed or otherwise-stuck file in JUCE's metadata
+    // reader can't stall the whole scan. On timeout returns a stub
+    // TrackInfo with file + isPodcast set; the track still appears in the
+    // library, with its filename as the displayed title. Public so callers
+    // outside the scanner (e.g. drag-drop "play immediately" path) can
+    // synthesise a TrackInfo without owning a scanner instance.
+    static TrackInfo buildTrackInfoWithTimeout(const juce::File& file,
+                                                bool isPodcast,
+                                                const juce::File& root = {});
+
 private:
     void run() override;
 
@@ -43,17 +58,9 @@ private:
                                      bool isPodcast,
                                      const juce::File& root = {});
 
-    // Wraps buildTrackInfo on a detached worker thread with a 15 s per-file
-    // timeout, so a malformed or otherwise-stuck file in JUCE's metadata
-    // reader can't stall the whole scan. On timeout returns a stub
-    // TrackInfo with file + isPodcast set; the track still appears in the
-    // library, with its filename as the displayed title.
-    static TrackInfo buildTrackInfoWithTimeout(const juce::File& file,
-                                                bool isPodcast,
-                                                const juce::File& root = {});
-
     std::vector<juce::File> musicRoots_;
     std::vector<juce::File> podcastRoots_;
+    std::vector<juce::File> individualMusicFiles_;
     juce::CriticalSection   lock_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryScanner)

@@ -27,18 +27,21 @@ LibraryScanner::~LibraryScanner()
 }
 
 void LibraryScanner::scanFolders(std::vector<juce::File> musicFolders,
-                                  std::vector<juce::File> podcastFolders)
+                                  std::vector<juce::File> podcastFolders,
+                                  std::vector<juce::File> individualMusicFiles)
 {
     cancelScan();
     {
         juce::ScopedLock sl(lock_);
-        musicRoots_   = std::move(musicFolders);
-        podcastRoots_ = std::move(podcastFolders);
+        musicRoots_           = std::move(musicFolders);
+        podcastRoots_         = std::move(podcastFolders);
+        individualMusicFiles_ = std::move(individualMusicFiles);
     }
     DBG("LibraryScanner::scanFolders called with "
-        + juce::String((int) musicRoots_.size()) + " music root(s), "
-        + juce::String((int) podcastRoots_.size()) + " podcast root(s)");
-    if (! musicRoots_.empty() || ! podcastRoots_.empty())
+        + juce::String((int) musicRoots_.size())   + " music root(s), "
+        + juce::String((int) podcastRoots_.size()) + " podcast root(s), "
+        + juce::String((int) individualMusicFiles_.size()) + " loose file(s)");
+    if (! musicRoots_.empty() || ! podcastRoots_.empty() || ! individualMusicFiles_.empty())
         startThread(juce::Thread::Priority::background);
     else if (onScanComplete)
         juce::MessageManager::callAsync([this] { if (onScanComplete) onScanComplete(0); });
@@ -57,11 +60,12 @@ bool LibraryScanner::isScanning() const
 
 void LibraryScanner::run()
 {
-    std::vector<juce::File> musicRoots, podcastRoots;
+    std::vector<juce::File> musicRoots, podcastRoots, individualFiles;
     {
         juce::ScopedLock sl(lock_);
-        musicRoots   = musicRoots_;
-        podcastRoots = podcastRoots_;
+        musicRoots      = musicRoots_;
+        podcastRoots    = podcastRoots_;
+        individualFiles = individualMusicFiles_;
     }
 
     // Helper: collect non-hidden audio files under a root folder.
@@ -121,6 +125,30 @@ void LibraryScanner::run()
             if (! isUnderPodcastRoot(f))
                 musicFilesWithRoot.push_back({ f, root });
     }
+
+    // Append individually-added music files. Skip any that are already covered
+    // by a music root (would otherwise double-emit) or that fall under a podcast
+    // root (those belong in the podcast pass). Loose files have no meaningful
+    // root, so folder-based artist/album inference is intentionally bypassed by
+    // passing an empty File as the root.
+    auto isUnderMusicRoot = [&musicRoots](const juce::File& f) -> bool {
+        for (const auto& mr : musicRoots)
+            if (f.isAChildOf(mr))
+                return true;
+        return false;
+    };
+    for (const auto& f : individualFiles)
+    {
+        if (threadShouldExit()) return;
+        if (! f.existsAsFile())   continue;
+        if (isUnderPodcastRoot(f)) continue;
+        if (isUnderMusicRoot(f))   continue;
+        if (! Constants::supportedExtensions.contains(
+                f.getFileExtension().trimCharactersAtStart(".").toLowerCase()))
+            continue;
+        musicFilesWithRoot.push_back({ f, juce::File{} });
+    }
+
     std::sort(musicFilesWithRoot.begin(), musicFilesWithRoot.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
 

@@ -3,7 +3,12 @@
 namespace Stylus
 {
 
-static constexpr int cacheVersion = 2;
+// Bumped to 3 when the cache started persisting individualTracks_ in addition
+// to the folder lists. Older caches lack the field; loading them as v3 would
+// race-condition with whatever the live individualTracks_ list happens to be.
+// Failing the version check forces a fresh scan once after upgrade, which
+// rebuilds the cache file in the new shape.
+static constexpr int cacheVersion = 3;
 
 juce::File LibraryCache::cacheFile()
 {
@@ -17,7 +22,8 @@ juce::File LibraryCache::cacheFile()
 
 bool LibraryCache::save(const std::vector<TrackInfo>& tracks,
                          const std::vector<juce::File>& musicFolders,
-                         const std::vector<juce::File>& podcastFolders)
+                         const std::vector<juce::File>& podcastFolders,
+                         const std::vector<juce::File>& individualTracks)
 {
     auto* root = new juce::DynamicObject();
     root->setProperty("version", cacheVersion);
@@ -31,6 +37,11 @@ bool LibraryCache::save(const std::vector<TrackInfo>& tracks,
     for (const auto& f : podcastFolders)
         podcastArr.add(f.getFullPathName());
     root->setProperty("podcastFolders", podcastArr);
+
+    juce::Array<juce::var> individualArr;
+    for (const auto& f : individualTracks)
+        individualArr.add(f.getFullPathName());
+    root->setProperty("individualTracks", individualArr);
 
     juce::Array<juce::var> trackArr;
     trackArr.ensureStorageAllocated(static_cast<int>(tracks.size()));
@@ -66,7 +77,8 @@ bool LibraryCache::save(const std::vector<TrackInfo>& tracks,
 
 bool LibraryCache::tryLoad(std::vector<TrackInfo>& outTracks,
                             std::vector<juce::File>& outMusicFolders,
-                            std::vector<juce::File>& outPodcastFolders)
+                            std::vector<juce::File>& outPodcastFolders,
+                            std::vector<juce::File>& outIndividualTracks)
 {
     const auto file = cacheFile();
     if (! file.existsAsFile()) return false;
@@ -109,6 +121,12 @@ bool LibraryCache::tryLoad(std::vector<TrackInfo>& outTracks,
         for (const auto& f : *podcastFoldersVar.getArray())
             podcastFolders.emplace_back(f.toString());
 
+    std::vector<juce::File> individualTracks;
+    auto individualVar = obj->getProperty("individualTracks");
+    if (individualVar.isArray())
+        for (const auto& f : *individualVar.getArray())
+            individualTracks.emplace_back(f.toString());
+
     auto belongsToPodcastFolder = [&](const juce::File& f)
     {
         for (const auto& pf : podcastFolders)
@@ -141,9 +159,10 @@ bool LibraryCache::tryLoad(std::vector<TrackInfo>& outTracks,
         tracks.push_back(std::move(info));
     }
 
-    outTracks         = std::move(tracks);
-    outMusicFolders   = std::move(musicFolders);
-    outPodcastFolders = std::move(podcastFolders);
+    outTracks            = std::move(tracks);
+    outMusicFolders      = std::move(musicFolders);
+    outPodcastFolders    = std::move(podcastFolders);
+    outIndividualTracks  = std::move(individualTracks);
     return true;
 }
 

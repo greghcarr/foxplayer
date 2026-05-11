@@ -67,6 +67,8 @@ Or double-click `Stylus.exe` in Explorer at `build\Stylus_artefacts\Debug\`.
 ### Library
 
 - Recursive folder scanning for music and podcasts (multiple roots supported)
+- **Drop files or folders onto the Stylus window** to add them to the library. Audio files are added as "loose" tracks; for folders a dialog asks whether to add the folder as a library root (so its contents stay in sync going forward) or just import its current audio files as loose tracks
+- **Open With Stylus** from Finder plays the file immediately and adds it to the library as a loose track. Works for cold launch (file double-clicked while Stylus is closed) and for "Open With" on a running instance
 - On-disk library cache so the app starts with the previous library visible while a fresh scan runs in the background
 - Supports MP3, FLAC, WAV, AIFF, OGG, Opus on both platforms; AAC, ALAC, M4A via CoreAudio on macOS and via Media Foundation on Windows
 - Search, multi-column sort, hidden tracks

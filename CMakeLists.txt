@@ -58,6 +58,10 @@ juce_add_gui_app(Stylus
     COMPANY_NAME        "Greg Carr"
     ICON_BIG            "${CMAKE_SOURCE_DIR}/resources/app-icon.png"
     MICROPHONE_PERMISSION_ENABLED   FALSE
+    # Audio file types Stylus can open from Finder / "Open With".
+    # JUCE turns this into CFBundleDocumentTypes in Info.plist on macOS
+    # and a HKCR ProgID block on Windows.
+    DOCUMENT_EXTENSIONS mp3 flac wav aiff aif m4a aac alac ogg opus
 )
 
 juce_generate_juce_header(Stylus)

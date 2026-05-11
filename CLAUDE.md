@@ -47,7 +47,10 @@ src/
     AnalysisEngine.h/.cpp      : Queue-based analysis (Full or LufsOnly mode); fires onTrackAnalysed
     AppleMusicLookup.h/.cpp    : Background iTunes Search API queries; retry + suspend logic
   library/
-    LibraryScanner.h/.cpp      : Background thread: recursive scan + metadata extraction
+    LibraryScanner.h/.cpp      : Background thread: recursive scan + metadata extraction.
+                                   Also takes a list of loose `individualMusicFiles` (drag-drop,
+                                   "Open With Stylus") and emits them alongside folder-scanned tracks
+                                   with empty root so folder-based artist/album inference is skipped.
     LibraryCache.h/.cpp        : On-disk cache of fullLibrary_ keyed by folder list, so app
                                    starts with the previous library visible while a fresh scan runs
     LibraryTableComponent.h/.cpp: TableListBox showing the library; drag source for DnD
@@ -127,6 +130,23 @@ When a library row is activated, all tracks from that row to the end of the curr
 
 ### Library data ownership
 `fullLibrary_` in `MainComponent` is the single source of truth for all scanned tracks. `LibraryTableComponent` holds a filtered view (pointers into a local copy). When switching sidebar items, `MainComponent` calls `libraryTable_.setTracks(subset)`: it never reads back from the table as the authoritative source, except via `allTracks()` when `onLibraryChanged` fires (hidden state change).
+
+### Loose / individually-added tracks
+Three persistence layers feed `fullLibrary_`:
+- `musicFolders_` — recursive roots (Preferences → Library, drag-folder "Add as Library Folder").
+- `podcastFolders_` — same idea for podcasts.
+- `individualTracks_` — a `std::vector<juce::File>` of loose audio files added without a folder root (drag-files onto window, Finder "Open With Stylus", "Add Files Only" from the folder-drop dialog). Persisted under `"individualTracks"` in `ApplicationProperties` as `\n`-joined paths.
+
+`LibraryScanner::scanFolders` takes all three as inputs. The loose-files pass is deduped against music roots and podcast roots (so the same file isn't double-emitted) and uses an empty `root` so folder-based artist/album inference is bypassed — for loose files we trust tags + filename parsing only.
+
+When the user drops a folder, the prompt offers three buttons: "Add as Library Folder" routes through `addMusicFolderRoots()` (appended to `musicFolders_`, with redundant individuals removed); "Add Files Only" routes through `collectAudioFilesUnder()` and `addIndividualTracks()`; "Cancel" drops the whole transaction. A mixed drop (files + folders) batches both decisions into one `commitDroppedTracks()` call so the scanner only fires once.
+
+### External-entry points
+- **Drag onto window**: `MainComponent` is a `juce::FileDragAndDropTarget`. `filesDropped` splits into folders vs. audio files and routes through `handleExternalPaths(paths, /*startPlayback*/ false)`. No auto-play; drag-drop is library-add only.
+- **Finder "Open With Stylus" / double-click of an associated file**: macOS routes the open event into the JUCE app delegate. JUCE forwards to `JUCEApplication::anotherInstanceStarted(commandLine)` when the app is already running (single-instance mode), and into `initialise(commandLine)` on cold launch. `Main.cpp` calls `MainComponent::handleExternalPaths(paths, /*startPlayback*/ true)` in both cases — same code path as drag-drop, but the first audio file starts playing immediately. Cold-launch paths land in `pendingOpenPaths_` and are drained once MainComponent has been constructed (the splash defers main-window creation ~60 ms).
+- **JUCE document types** are declared in `CMakeLists.txt` via `DOCUMENT_EXTENSIONS` on `juce_add_gui_app`. JUCE turns that into `CFBundleDocumentTypes` in `Info.plist` for macOS and an HKCR ProgID block on Windows.
+
+`commitDroppedTracks` builds a synchronous `TrackInfo` via `LibraryScanner::buildTrackInfoWithTimeout` (now public) for the playback-start path, so the queue can fire before the background rescan finishes. The eventual scan produces the canonical `TrackInfo` for the same file; the library view picks up that one naturally.
 
 ### Sidebar IDs
 - `1` = Library (all non-podcast tracks)

@@ -28,6 +28,7 @@ namespace Stylus
 
 class MainComponent : public juce::Component,
                       public juce::DragAndDropContainer,
+                      public juce::FileDragAndDropTarget,
                       public juce::KeyListener,
                       public juce::ApplicationCommandTarget,
                       public juce::MenuBarModel,
@@ -40,6 +41,10 @@ public:
     // juce::Component
     void paint(juce::Graphics& g) override;
     void resized() override;
+
+    // juce::FileDragAndDropTarget
+    bool isInterestedInFileDrag(const juce::StringArray& files) override;
+    void filesDropped(const juce::StringArray& files, int x, int y) override;
 
     // juce::KeyListener
     bool keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent) override;
@@ -81,6 +86,13 @@ public:
     // enabled, then calls onConfirmed. Call this instead of quit() directly.
     void requestQuit(std::function<void()> onConfirmed);
 
+    // External-entry point: handle a list of paths (files and/or folders) that
+    // came from outside the app (drag onto window, Finder/Explorer "Open With",
+    // command-line). Adds tracks to the library and, if startPlayback is true,
+    // queues and starts the first audio file. Folders are routed through the
+    // same prompt as a drag-drop folder (add as root vs. add files only).
+    void handleExternalPaths(const juce::StringArray& paths, bool startPlayback);
+
 private:
     // Prompts the user for a folder and appends it to the library list.
     void showAddFolderChooser();
@@ -89,6 +101,31 @@ private:
     // Persist / load the set of music-library root folders.
     void saveMusicFolders();
     std::vector<juce::File> loadSavedMusicFolders();
+    // Persist / load loose music files added via drag-drop or "Open With".
+    void saveIndividualTracks();
+    std::vector<juce::File> loadSavedIndividualTracks();
+    // Append a list of loose audio files to individualTracks_, dedupe, persist,
+    // and trigger a rescan that keeps the existing library visible. Files that
+    // are already present (in the loose list or under any music root) are
+    // ignored. Returns the number of newly-added files.
+    int addIndividualTracks(const std::vector<juce::File>& files);
+    // Append the given folders to musicFolders_, persist, and rescan.
+    int addMusicFolderRoots(const std::vector<juce::File>& roots);
+    // Recursively collect supported audio files inside a folder. Skips hidden
+    // files and the same extensions filter the main scanner uses.
+    static std::vector<juce::File> collectAudioFilesUnder(const juce::File& folder);
+    // Show the "add as library folder vs. add files only vs. cancel" dialog
+    // for a set of dropped folders, then dispatch the choice. loosePending /
+    // startPlaybackPath are passed through so a single drag mixing files +
+    // folders settles on the same "play first track" decision.
+    void promptForFolderDrop(std::vector<juce::File> folders,
+                             std::vector<juce::File> filesAlreadyQueued,
+                             juce::File              startPlaybackPath);
+    // Once both files-only and folders-as-roots paths are decided, this runs
+    // the rescan + (optional) playback. Pass an empty File to skip playback.
+    void commitDroppedTracks(const std::vector<juce::File>& looseFiles,
+                             const std::vector<juce::File>& newRoots,
+                             const juce::File&              startPlaybackPath);
     // setMusicFolders variants: the keepLibrary form skips the
     // clear-fullLibrary step (used after we've loaded the on-disk cache so
     // the cached view stays visible while a refresh scan runs in the
@@ -327,6 +364,10 @@ private:
     std::map<int, juce::String> genreIdToName_;
     std::vector<juce::File> musicFolders_;
     std::vector<juce::File> podcastFolders_;
+    // Loose tracks added outside the folder hierarchy (drag-and-drop, Finder
+    // "Open With"). Persisted under "individualTracks" in ApplicationProperties
+    // and threaded through every scanner_.scanFolders() call.
+    std::vector<juce::File> individualTracks_;
     juce::StringArray       lastFolderErrors_; // cached to detect changes between timer ticks
 
     // Pending Edit Info dialog lookup: when the user clicks "Apple Music" in
