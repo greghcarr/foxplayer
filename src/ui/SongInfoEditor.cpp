@@ -20,6 +20,70 @@ static constexpr int btnW         = 80;
 static constexpr int btnH         = 28;
 static constexpr int halfFieldGap = 12;
 
+SongInfoEditor::FilePathLink::FilePathLink()
+{
+    setInterceptsMouseClicks(true, false);
+    setMouseCursor(juce::MouseCursor::PointingHandCursor);
+}
+
+void SongInfoEditor::FilePathLink::setFile(const juce::File& f)
+{
+    file_ = f;
+    repaint();
+}
+
+void SongInfoEditor::FilePathLink::paint(juce::Graphics& g)
+{
+    if (file_ == juce::File{}) return;
+
+    const auto path = file_.getFullPathName();
+
+    juce::Font font(juce::FontOptions().withHeight(13.0f));
+    if (hovered_)
+        font.setUnderline(true);
+    g.setFont(font);
+    g.setColour(hovered_ ? Color::textPrimary : Color::textDim);
+
+    const auto bounds = getLocalBounds().reduced(2, 0).toFloat();
+    g.drawText(path, bounds, juce::Justification::centredLeft, true);
+}
+
+void SongInfoEditor::FilePathLink::mouseEnter(const juce::MouseEvent&)
+{
+    hovered_ = true;
+    repaint();
+}
+
+void SongInfoEditor::FilePathLink::mouseExit(const juce::MouseEvent&)
+{
+    hovered_ = false;
+    repaint();
+}
+
+void SongInfoEditor::FilePathLink::mouseDown(const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() && file_ != juce::File{})
+    {
+        juce::PopupMenu m;
+        m.addItem(1, "Copy Path");
+        m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
+            [path = file_.getFullPathName()](int r) {
+                if (r == 1) juce::SystemClipboard::copyTextToClipboard(path);
+            });
+    }
+}
+
+void SongInfoEditor::FilePathLink::mouseUp(const juce::MouseEvent& e)
+{
+    // Reveal on left-click release inside the component. Using mouseUp (not
+    // mouseDown) avoids triggering Finder during a click-and-drag and matches
+    // the "I committed to clicking this" affordance.
+    if (e.mods.isPopupMenu()) return;
+    if (file_ == juce::File{}) return;
+    if (! getLocalBounds().contains(e.getPosition())) return;
+    file_.revealToUser();
+}
+
 SongInfoEditor::SongInfoEditor(const TrackInfo& track)
     : mode_(track.isPodcast ? Mode::SinglePodcast : Mode::SingleMusic)
     , tracks_({ track })
@@ -114,14 +178,7 @@ void SongInfoEditor::init()
                              : juce::String(), false);
         keyEdit_.setText(tracks_[0].musicalKey, false);
 
-        fileLabel_.setText(tracks_[0].file.getFullPathName(), false);
-        fileLabel_.setReadOnly(true);
-        fileLabel_.setScrollbarsShown(false);
-        fileLabel_.setColour(juce::TextEditor::backgroundColourId,      juce::Colours::transparentBlack);
-        fileLabel_.setColour(juce::TextEditor::outlineColourId,         juce::Colours::transparentBlack);
-        fileLabel_.setColour(juce::TextEditor::focusedOutlineColourId,  juce::Colours::transparentBlack);
-        fileLabel_.setColour(juce::TextEditor::textColourId,            Color::textDim);
-        fileLabel_.setMouseCursor(juce::MouseCursor::IBeamCursor);
+        fileLabel_.setFile(tracks_[0].file);
         addAndMakeVisible(fileLabel_);
     }
     else if (mode_ == Mode::SinglePodcast)
@@ -147,14 +204,7 @@ void SongInfoEditor::init()
                                     ? juce::String(tracks_[0].trackNumber)
                                     : juce::String(), false);
 
-        fileLabel_.setText(tracks_[0].file.getFullPathName(), false);
-        fileLabel_.setReadOnly(true);
-        fileLabel_.setScrollbarsShown(false);
-        fileLabel_.setColour(juce::TextEditor::backgroundColourId,      juce::Colours::transparentBlack);
-        fileLabel_.setColour(juce::TextEditor::outlineColourId,         juce::Colours::transparentBlack);
-        fileLabel_.setColour(juce::TextEditor::focusedOutlineColourId,  juce::Colours::transparentBlack);
-        fileLabel_.setColour(juce::TextEditor::textColourId,            Color::textDim);
-        fileLabel_.setMouseCursor(juce::MouseCursor::IBeamCursor);
+        fileLabel_.setFile(tracks_[0].file);
         addAndMakeVisible(fileLabel_);
     }
     else if (mode_ == Mode::MultiMusic)

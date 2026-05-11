@@ -69,7 +69,28 @@ private:
     juce::Label episodeNumLabel_  { {}, "Episode #" };
     juce::Label bpmLabel_         { {}, "BPM" };
     juce::Label keyLabel_         { {}, "Key" };
-    juce::TextEditor fileLabel_;
+
+    // Clickable file-path readout at the bottom of single-track edit dialogs.
+    // Behaves like a hyperlink: brightens + underlines on hover, pointer
+    // cursor, click reveals the file in Finder / Explorer. Right-click
+    // exposes "Copy Path".
+    class FilePathLink : public juce::Component
+    {
+    public:
+        FilePathLink();
+        void setFile(const juce::File& f);
+
+        void paint(juce::Graphics& g) override;
+        void mouseEnter(const juce::MouseEvent&) override;
+        void mouseExit (const juce::MouseEvent&) override;
+        void mouseDown (const juce::MouseEvent& e) override;
+        void mouseUp   (const juce::MouseEvent& e) override;
+
+    private:
+        juce::File file_;
+        bool       hovered_ { false };
+    };
+    FilePathLink fileLabel_;
     juce::Label hintLabel_;
 
     juce::TextEditor titleEdit_;
