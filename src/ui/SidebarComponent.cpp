@@ -1114,6 +1114,18 @@ bool SidebarComponent::keyPressed(const juce::KeyPress& key)
         const bool  printable = ! mods.isCommandDown() && ! mods.isAltDown()
                               && ! mods.isCtrlDown()  && textCh > 0
                               && juce::CharacterFunctions::isPrintable(textCh);
+
+        // Space is the global play/pause hotkey. We only want to count it
+        // as type-ahead input when the user is mid-search (buffer has
+        // content AND we're still inside the timeout) so they can type
+        // multi-word labels like "Daft Punk". Otherwise let space fall
+        // through to MainComponent::keyPressed.
+        const bool isSpace      = (textCh == ' ');
+        const bool midTypeAhead = typeAheadBuffer_.isNotEmpty()
+            && (juce::Time::currentTimeMillis() - typeAheadLastKeyMs_) < kTypeAheadTimeoutMs;
+        if (isSpace && ! midTypeAhead)
+            return false;
+
         if (printable)
         {
             const auto now = juce::Time::currentTimeMillis();
