@@ -4412,7 +4412,10 @@ void MainComponent::requestQuit(std::function<void()> onConfirmed)
     if (auto* s = appProperties_.getUserSettings())
         ask = s->getBoolValue(MiscPreferencesPanel::kAskBeforeQuittingKey, true);
 
-    if (! ask)
+    // Skip the dialog entirely when there's nothing actively playing: the
+    // user's mental model is "audio is running, quit will cut it off", so
+    // confirming when paused or with no track loaded is just noise.
+    if (! ask || ! engine_.isPlaying())
     {
         if (onConfirmed) onConfirmed();
         return;
@@ -4478,12 +4481,6 @@ void MainComponent::requestQuit(std::function<void()> onConfirmed)
     auto* dlg      = new QuitDialog();
     auto* dontShow = &dlg->dontShow;
     dlg->setName("Confirm Quit");
-    // Tailor the dialog copy: the "playback ends immediately" warning is
-    // only relevant when something is actually playing.
-    dlg->msg.setText(engine_.isPlaying()
-                         ? "Quitting will end playback immediately."
-                         : "Are you sure you want to quit Stylus?",
-                     juce::dontSendNotification);
 
     auto dismiss = [this, dlg](bool confirmed, std::function<void()> cb) {
         activeQuitDialog_ = nullptr;
