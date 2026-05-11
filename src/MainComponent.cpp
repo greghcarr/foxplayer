@@ -2769,6 +2769,9 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track,
     dw->setVisible(false);
     dw->addToDesktop(dw->getDesktopWindowStyleFlags());
     applyDarkTitleBar(*dw);
+    // If the main window is pinned, the dialog needs to match the
+    // elevated window level or it'll open underneath and look hidden.
+    if (alwaysOnTop_) dw->setAlwaysOnTop(true);
     dw->setVisible(true);
 }
 
@@ -2820,6 +2823,7 @@ void MainComponent::showMultiInfoEditor(const std::vector<TrackInfo>& tracks)
     dw->setVisible(false);
     dw->addToDesktop(dw->getDesktopWindowStyleFlags());
     applyDarkTitleBar(*dw);
+    if (alwaysOnTop_) dw->setAlwaysOnTop(true);
     dw->setVisible(true);
 }
 
@@ -3831,7 +3835,13 @@ void MainComponent::toggleAnalysisLog()
     const bool shouldShow = !analysisLogWindow_->isVisible();
     analysisLogWindow_->setVisible(shouldShow);
     if (shouldShow)
+    {
+        // Match the main window's level so we don't disappear behind a
+        // pinned player. applyAlwaysOnTop keeps this in sync if the user
+        // toggles the pin while the log is open.
+        analysisLogWindow_->setAlwaysOnTop(alwaysOnTop_);
         analysisLogWindow_->toFront(true);
+    }
 
     menuItemsChanged();
 }
@@ -3850,6 +3860,22 @@ void MainComponent::applyAlwaysOnTop()
 {
     if (auto* win = getTopLevelComponent())
         win->setAlwaysOnTop(alwaysOnTop_);
+
+    // Propagate the level to any dialog windows currently on screen, so
+    // they don't fall behind the pinned main window. macOS stacks windows
+    // by NSWindow level first, child-of-parent second — a normal-level
+    // dialog under an NSFloatingWindowLevel main window goes underneath
+    // no matter how it was launched. AlertWindows handle this themselves
+    // (TopLevelWindow auto-detects any always-on-top peer), so we only
+    // need to nudge our custom DialogWindow subclasses here.
+    if (auto* w = activeEditInfoWindow_.getComponent())
+        w->setAlwaysOnTop(alwaysOnTop_);
+    if (auto* w = activeQuitDialog_.getComponent())
+        w->setAlwaysOnTop(alwaysOnTop_);
+    if (preferencesWindow_ && preferencesWindow_->isVisible())
+        preferencesWindow_->setAlwaysOnTop(alwaysOnTop_);
+    if (analysisLogWindow_ && analysisLogWindow_->isVisible())
+        analysisLogWindow_->setAlwaysOnTop(alwaysOnTop_);
 }
 
 void MainComponent::showPreferences()
@@ -4450,6 +4476,7 @@ void MainComponent::requestQuit(std::function<void()> onConfirmed)
                     | juce::ComponentPeer::windowHasDropShadow
                     | juce::ComponentPeer::windowIsTemporary);
     applyDarkTitleBar(*dlg);
+    if (alwaysOnTop_) dlg->setAlwaysOnTop(true);
     dlg->setCentrePosition(getScreenBounds().getCentreX(), getScreenBounds().getCentreY());
     dlg->setVisible(true);
 }
