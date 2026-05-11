@@ -4414,6 +4414,20 @@ void MainComponent::requestQuit(std::function<void()> onConfirmed)
             addAndMakeVisible(cancelBtn);
             addAndMakeVisible(quitBtn);
             setSize(320, pad + rowH + 10 + rowH + 16 + btnH + padBottom);
+            // Need keyboard focus on the dialog itself so Esc-on-no-child
+            // still reaches us. Buttons / toggles don't consume Esc, so the
+            // keypress propagates up to here even when focus is on them.
+            setWantsKeyboardFocus(true);
+        }
+
+        bool keyPressed(const juce::KeyPress& key) override
+        {
+            if (key.isKeyCode(juce::KeyPress::escapeKey))
+            {
+                cancelBtn.triggerClick();
+                return true;
+            }
+            return juce::Component::keyPressed(key);
         }
 
         void paint(juce::Graphics& g) override

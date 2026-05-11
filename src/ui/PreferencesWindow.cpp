@@ -770,6 +770,16 @@ void PreferencesWindow::visibilityChanged()
         applyDarkTitleBar(*this);
 }
 
+bool PreferencesWindow::keyPressed(const juce::KeyPress& key)
+{
+    if (key.isKeyCode(juce::KeyPress::escapeKey))
+    {
+        closeButtonPressed();
+        return true;
+    }
+    return juce::DocumentWindow::keyPressed(key);
+}
+
 LibraryPreferencesPanel* PreferencesWindow::libraryPanel()
 {
     return prefsComponent_ != nullptr ? &prefsComponent_->libraryPanel() : nullptr;

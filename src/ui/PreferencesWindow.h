@@ -240,6 +240,9 @@ public:
     void closeButtonPressed() override;
     // See AnalysisLogWindow::visibilityChanged for why this is here.
     void visibilityChanged() override;
+    // Esc dismisses the window. Routed through closeButtonPressed so the
+    // onClose callback runs, matching the close-button path.
+    bool keyPressed(const juce::KeyPress& key) override;
 
     // Direct access to the library panel so MainComponent can wire up callbacks
     // and push the current folder lists into the view.

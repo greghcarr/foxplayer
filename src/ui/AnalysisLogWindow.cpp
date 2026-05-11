@@ -270,6 +270,16 @@ void AnalysisLogWindow::visibilityChanged()
         applyDarkTitleBar(*this);
 }
 
+bool AnalysisLogWindow::keyPressed(const juce::KeyPress& key)
+{
+    if (key.isKeyCode(juce::KeyPress::escapeKey))
+    {
+        closeButtonPressed();
+        return true;
+    }
+    return juce::DocumentWindow::keyPressed(key);
+}
+
 AnalysisLogComponent& AnalysisLogWindow::log()
 {
     jassert(logComponent_ != nullptr);

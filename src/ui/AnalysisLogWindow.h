@@ -69,6 +69,8 @@ public:
     // may have been rebuilt while hidden, and applyDarkTitleBar is a cheap
     // idempotent call that no-ops on platforms other than Windows.
     void visibilityChanged() override;
+    // Esc dismisses the window, same as clicking the close button.
+    bool keyPressed(const juce::KeyPress& key) override;
 
     AnalysisLogComponent& log();
 
