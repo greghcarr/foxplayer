@@ -93,6 +93,12 @@ public:
     // same prompt as a drag-drop folder (add as root vs. add files only).
     void handleExternalPaths(const juce::StringArray& paths, bool startPlayback);
 
+    // Brings every open dialog window owned by this component to the front,
+    // ensuring they sit above the main window. Called from MainWindow when
+    // app activation returns so the user doesn't have to dig dialogs out
+    // from behind the player after Cmd-Tabbing back.
+    void bringDialogsToFront();
+
 private:
     // Prompts the user for a folder and appends it to the library list.
     void showAddFolderChooser();

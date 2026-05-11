@@ -3856,6 +3856,32 @@ void MainComponent::toggleAlwaysOnTop()
     saveSessionState();
 }
 
+void MainComponent::bringDialogsToFront()
+{
+    // Defer the raise to the next message-loop tick so it lands AFTER
+    // macOS finishes its activation sequence. The synchronous path was
+    // racing the OS: clicking the main window's title bar to refocus
+    // Stylus fires the activation observer (which calls this), but
+    // macOS THEN routes the click to the main window, which re-raises
+    // it above any dialog we just lifted. Queuing the raise via
+    // callAsync runs it after that click handling settles, so the
+    // dialog ends up genuinely on top.
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    juce::MessageManager::callAsync([safeThis] {
+        auto* self = safeThis.getComponent();
+        if (self == nullptr) return;
+
+        auto raise = [](juce::Component* w) {
+            if (w == nullptr || ! w->isVisible()) return;
+            w->toFront(/*shouldAlsoGainFocus*/ true);
+        };
+        raise(self->activeEditInfoWindow_.getComponent());
+        raise(self->activeQuitDialog_.getComponent());
+        raise(self->preferencesWindow_.get());
+        raise(self->analysisLogWindow_.get());
+    });
+}
+
 void MainComponent::applyAlwaysOnTop()
 {
     if (auto* win = getTopLevelComponent())
@@ -4486,9 +4512,13 @@ void MainComponent::requestQuit(std::function<void()> onConfirmed)
     // and the default light title bar flashes for a frame before our
     // DwmSetWindowAttribute call lands.
     dlg->setVisible(false);
+    // Don't pass windowIsTemporary: it tells macOS this is a transient
+    // utility-style window, which interferes with bringDialogsToFront's
+    // ability to re-stack it above the main window after the app is
+    // reactivated. The Edit Info dialog (which works correctly) uses
+    // DialogWindow's default flags, which don't include this bit.
     dlg->addToDesktop(juce::ComponentPeer::windowHasTitleBar
-                    | juce::ComponentPeer::windowHasDropShadow
-                    | juce::ComponentPeer::windowIsTemporary);
+                    | juce::ComponentPeer::windowHasDropShadow);
     applyDarkTitleBar(*dlg);
     if (alwaysOnTop_) dlg->setAlwaysOnTop(true);
     dlg->setCentrePosition(getScreenBounds().getCentreX(), getScreenBounds().getCentreY());

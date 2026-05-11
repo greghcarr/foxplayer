@@ -81,6 +81,18 @@ public:
         // Both the Window-menu command and the Dock icon click call showWindow().
         mainComponent_->onShowWindowRequested = [this]() { showWindow(); };
 
+        // Whenever the app reactivates (Cmd-Tab back, dock click), hoist any
+        // open dialogs above the main window. macOS doesn't restack child /
+        // utility windows above their owner on activation, so a dialog that
+        // was on top before Cmd-Tabbing away can end up underneath the
+        // player when focus returns. activeWindowStatusChanged below covers
+        // the case where focus lands on the main window specifically; this
+        // notification observer covers the general "app became active" case
+        // regardless of which window keying happens first.
+        Stylus_setAppActivatedCallback([this] {
+            if (mainComponent_) mainComponent_->bringDialogsToFront();
+        });
+
         // macOS only: clicking the Dock icon while all windows are hidden
         // fires NSApplicationDidBecomeActiveNotification. Re-show the window.
         // The Windows stub no-ops, so this is a safe call on every platform.
@@ -119,6 +131,19 @@ public:
         juce::DocumentWindow::resized();
         if (getName() != "Stylus")
             setName("Stylus");
+    }
+
+    // Fires when the OS shifts focus to or away from this window. When the
+    // user Cmd-Tabs back to Stylus (or clicks the dock icon while open),
+    // any dialog windows we own may have fallen behind the main window in
+    // the activation order. Bring them back up so the user doesn't end up
+    // staring at a player they can't interact with because a modal Edit
+    // Info dialog is hidden underneath.
+    void activeWindowStatusChanged() override
+    {
+        juce::DocumentWindow::activeWindowStatusChanged();
+        if (isActiveWindow() && mainComponent_ != nullptr)
+            mainComponent_->bringDialogsToFront();
     }
 
     MainComponent* getMainComponent() const { return mainComponent_.get(); }
