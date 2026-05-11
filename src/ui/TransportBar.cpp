@@ -50,8 +50,15 @@ void TransportButton::paint(juce::Graphics& g)
     const float cy = h * 0.5f;
     const float r  = d * 0.5f;
 
-    const bool isMod = (icon == Icon::Shuffle || icon == Icon::Repeat
-                     || icon == Icon::Pin     || icon == Icon::Normalize);
+    // Shuffle and Repeat use the floating-icon "mod" rendering only when
+    // off. When engaged they switch into the chrome silver-button look the
+    // play / prev / next buttons use, so the active state reads as a solid
+    // primary control rather than a tinted glyph. Pin / Normalize stay as
+    // floating mods at all toggle states (they live on the right edge with
+    // their own visual family).
+    const bool isShuffleOrRepeat = (icon == Icon::Shuffle || icon == Icon::Repeat);
+    const bool isMod = (icon == Icon::Pin || icon == Icon::Normalize)
+                    || (isShuffleOrRepeat && toggleState == 0);
 
     juce::Colour iconColor;
     if (isMod)
