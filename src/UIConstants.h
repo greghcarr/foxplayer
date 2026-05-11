@@ -67,8 +67,13 @@ namespace Stylus::UIConstants
 
     static constexpr int rowHeight = 24;
 
-    // Sidebar dynamic ID ranges
-    static constexpr int noGenreId = 5999;  // reserved; real genres use 5000..5998
+    // Sidebar dynamic ID ranges. The "(no X)" rows are sentinel ids at the
+    // top of each range so they pin to the top of their section after the
+    // real entries are sorted. The (no X) buckets surface tracks that lack
+    // a value for that field, so the user can clean them up in batch.
+    static constexpr int noArtistId = 2999;   // real artists use 2000..2998
+    static constexpr int noAlbumId  = 3999;   // real albums  use 3000..3998
+    static constexpr int noGenreId  = 5999;   // real genres  use 5000..5998
 
     // Colors
     namespace Color

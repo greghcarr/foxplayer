@@ -1866,14 +1866,20 @@ void MainComponent::updateTrackInLibrary(const TrackInfo& updated, bool followTr
             int newId = 1;
             if (activeSidebarId_ >= 2000 && activeSidebarId_ < 3000)
             {
-                for (const auto& [id, name] : artistIdToName_)
-                    if (name == updated.artist) { newId = id; break; }
+                if (updated.artist.isEmpty())
+                    newId = UIConstants::noArtistId;
+                else
+                    for (const auto& [id, name] : artistIdToName_)
+                        if (name == updated.artist) { newId = id; break; }
             }
             else if (activeSidebarId_ >= 3000 && activeSidebarId_ < 4000)
             {
-                for (const auto& [id, info] : albumIdToInfo_)
-                    if (info.artist == updated.artist && info.album == updated.album)
-                        { newId = id; break; }
+                if (updated.album.isEmpty())
+                    newId = UIConstants::noAlbumId;
+                else
+                    for (const auto& [id, info] : albumIdToInfo_)
+                        if (info.artist == updated.artist && info.album == updated.album)
+                            { newId = id; break; }
             }
             else if (activeSidebarId_ >= 5000 && activeSidebarId_ < 6000)
             {
@@ -2190,19 +2196,35 @@ std::vector<TrackInfo> MainComponent::getTracksForSidebar(int sidebarId) const
     }
     else if (sidebarId >= 2000 && sidebarId < 3000)
     {
-        const auto it = artistIdToName_.find(sidebarId);
-        if (it != artistIdToName_.end())
+        if (sidebarId == UIConstants::noArtistId)
+        {
             for (const auto& t : fullLibrary_)
-                if (t.artist == it->second) result.push_back(t);
+                if (! t.isPodcast && t.artist.isEmpty()) result.push_back(t);
+        }
+        else
+        {
+            const auto it = artistIdToName_.find(sidebarId);
+            if (it != artistIdToName_.end())
+                for (const auto& t : fullLibrary_)
+                    if (t.artist == it->second) result.push_back(t);
+        }
     }
     else if (sidebarId >= 3000 && sidebarId < 4000)
     {
-        const auto it = albumIdToInfo_.find(sidebarId);
-        if (it != albumIdToInfo_.end())
+        if (sidebarId == UIConstants::noAlbumId)
         {
-            const auto& [artist, album] = it->second;
             for (const auto& t : fullLibrary_)
-                if (t.album == album && t.artist == artist) result.push_back(t);
+                if (! t.isPodcast && t.album.isEmpty()) result.push_back(t);
+        }
+        else
+        {
+            const auto it = albumIdToInfo_.find(sidebarId);
+            if (it != albumIdToInfo_.end())
+            {
+                const auto& [artist, album] = it->second;
+                for (const auto& t : fullLibrary_)
+                    if (t.album == album && t.artist == artist) result.push_back(t);
+            }
         }
     }
     else if (sidebarId >= 5000 && sidebarId < 6000)
@@ -2243,13 +2265,21 @@ void MainComponent::refreshSidebarAlbums()
     const bool srcInRange = (qsrc.sidebarId >= 3000 && qsrc.sidebarId < 4000);
 
     // Collect unique (artist, album) pairs using the "ARTIST - ALBUM" label
-    // as the sort key so the sidebar order matches the label order.
+    // as the sort key so the sidebar order matches the label order. Tracks
+    // with an empty album field don't get a real row; they're collected
+    // into the "(no album)" bucket at the top of the section instead.
     struct Item { juce::String artist, album, label; };
     std::vector<Item> items;
     std::set<juce::String> seen;
+    bool hasNoAlbum = false;
     for (const auto& t : fullLibrary_)
     {
-        if (t.isPodcast || t.album.isEmpty()) continue;
+        if (t.isPodcast) continue;
+        if (t.album.isEmpty())
+        {
+            hasNoAlbum = true;
+            continue;
+        }
         const juce::String label = (t.artist.isNotEmpty() ? t.artist : juce::String("Unknown Artist"))
                                  + " - " + t.album;
         if (seen.insert(label).second)
@@ -2262,10 +2292,17 @@ void MainComponent::refreshSidebarAlbums()
 
     albumIdToInfo_.clear();
     std::vector<std::pair<int, juce::String>> sidebarItems;
+
+    if (hasNoAlbum)
+    {
+        albumIdToInfo_[UIConstants::noAlbumId] = { {}, {} };
+        sidebarItems.push_back({ UIConstants::noAlbumId, "(no album)" });
+    }
+
     int id = 3000;
     for (const auto& it : items)
     {
-        if (id >= 4000) break;
+        if (id >= UIConstants::noAlbumId) break;   // leave 3999 reserved
         albumIdToInfo_[id] = { it.artist, it.album };
         sidebarItems.push_back({ id, it.label });
         ++id;
@@ -2410,11 +2447,17 @@ void MainComponent::refreshSidebarArtists()
     const auto qsrc = queue_.hasCurrent() ? queue_.currentSource() : PlayQueue::QueueSource{};
     const bool srcInRange = (qsrc.sidebarId >= 2000 && qsrc.sidebarId < 3000);
 
-    // Collect unique non-empty artist names (non-podcast tracks only), sorted case-insensitively.
+    // Detect whether any non-podcast tracks lack an artist tag; those land
+    // in the "(no artist)" bucket row at the top of the section. Real
+    // artists fill the rest of the range.
+    bool hasNoArtist = false;
     std::set<juce::String> unique;
     for (const auto& t : fullLibrary_)
-        if (!t.isPodcast && t.artist.isNotEmpty())
-            unique.insert(t.artist);
+    {
+        if (t.isPodcast) continue;
+        if (t.artist.isEmpty()) hasNoArtist = true;
+        else                    unique.insert(t.artist);
+    }
 
     std::vector<juce::String> sorted(unique.begin(), unique.end());
     std::sort(sorted.begin(), sorted.end(), [](const juce::String& a, const juce::String& b) {
@@ -2423,10 +2466,17 @@ void MainComponent::refreshSidebarArtists()
 
     artistIdToName_.clear();
     std::vector<std::pair<int, juce::String>> items;
+
+    if (hasNoArtist)
+    {
+        artistIdToName_[UIConstants::noArtistId] = {};
+        items.push_back({ UIConstants::noArtistId, "(no artist)" });
+    }
+
     int id = 2000;
     for (const auto& name : sorted)
     {
-        if (id >= 3000) break;
+        if (id >= UIConstants::noArtistId) break;   // leave 2999 reserved
         artistIdToName_[id] = name;
         items.push_back({ id, name });
         ++id;
@@ -2592,12 +2642,47 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track,
         }
     };
 
-    editor->onSave = [this](std::vector<TrackInfo> updated) {
+    // (no X) bucket views are a special workflow: the user is methodically
+    // filling in a missing field across many tracks. After save, the edited
+    // track no longer belongs in the bucket, so we deliberately keep the
+    // active view pinned to the bucket (followTrack=false) and route the
+    // selection / Next / Prev navigation to whichever track took the just-
+    // vacated slot. The captured peerIndex is the pre-save position of the
+    // edited row in the bucket's visible order.
+    const bool inNoBucketView = (activeSidebarId_ == UIConstants::noGenreId
+                              || activeSidebarId_ == UIConstants::noArtistId
+                              || activeSidebarId_ == UIConstants::noAlbumId);
+    const int  capturedPeerIndex = peerIndex;
+
+    editor->onSave = [this, inNoBucketView, capturedPeerIndex](std::vector<TrackInfo> updated) {
         for (auto& t : updated) {
             StylFile::save(t);
-            updateTrackInLibrary(t);
+            // In a (no X) bucket view we don't want to chase the edited
+            // track out into its new home: the user wants to stay put and
+            // keep working through the bucket. updateTrackInLibrary with
+            // followTrack=false leaves activeSidebarId_ alone.
+            updateTrackInLibrary(t, /*followTrack*/ ! inNoBucketView);
         }
         LibraryCache::save(fullLibrary_, musicFolders_, podcastFolders_, individualTracks_);
+
+        // After the (no X) refresh, the edited track has dropped out of
+        // visibleTracks(). Move the library selection to whichever track
+        // now occupies the pre-edit slot, so the user has visual context
+        // for "what's next". If the bucket is now empty (or the slot is
+        // past the end), clear the selection instead.
+        if (inNoBucketView)
+        {
+            const auto& peers = libraryTable_.visibleTracks();
+            if (capturedPeerIndex >= 0
+                && capturedPeerIndex < (int) peers.size())
+            {
+                libraryTable_.scrollToFile(peers[(size_t) capturedPeerIndex].file);
+            }
+            else
+            {
+                libraryTable_.setSelectedFiles({});
+            }
+        }
     };
 
     editor->onLookupRequested = [this](const TrackInfo& t, std::function<void(bool, TrackInfo)> cb) {
@@ -2612,7 +2697,8 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track,
     if (peerIndex >= 0 && (int)peerList.size() > 1)
     {
         editor->setPeerNavigation(peerIndex, (int)peerList.size());
-        editor->onSaveAndNavigate = [safeThis, closeDialog](int delta) {
+        editor->onSaveAndNavigate = [safeThis, closeDialog, inNoBucketView,
+                                     capturedPeerIndex](int delta) {
             auto* self = safeThis.getComponent();
             if (self == nullptr) return;
 
@@ -2622,17 +2708,50 @@ void MainComponent::showSongInfoEditor(const TrackInfo& track,
             // snapshot captured when the dialog opened would walk the wrong
             // neighbours.
             auto currentPeers = self->libraryTable_.visibleTracks();
-            if (currentPeers.empty()) return;
+            if (currentPeers.empty())
+            {
+                closeDialog(true);   // bucket emptied: dismiss
+                return;
+            }
 
+            int newIndex = -1;
             int currentIdx = -1;
             for (int i = 0; i < (int) currentPeers.size(); ++i)
                 if (currentPeers[(size_t) i].file == self->lastEditedInfoFile_)
                     { currentIdx = i; break; }
 
-            if (currentIdx < 0) return;  // track is no longer in this view
+            if (currentIdx >= 0)
+            {
+                // Track is still in this view (no field that affected the
+                // view's filter changed). Step forward / back from its
+                // live position.
+                newIndex = currentIdx + delta;
+            }
+            else if (inNoBucketView)
+            {
+                // Track has dropped out of a (no X) bucket because the user
+                // just supplied the missing field. The slot the edited row
+                // held has been backfilled by what was originally at
+                // index+1, so for Next we land on capturedPeerIndex (the
+                // same numeric slot, now showing a different file). For
+                // Prev we step one slot earlier, which is unchanged by the
+                // removal.
+                newIndex = (delta > 0)
+                             ? capturedPeerIndex
+                             : capturedPeerIndex - 1;
+            }
+            else
+            {
+                return;  // edited track left a non-bucket view; nothing to do
+            }
 
-            const int newIndex = currentIdx + delta;
-            if (newIndex < 0 || newIndex >= (int) currentPeers.size()) return;
+            if (newIndex < 0 || newIndex >= (int) currentPeers.size())
+            {
+                // No track left in the user's direction of travel; dismiss
+                // the dialog rather than wrapping silently.
+                closeDialog(true);
+                return;
+            }
 
             closeDialog(false); // close old dialog without hiding the overlay
 
@@ -3584,11 +3703,15 @@ juce::String MainComponent::sourceNameForSidebar(int sidebarId) const
         const auto it = podcastIdToName_.find(sidebarId);
         return it != podcastIdToName_.end() ? it->second : juce::String("Podcast");
     }
+    if (sidebarId == UIConstants::noArtistId)
+        return "(no artist)";
     if (sidebarId >= 2000 && sidebarId < 3000)
     {
         const auto it = artistIdToName_.find(sidebarId);
         return it != artistIdToName_.end() ? it->second : juce::String("Artist");
     }
+    if (sidebarId == UIConstants::noAlbumId)
+        return "(no album)";
     if (sidebarId >= 3000 && sidebarId < 4000)
     {
         const auto it = albumIdToInfo_.find(sidebarId);

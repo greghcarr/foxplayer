@@ -409,7 +409,9 @@ void SidebarComponent::drawSectionItem(juce::Graphics& g,
     }
 
     const int labelX = iconX + iconDim + iconGap;
-    const bool isDim = (item.id == UIConstants::noGenreId);
+    const bool isDim = (item.id == UIConstants::noGenreId)
+                    || (item.id == UIConstants::noArtistId)
+                    || (item.id == UIConstants::noAlbumId);
     g.setColour(isActive ? Color::textPrimary
                 : isDim  ? Color::textDim
                          : Color::textSecondary);
@@ -906,12 +908,14 @@ void SidebarComponent::mouseExit(const juce::MouseEvent&)
 bool SidebarComponent::isRenamableId(int sidebarId)
 {
     // Renamable rows: playlists, artists, albums, podcasts, and user-set
-    // genres. The "(no genre)" row at noGenreId is reserved as a bucket
-    // label and not user-editable. All Music / All Podcasts are pseudo-rows
-    // (ids 1 / 2) and intentionally fall through.
+    // genres. The "(no X)" sentinel rows are reserved bucket labels and
+    // not user-editable. All Music / All Podcasts (ids 1 / 2) are pseudo-
+    // rows and intentionally fall through.
     return (sidebarId >= 1000 && sidebarId < 2000)                 // playlists
-        || (sidebarId >= 2000 && sidebarId < 3000)                 // artists
-        || (sidebarId >= 3000 && sidebarId < 4000)                 // albums
+        || (sidebarId >= 2000 && sidebarId < 3000
+            && sidebarId != UIConstants::noArtistId)               // artists
+        || (sidebarId >= 3000 && sidebarId < 4000
+            && sidebarId != UIConstants::noAlbumId)                // albums
         || (sidebarId >= 4000 && sidebarId < 5000)                 // podcasts
         || (sidebarId >= 5000 && sidebarId < 6000
             && sidebarId != UIConstants::noGenreId);               // genres
