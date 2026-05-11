@@ -1144,34 +1144,91 @@ bool SidebarComponent::keyPressed(const juce::KeyPress& key)
     }
 
     // Cmd + Up / Down: jump to the first / last navigable item of the
-    // user's current section. Stays inside the section the cursor is in
-    // - section-crossing is what Option+Up / Option+Down does.
+    // user's current section. If the anchor is *already* at that boundary,
+    // cross into the previous / next non-empty section instead (collapsing
+    // the current section, expanding the target) so a series of Cmd+Up /
+    // Cmd+Down presses walks continuously through the whole sidebar.
+    // Section-only nav without the boundary-crossing behaviour is Alt+Up /
+    // Alt+Down.
     if (key.getModifiers().isCommandDown()
         && ! key.getModifiers().isAltDown()
         && (key.getKeyCode() == juce::KeyPress::upKey
          || key.getKeyCode() == juce::KeyPress::downKey))
     {
-        const int anchorId = (focusedId_ > 0) ? focusedId_ : selectedId_;
-        for (const auto& sec : sections_)
-        {
-            bool inThisSection = false;
-            for (const auto& it : sec.items)
-                if (it.id == anchorId) { inThisSection = true; break; }
-            if (! inThisSection) continue;
+        const bool wantLast = (key.getKeyCode() == juce::KeyPress::downKey);
+        const int anchorId  = (focusedId_ > 0) ? focusedId_ : selectedId_;
 
-            const bool wantLast = (key.getKeyCode() == juce::KeyPress::downKey);
-            int targetId = -1;
+        // Locate the section the anchor lives in, plus the first / last
+        // navigable id in that section.
+        int currentSection = -1;
+        int sectionBoundaryId = -1;
+        for (size_t i = 0; i < sections_.size(); ++i)
+        {
+            const auto& sec = sections_[i];
+            bool here = false;
+            for (const auto& it : sec.items)
+                if (it.id == anchorId) { here = true; break; }
+            if (! here) continue;
+
+            currentSection = (int) i;
             for (auto it = sec.items.begin(); it != sec.items.end(); ++it)
             {
                 if (it->id <= 0) continue;
-                targetId = it->id;
-                if (! wantLast) break;     // first navigable: stop on the first match
-                // last navigable: keep walking; the last assignment wins
+                sectionBoundaryId = it->id;
+                if (! wantLast) break;
             }
-            if (targetId > 0) selectId(targetId);
+            break;
+        }
+        if (currentSection < 0) return false;
+
+        // If we're not already at the boundary, jump to it within the
+        // current section (preserves the original within-section behaviour).
+        if (sectionBoundaryId > 0 && anchorId != sectionBoundaryId)
+        {
+            selectId(sectionBoundaryId);
             return true;
         }
-        return false;
+
+        // Boundary hit: cross to the previous / next non-empty section,
+        // mirroring Alt+Up / Alt+Down section-jump semantics. Sections
+        // without any navigable items (id <= 0) are skipped so the cursor
+        // doesn't get stranded on a heading.
+        const int direction = wantLast ? +1 : -1;
+        int targetSection = -1;
+        for (int j = currentSection + direction;
+             j >= 0 && j < (int) sections_.size();
+             j += direction)
+        {
+            for (const auto& it : sections_[(size_t) j].items)
+                if (it.id > 0) { targetSection = j; break; }
+            if (targetSection >= 0) break;
+        }
+        if (targetSection < 0) return true;     // no further section: silent no-op
+
+        if (sections_[(size_t) currentSection].collapsible)
+            sections_[(size_t) currentSection].collapsed = true;
+        if (sections_[(size_t) targetSection].collapsible)
+            sections_[(size_t) targetSection].collapsed = false;
+
+        // Land on the first navigable item of the target section when going
+        // down, or the last navigable item when going up. A single Cmd+Up at
+        // the top of a section therefore lands on the BOTTOM of the previous
+        // section, so a sustained Cmd+Up walks contiguously upward through
+        // every section boundary without skipping entries on either side.
+        int targetId = -1;
+        for (const auto& it : sections_[(size_t) targetSection].items)
+        {
+            if (it.id <= 0) continue;
+            targetId = it.id;
+            if (wantLast) break;     // going down: stop on the first navigable
+            // going up: keep walking so the last assignment wins
+        }
+        if (targetId > 0)
+        {
+            layoutItems();
+            selectId(targetId);
+        }
+        return true;
     }
 
     // Option/Alt + Up / Down: jump to the first item of the previous /
