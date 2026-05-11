@@ -119,6 +119,15 @@ void AudioEngine::setVolumeNormalizationEnabled(bool enabled)
     // Normalisation toggle is a global decision the user makes - fade the
     // transition so an active track doesn't lurch between levels.
     applyCombinedGain(true);
+
+    // Start the visual fade-in when toggling on with a usable measurement
+    // already known (the audio gain ramps the same window, so the check
+    // appears in lockstep). Toggling off snaps the check to "off" via the
+    // button-state path, so no fade-out tracking is needed.
+    if (enabled && lufsKnown_ && currentTrack_.lufs != 0.0f)
+        checkFadeStartMs_ = juce::Time::currentTimeMillis();
+    else if (! enabled)
+        checkFadeStartMs_ = 0;
 }
 
 void AudioEngine::updateCurrentTrackLufs(float lufs)
@@ -129,6 +138,12 @@ void AudioEngine::updateCurrentTrackLufs(float lufs)
     // Lazy LUFS just landed mid-track: fade from pre-roll to the measured
     // level so the correction reads as a smooth settle, not a jump.
     applyCombinedGain(true);
+
+    // Mark the moment for the visual check fade. The opacity getter uses
+    // smoothstep over kRampDurationMs from this timestamp, so the green
+    // check fades in alongside the audible ramp.
+    if (normalizeVolume_ && currentTrack_.lufs != 0.0f)
+        checkFadeStartMs_ = juce::Time::currentTimeMillis();
 }
 
 void AudioEngine::markLufsAnalysisFailed()
@@ -138,6 +153,35 @@ void AudioEngine::markLufsAnalysisFailed()
     // Same rationale as updateCurrentTrackLufs: fade pre-roll back to
     // unity rather than snapping.
     applyCombinedGain(true);
+    // Failed analysis leaves checkFadeStartMs_ unset: no effect engaged,
+    // no check overlay.
+}
+
+bool AudioEngine::isLufsAnalysisPending() const
+{
+    return normalizeVolume_ && trackLoaded_ && ! lufsKnown_;
+}
+
+float AudioEngine::normalizationCheckOpacity() const
+{
+    // Off: feature disabled entirely, no overlay at all.
+    if (! normalizeVolume_)             return 0.0f;
+    // Analysis is in flight - the spinner overlay takes over, so suppress
+    // the check during that window.
+    if (isLufsAnalysisPending())        return 0.0f;
+
+    // Otherwise the feature is "engaged" from the user's perspective
+    // (button is on, no analysis pending). The check is the on-indicator
+    // and stays visible regardless of whether the loaded track happens to
+    // have a usable LUFS value: a failed analysis or absent track shouldn't
+    // make the visual look like the feature was disabled.
+    if (checkFadeStartMs_ == 0)         return 1.0f;
+
+    const auto elapsed = juce::Time::currentTimeMillis() - checkFadeStartMs_;
+    if (elapsed >= kRampDurationMs)     return 1.0f;
+
+    const float t = (float) elapsed / (float) kRampDurationMs;
+    return t * t * (3.0f - 2.0f * t);   // matches the audio gain smoothstep
 }
 
 float AudioEngine::computeTargetGain() const
@@ -309,6 +353,11 @@ void AudioEngine::loadTrack(const TrackInfo& track)
     // (or report a failure) shortly. applyCombinedGain reads this to decide
     // pre-roll vs measured vs unity.
     lufsKnown_ = (currentTrack_.lufs != 0.0f);
+    // No fade-in on track load: if normalisation is on and the LUFS is
+    // already known, the check renders at full opacity immediately (the
+    // audio gain also snaps via applyCombinedGain(false) on this path);
+    // otherwise the spinner takes over until lazy analysis lands.
+    checkFadeStartMs_ = 0;
     readerSource_ = std::make_unique<juce::AudioFormatReaderSource>(reader, true);
     transportSource_.setSource(readerSource_.get(),
                                Constants::audioReadAheadBufferSize,

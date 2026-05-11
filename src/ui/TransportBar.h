@@ -12,7 +12,8 @@ namespace Stylus
 
 // Circular transport control button with a vector-drawn icon.
 class TransportButton : public juce::Component,
-                        public juce::SettableTooltipClient
+                        public juce::SettableTooltipClient,
+                        private juce::Timer
 {
 public:
     enum class Icon { Prev, Play, Pause, Next, Shuffle, Repeat, Pin, Normalize };
@@ -41,7 +42,18 @@ public:
     // would see if they had pressed the button with the mouse.
     void flashPressed();
 
+    // Normalize-icon overlay. When showSpinner is true, a rotating arc is
+    // drawn in place of the green check and an internal timer ticks at
+    // 30 Hz. checkAlpha (0..1) drives the green-check opacity for the
+    // fade-in from "analysing" to "active". Both controls are no-ops on
+    // non-Normalize buttons. Callers pull state from
+    // AudioEngine::isLufsAnalysisPending / normalizationCheckOpacity.
+    void setShowSpinner(bool show);
+    void setCheckAlpha(float a);
+
 private:
+    void timerCallback() override;   // ticks spinner rotation
+
     bool hovered_ { false };
     bool pressed_  { false };
 
@@ -59,6 +71,13 @@ private:
     // in the "on" state. One-shot cache: built on first paint after
     // construction, then reused for every subsequent on-state paint.
     mutable std::unique_ptr<juce::Drawable> checkOverlayCache_;
+
+    // Normalize overlay state. checkAlpha_ is what paint() actually reads
+    // for the check opacity (replaces the old fixed 0.78). showSpinner_
+    // suppresses the check entirely and draws a rotating arc instead.
+    bool  showSpinner_  { false };
+    float checkAlpha_   { 0.0f };
+    float spinnerAngle_ { 0.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TransportButton)
 };

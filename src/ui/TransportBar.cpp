@@ -158,41 +158,73 @@ void TransportButton::paint(juce::Graphics& g)
             1.0f);
     }
 
-    // Normalize button "on" state: a green check-fill drawn over the dim
-    // waveform icon. The check shape itself has no background (it's just
-    // the stroke) so the icon stays visible around it; the check is also
-    // drawn at less than full opacity so the icon shows through the parts
-    // it does overlap. Built lazily and cached so paint stays cheap.
+    // Normalize button overlay layer. Three visual states the caller can
+    // arbitrate between via setShowSpinner / setCheckAlpha:
+    //   - showSpinner_ true       => rotating arc (analysis in progress)
+    //   - checkAlpha_  > 0        => green check at the given opacity
+    //                                (fades in alongside the audio ramp)
+    //   - both off                => bare dim waveform icon (off state, or
+    //                                analysis ran but produced no value)
     if (icon == Icon::Normalize && toggleState != 0)
     {
-        if (! checkOverlayCache_)
+        if (showSpinner_)
         {
-            // Use the "fat" variant (check-fat-fill) rather than check-fill:
-            // check-fill is a checkbox shape (rounded rect + check cutout),
-            // which renders as a green frame with a transparent check
-            // inside. check-fat-fill is just the chunky check stroke on
-            // its own with no frame, so the underlying icon stays visible
-            // around it.
-            const auto xmlStr = juce::String::createStringFromData(
-                BinaryData::checkfatfill_svg, BinaryData::checkfatfill_svgSize);
-            if (auto xml = juce::XmlDocument::parse(xmlStr))
-                if (auto drawable = juce::Drawable::createFromSVG(*xml))
-                {
-                    // Distinct "on / approved" green, independent of any
-                    // app-accent colour change.
-                    drawable->replaceColour(juce::Colours::black, juce::Colour(0xff3ec25e));
-                    checkOverlayCache_ = std::move(drawable);
-                }
+            // Match LoadingIndicator's spinner styling so the "we're
+            // measuring loudness" cue reads the same as the library scan
+            // spinner the user already knows. Sized so the arc tucks
+            // inside the icon's chunky waveform glyph.
+            const float spinnerD = d * 0.65f;
+            const float r        = spinnerD * 0.5f - 1.0f;
+
+            // Faint background ring (textDim) so the moving arc has a track.
+            g.setColour(UIConstants::Color::textDim.withAlpha(0.45f));
+            g.drawEllipse(cx - r, cy - r, r * 2.0f, r * 2.0f, 1.5f);
+
+            // Rotating accent arc.
+            juce::Path arc;
+            const float sweep = juce::MathConstants<float>::pi * 1.55f;
+            arc.addCentredArc(cx, cy, r, r,
+                              0.0f,
+                              spinnerAngle_,
+                              spinnerAngle_ + sweep,
+                              true);
+            g.setColour(UIConstants::Color::accent);
+            g.strokePath(arc, juce::PathStrokeType(1.8f,
+                                                    juce::PathStrokeType::curved,
+                                                    juce::PathStrokeType::rounded));
         }
-        if (checkOverlayCache_)
+        else if (checkAlpha_ > 0.0f)
         {
-            const float overlaySize = d * 0.85f;
-            checkOverlayCache_->drawWithin(
-                g,
-                juce::Rectangle<float>(cx - overlaySize * 0.5f, cy - overlaySize * 0.5f,
-                                       overlaySize, overlaySize),
-                juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize,
-                0.78f);    // partial opacity so the waveform shows through
+            if (! checkOverlayCache_)
+            {
+                // check-fat-fill is the chunky check stroke with no frame,
+                // so the underlying icon stays visible around it (the
+                // alternative check-fill is a checkbox shape with a frame).
+                const auto xmlStr = juce::String::createStringFromData(
+                    BinaryData::checkfatfill_svg, BinaryData::checkfatfill_svgSize);
+                if (auto xml = juce::XmlDocument::parse(xmlStr))
+                    if (auto drawable = juce::Drawable::createFromSVG(*xml))
+                    {
+                        drawable->replaceColour(juce::Colours::black,
+                                                juce::Colour(0xff3ec25e));
+                        checkOverlayCache_ = std::move(drawable);
+                    }
+            }
+            if (checkOverlayCache_)
+            {
+                const float overlaySize = d * 0.85f;
+                // 0.78 is the baseline opacity used before this overlay
+                // gained a fade-in animation; scale by checkAlpha_ so 0
+                // hides the check and 1 reproduces the original look.
+                const float baseAlpha = 0.78f;
+                checkOverlayCache_->drawWithin(
+                    g,
+                    juce::Rectangle<float>(cx - overlaySize * 0.5f,
+                                            cy - overlaySize * 0.5f,
+                                            overlaySize, overlaySize),
+                    juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize,
+                    baseAlpha * juce::jlimit(0.0f, 1.0f, checkAlpha_));
+            }
         }
     }
 
@@ -230,6 +262,39 @@ void TransportButton::flashPressed()
                 b->repaint();
             }
         });
+}
+
+void TransportButton::setShowSpinner(bool show)
+{
+    if (showSpinner_ == show) return;
+    showSpinner_ = show;
+    if (show)
+    {
+        // 30 Hz matches LoadingIndicator's spinner so the two animations
+        // look identical when on screen at the same time.
+        if (! isTimerRunning()) startTimerHz(30);
+    }
+    else if (isTimerRunning())
+    {
+        stopTimer();
+    }
+    repaint();
+}
+
+void TransportButton::setCheckAlpha(float a)
+{
+    a = juce::jlimit(0.0f, 1.0f, a);
+    if (std::abs(checkAlpha_ - a) < 0.005f) return;
+    checkAlpha_ = a;
+    repaint();
+}
+
+void TransportButton::timerCallback()
+{
+    spinnerAngle_ += juce::MathConstants<float>::pi * 0.08f;
+    if (spinnerAngle_ > juce::MathConstants<float>::twoPi)
+        spinnerAngle_ -= juce::MathConstants<float>::twoPi;
+    repaint();
 }
 
 void TransportButton::mouseEnter(const juce::MouseEvent&)

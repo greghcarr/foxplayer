@@ -225,6 +225,21 @@ private:
     TransportButton        pinButton_;
     TransportButton        normalizeButton_;
 
+    // Drives the spinner / check-fade overlays on normalizeButton_ at 30 Hz.
+    // Self-stops once both states settle (spinner off + checkAlpha at 0 or 1)
+    // so it doesn't burn CPU once analysis is done. Restarted by every event
+    // that can change the overlay (toggle, track load, analysis lands).
+    class NormalizeAnimator : public juce::Timer
+    {
+    public:
+        explicit NormalizeAnimator(MainComponent& p) : parent_(p) {}
+        void timerCallback() override;
+    private:
+        MainComponent& parent_;
+    };
+    NormalizeAnimator normalizeAnimator_ { *this };
+    void updateNormalizeOverlay();   // pushes engine state to the button
+
     // Full-bleed overlay shown while the Preferences window is open. Dims the
     // main content, blocks clicks from reaching anything beneath, and offers
     // two buttons: one to recentre the Preferences window on the main window,

@@ -330,6 +330,10 @@ MainComponent::MainComponent()
             if (t.lufs == 0.0f && t.file.existsAsFile())
                 analysisEngine_.enqueueLufsOnly(t);
         }
+        // Refresh the spinner / check-fade overlay immediately and (re)start
+        // the animator so the visual tracks the audio ramp.
+        updateNormalizeOverlay();
+        normalizeAnimator_.startTimerHz(30);
     };
     addAndMakeVisible(normalizeButton_);
 
@@ -1043,6 +1047,9 @@ MainComponent::MainComponent()
                 if (t.lufs == 0.0f && t.file.existsAsFile())
                     analysisEngine_.enqueueLufsOnly(t);
             }
+            // Same overlay refresh as the transport-bar button click.
+            updateNormalizeOverlay();
+            normalizeAnimator_.startTimerHz(30);
         };
     }
     if (auto* s = appProperties_.getUserSettings())
@@ -1050,6 +1057,10 @@ MainComponent::MainComponent()
         const bool normOn = s->getBoolValue(AudioPreferencesPanel::kNormalizeVolumeKey, false);
         engine_.setVolumeNormalizationEnabled(normOn);
         normalizeButton_.toggleState = normOn ? 1 : 0;
+        // Initial overlay sync: no track yet means spinner is off and check
+        // is at 0; that's exactly what we want for the no-track resting
+        // state. Once a track loads, onTrackStarted refreshes this.
+        updateNormalizeOverlay();
     }
 
     // Analysis callbacks - feed both the library and the log window.
@@ -1086,6 +1097,11 @@ MainComponent::MainComponent()
                 engine_.updateCurrentTrackLufs(analysed.lufs);
             else
                 engine_.markLufsAnalysisFailed();
+            // Either path settles the pending state: turn the spinner off,
+            // start the check-fade (or stay off for failed analysis). The
+            // animator will tick through the fade and self-stop.
+            updateNormalizeOverlay();
+            normalizeAnimator_.startTimerHz(30);
         }
 
         if (analysisLogWindow_) analysisLogWindow_->log().trackAnalysed(analysed);
@@ -2707,6 +2723,13 @@ void MainComponent::setupAudioEngineCallbacks()
         // user wants consistent levels regardless of content type.
         if (engine_.isVolumeNormalizationEnabled() && track.lufs == 0.0f)
             analysisEngine_.enqueueLufsOnly(track);
+
+        // Refresh the spinner / check-fade overlay for the new track and
+        // restart the animator. A track with lufs already known settles the
+        // animator at full alpha within one tick; an unmeasured track turns
+        // the spinner on.
+        updateNormalizeOverlay();
+        normalizeAnimator_.startTimerHz(30);
     };
 
     engine_.onTrackFinished = [this] {
@@ -4306,6 +4329,29 @@ void MainComponent::requestQuit(std::function<void()> onConfirmed)
     applyDarkTitleBar(*dlg);
     dlg->setCentrePosition(getScreenBounds().getCentreX(), getScreenBounds().getCentreY());
     dlg->setVisible(true);
+}
+
+void MainComponent::NormalizeAnimator::timerCallback()
+{
+    parent_.updateNormalizeOverlay();
+}
+
+void MainComponent::updateNormalizeOverlay()
+{
+    const bool  spinner = engine_.isLufsAnalysisPending();
+    const float alpha   = engine_.normalizationCheckOpacity();
+
+    normalizeButton_.setShowSpinner(spinner);
+    normalizeButton_.setCheckAlpha(alpha);
+
+    // Stop the animator once both overlays are at a stable rest. Spinner
+    // off means analysis isn't pending (so no rotation to advance), and
+    // alpha pinned at 0 or 1 means the check is fully shown / hidden and
+    // not mid-fade. Anything else and we keep ticking.
+    const bool atRest = ! spinner
+                        && (alpha <= 0.001f || alpha >= 0.999f);
+    if (atRest && normalizeAnimator_.isTimerRunning())
+        normalizeAnimator_.stopTimer();
 }
 
 } // namespace Stylus

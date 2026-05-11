@@ -44,6 +44,20 @@ public:
     void  setVolumeNormalizationEnabled(bool enabled);
     bool  isVolumeNormalizationEnabled() const { return normalizeVolume_; }
 
+    // True while normalisation is enabled AND the loaded track's loudness
+    // hasn't been measured yet (gain is pre-rolling at -3 dB). The UI uses
+    // this to show a spinner overlay on the Normalize button.
+    bool  isLufsAnalysisPending() const;
+
+    // 0..1 opacity for the "active" overlay (the green check on the Normalize
+    // button). Returns 0 when normalisation is off or the loaded track has no
+    // usable LUFS measurement. After the measurement lands (or normalisation
+    // is toggled on while a measurement is already known), this fades from
+    // 0 to 1 over kRampDurationMs via the same smoothstep curve as the audio
+    // gain ramp, so the visual transition tracks the audible one. Stays at
+    // 1 once the fade completes; resets to 0 on next track load / disable.
+    float normalizationCheckOpacity() const;
+
     // Read-only access to the loaded track. MainComponent uses this to
     // recognise late LUFS analysis results that target the playing file.
     const TrackInfo& currentTrack() const { return currentTrack_; }
@@ -136,6 +150,11 @@ private:
     // failure. While false, applyCombinedGain pre-rolls at -3 dB; once
     // true, gain settles to either the measured offset or unity.
     bool        lufsKnown_     { false };
+    // Timestamp at which the "effect engaged" fade-in should begin (e.g. lazy
+    // LUFS lands with a usable value, or the user toggles normalisation on
+    // while the track is already analysed). 0 means no fade in progress —
+    // either we're settled at the steady state or no effect is engaged.
+    juce::int64 checkFadeStartMs_ { 0 };
 
     // Ramp state. currentGain_ is the gain that's actually live on the
     // transport. When a smooth ramp is requested, the timer interpolates
