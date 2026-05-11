@@ -18,6 +18,8 @@ public:
     // Mode is derived from tracks.front().isPodcast.
     explicit SongInfoEditor(const std::vector<TrackInfo>& tracks);
 
+    ~SongInfoEditor() override;
+
     // Called with all edited tracks on Save (1 element for single-track mode).
     std::function<void(std::vector<TrackInfo>)> onSave;
 
@@ -31,6 +33,18 @@ public:
     // Single-track mode only. Enables/disables the Prev and Next nav buttons.
     void setPeerNavigation(int index, int total);
 
+    // Programmatic equivalent of clicking the Prev / Next button. delta=+1
+    // fires Next, delta=-1 fires Prev. No-op if the requested button is
+    // hidden (multi mode) or disabled (at a list boundary). Used by the
+    // Option+Tab / Option+Shift+Tab keyboard shortcuts on the editor's
+    // input fields.
+    void requestNavigatePeer(int delta);
+
+    // Programmatic equivalent of clicking Cancel: invokes onDismiss with
+    // no edits applied. Used by the Esc-key handling on the editor's
+    // input fields (TextEditor would otherwise consume the keystroke).
+    void dismiss();
+
     // SingleMusic mode only. Called when the user clicks "Apple Music Lookup".
     // Implementations should kick off a lookup for the given track and call the
     // result callback on the message thread when it completes. success=false
@@ -40,7 +54,6 @@ public:
     // juce::Component
     void paint(juce::Graphics& g) override;
     void resized() override;
-    void focusOfChildComponentChanged(juce::Component::FocusChangeType) override;
 
 private:
     enum class Mode { SingleMusic, SinglePodcast, MultiMusic, MultiPodcast };

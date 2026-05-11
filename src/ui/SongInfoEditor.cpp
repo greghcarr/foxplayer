@@ -1,10 +1,146 @@
 #include "SongInfoEditor.h"
 #include "UIConstants.h"
+#include "ui/MacWindowHelper.h"
 
 namespace Stylus
 {
 
 using namespace UIConstants;
+
+namespace
+{
+    // KeyListener attached to every Edit Info text field. Intercepts
+    // Cmd+Backspace and turns it into "clear the whole field", matching
+    // the macOS convention for single-line inputs (browser address bar,
+    // Spotlight, system dialog text fields, etc.). JUCE's TextEditor
+    // otherwise treats Cmd+Backspace as a plain single-character delete.
+    // KeyListener::keyPressed runs before Component::keyPressed (see
+    // ComponentPeer::handleKeyPress), so returning true here suppresses
+    // TextEditor's default handling for this key combo only.
+    // Walks up from a child component to find the enclosing SongInfoEditor.
+    // Returns null if the editor isn't somewhere in the ancestor chain,
+    // which would mean the listener/filter got attached to a field outside
+    // its intended scope.
+    SongInfoEditor* findEnclosingEditor(juce::Component* origin)
+    {
+        for (auto* c = origin; c != nullptr; c = c->getParentComponent())
+            if (auto* se = dynamic_cast<SongInfoEditor*>(c))
+                return se;
+        return nullptr;
+    }
+
+    struct EditFieldKeyListener : public juce::KeyListener
+    {
+        bool keyPressed(const juce::KeyPress& key, juce::Component* origin) override
+        {
+            const auto mods = key.getModifiers();
+
+            // Cmd+Backspace: clear the focused field entirely. JUCE's
+            // default treats this as a single-character delete; this
+            // matches the macOS single-line-input convention instead.
+            if (key.isKeyCode(juce::KeyPress::backspaceKey) && mods.isCommandDown())
+            {
+                if (auto* ed = dynamic_cast<juce::TextEditor*>(origin))
+                {
+                    ed->setText({}, juce::sendNotificationSync);
+                    return true;
+                }
+            }
+
+            // Esc dismisses the dialog. TextEditor would otherwise consume
+            // Esc (via consumeEscAndReturnKeys) and the keystroke would
+            // never reach the surrounding dialog window's escape handler,
+            // so we have to catch it here and route it through dismiss().
+            if (key.isKeyCode(juce::KeyPress::escapeKey)
+                && ! mods.isAnyModifierKeyDown())
+            {
+                if (auto* editor = findEnclosingEditor(origin))
+                {
+                    editor->dismiss();
+                    return true;
+                }
+            }
+
+            // Option+Tab / Option+Shift+Tab: same as clicking the Next /
+            // Previous buttons. Lets the user save-and-advance without
+            // moving their hand off the keyboard. Plain Tab continues to
+            // traverse fields.
+            //
+            // On macOS Option+Tab is *also* caught at the IME layer via
+            // TabNavInputFilter below — that path fires when Cocoa routes
+            // the keystroke through insertText: instead of keyDown:, which
+            // it does specifically with Option held. We need both because
+            // Cocoa's choice between the two paths isn't predictable for
+            // every keyboard layout.
+            if (key.isKeyCode(juce::KeyPress::tabKey) && mods.isAltDown())
+            {
+                if (auto* editor = findEnclosingEditor(origin))
+                {
+                    // Mods captured from the KeyPress are reliable for this
+                    // path; the IME-routed path in TabNavInputFilter has to
+                    // re-poll the OS for live state instead.
+                    editor->requestNavigatePeer(mods.isShiftDown() ? -1 : +1);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    };
+
+    // macOS NSTextInputContext (the IME) intercepts Option+Tab before JUCE's
+    // keyPressed dispatch can see it, and converts the keystroke into a
+    // plain character insertion via insertText: -> insertTextAtCaret. The
+    // result is that nothing happens at the KeyListener layer; instead a
+    // tab character (which JUCE TextEditor renders as a space-ish glyph
+    // because tabKeyUsedAsCharacter is off) gets inserted. We catch the
+    // hijacked insertion here, in TextEditor's InputFilter chain, by
+    // looking for whitespace-y inserts while Option is currently held.
+    // Legitimate Option+letter combos (like Option+E for combining accents)
+    // produce non-whitespace text so they pass through unchanged.
+    struct TabNavInputFilter : public juce::TextEditor::InputFilter
+    {
+        juce::String filterNewText(juce::TextEditor& ed,
+                                    const juce::String& newInput) override
+        {
+            // Pull the LIVE OS-level modifier state, not the cached
+            // ModifierKeys::currentModifiers. The cached value can be
+            // stale by the time filterNewText fires for the second
+            // navigation in a row: closing/reopening the dialog appears to
+            // disturb JUCE's modifier-tracking even though the user never
+            // released Option. getNativeRealtimeModifiers re-reads from
+            // [NSEvent modifierFlags] on macOS, which is authoritative.
+            const auto mods = juce::ModifierKeys::getCurrentModifiersRealtime();
+            if (! mods.isAltDown() || newInput.isEmpty())
+                return newInput;
+
+            // Only swallow whitespace-y single-char insertions. Tab (0x09),
+            // ASCII space (0x20), and non-breaking space (0xA0) cover the
+            // observed macOS variants for Option+Tab and Option+Shift+Tab.
+            if (newInput.length() != 1) return newInput;
+            const auto c = newInput[0];
+            const bool isHijackedTab = (c == 0x09 || c == 0x20 || c == 0xA0);
+            if (! isHijackedTab) return newInput;
+
+            if (auto* editor = findEnclosingEditor(&ed))
+                editor->requestNavigatePeer(mods.isShiftDown() ? -1 : +1);
+
+            return {};   // drop the would-be insertion
+        }
+    };
+
+    EditFieldKeyListener& sharedEditFieldKeys()
+    {
+        static EditFieldKeyListener instance;
+        return instance;
+    }
+
+    TabNavInputFilter& sharedTabNavFilter()
+    {
+        static TabNavInputFilter instance;
+        return instance;
+    }
+}
 
 static const juce::String kLookupLabel =
     juce::String("Apple Music ") + juce::String(juce::CharPointer_UTF8("\xf0\x9f\x94\x8d"));
@@ -84,10 +220,22 @@ void SongInfoEditor::FilePathLink::mouseUp(const juce::MouseEvent& e)
     file_.revealToUser();
 }
 
+// Tracks the most-recently-constructed SongInfoEditor so the global
+// Option+Tab NSEvent monitor knows which instance to invoke. Only one Edit
+// Info dialog is open at a time, but the Next/Previous flow creates a new
+// editor before the previous one is asynchronously deleted, so the dtor
+// must check that it's still the current_ before clearing it.
+namespace { SongInfoEditor* currentEditor = nullptr; }
+
 SongInfoEditor::SongInfoEditor(const TrackInfo& track)
     : mode_(track.isPodcast ? Mode::SinglePodcast : Mode::SingleMusic)
     , tracks_({ track })
 {
+    currentEditor = this;
+    Stylus_setOptionTabMonitor([](bool shift) {
+        if (currentEditor != nullptr)
+            currentEditor->requestNavigatePeer(shift ? -1 : +1);
+    });
     init();
 }
 
@@ -95,7 +243,26 @@ SongInfoEditor::SongInfoEditor(const std::vector<TrackInfo>& tracks)
     : mode_((!tracks.empty() && tracks.front().isPodcast) ? Mode::MultiPodcast : Mode::MultiMusic)
     , tracks_(tracks)
 {
+    currentEditor = this;
+    Stylus_setOptionTabMonitor([](bool shift) {
+        if (currentEditor != nullptr)
+            currentEditor->requestNavigatePeer(shift ? -1 : +1);
+    });
     init();
+}
+
+SongInfoEditor::~SongInfoEditor()
+{
+    // The next-track recursion in MainComponent creates the replacement
+    // editor before the old one is asynchronously destroyed: ctor runs
+    // first, dtor later. Only clear current_ if it still points at us;
+    // otherwise the new editor has already claimed it and we'd otherwise
+    // wipe out an active monitor target.
+    if (currentEditor == this)
+    {
+        currentEditor = nullptr;
+        Stylus_setOptionTabMonitor(nullptr);
+    }
 }
 
 juce::String SongInfoEditor::findCommonPrefix() const
@@ -138,6 +305,17 @@ void SongInfoEditor::init()
         ed.setColour(juce::TextEditor::outlineColourId,    Color::border);
         ed.setColour(juce::TextEditor::focusedOutlineColourId, Color::accent);
         ed.setJustification(juce::Justification::centredLeft);
+        // Tab-into / click-into a field selects the whole content, so the
+        // user can immediately type to replace it. The init() block below
+        // intentionally moves the caret to the end for the initial focus
+        // in Multi mode (where the user is extending a common prefix) -
+        // that runs after this and overrides the selection.
+        ed.setSelectAllWhenFocused(true);
+        // Cmd+Backspace clears the field rather than deleting one char.
+        ed.addKeyListener(&sharedEditFieldKeys());
+        // Catches Option+Tab when macOS routes it through the IME path
+        // instead of keyPressed (see TabNavInputFilter for details).
+        ed.setInputFilter(&sharedTabNavFilter(), /*takeOwnership*/ false);
     };
 
     auto commonStr = [this](std::function<juce::String(const TrackInfo&)> fn) -> juce::String {
@@ -411,6 +589,27 @@ void SongInfoEditor::collectEditsIntoTracks()
     }
 }
 
+void SongInfoEditor::dismiss()
+{
+    if (onDismiss) onDismiss();
+}
+
+void SongInfoEditor::requestNavigatePeer(int delta)
+{
+    auto& btn = (delta > 0) ? nextButton_ : prevButton_;
+    // Hidden in Multi mode, disabled at the ends of a Single-mode peer
+    // list. Either way, the keyboard shortcut should silently do nothing
+    // rather than save + dismiss with no follow-up dialog.
+    if (! btn.isShowing() || ! btn.isEnabled()) return;
+    // Pull the latest field values out of the text editors into tracks_
+    // before save fires - matches what the on-click handlers above do.
+    // Without this, the keyboard-shortcut path would save the original
+    // (pre-edit) values and the user's changes would be silently lost.
+    collectEditsIntoTracks();
+    if (onSave) onSave(tracks_);
+    if (onSaveAndNavigate) onSaveAndNavigate(delta);
+}
+
 void SongInfoEditor::setPeerNavigation(int index, int total)
 {
     prevButton_.setEnabled(index > 0);
@@ -462,24 +661,6 @@ void SongInfoEditor::save()
 
     if (onSave) onSave(tracks_);
     if (onDismiss) onDismiss();
-}
-
-void SongInfoEditor::focusOfChildComponentChanged(juce::Component::FocusChangeType)
-{
-    for (auto* comp : getChildren())
-    {
-        if (auto* ed = dynamic_cast<juce::TextEditor*>(comp))
-        {
-            if (ed->hasKeyboardFocus(false))
-            {
-                juce::Component::SafePointer<juce::TextEditor> safe(ed);
-                juce::MessageManager::callAsync([safe] {
-                    if (safe) safe->selectAll();
-                });
-                break;
-            }
-        }
-    }
 }
 
 void SongInfoEditor::paint(juce::Graphics& g)
