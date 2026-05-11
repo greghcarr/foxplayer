@@ -3876,12 +3876,26 @@ void MainComponent::getCommandInfo(juce::CommandID id, juce::ApplicationCommandI
             break;
 
         case cmdEditInfo:
-            info.setInfo("Edit Info",
-                         "Edit metadata for the selected track(s)",
+        {
+            // When the sidebar has keyboard focus on a renamable row, Cmd-R
+            // means "rename this row" instead of "edit info on the library
+            // selection". Either path keeps the command active so the menu
+            // entry stays usable; the perform handler picks the right route.
+            const bool sidebarRenameReady =
+                sidebar_.hasKeyboardFocus(true)
+                && SidebarComponent::isRenamableId(sidebar_.focusedId());
+
+            info.setInfo(sidebarRenameReady ? "Rename" : "Edit Info",
+                         sidebarRenameReady
+                             ? "Rename the focused sidebar item"
+                             : "Edit metadata for the selected track(s)",
                          "File", 0);
-            info.setActive(libraryTable_.hasSelection() && !activeEditInfoWindow_.getComponent());
+            info.setActive(
+                sidebarRenameReady
+                || (libraryTable_.hasSelection() && !activeEditInfoWindow_.getComponent()));
             info.addDefaultKeypress('r', juce::ModifierKeys::commandModifier);
             break;
+        }
 
         case cmdFocusSearch:
             info.setInfo("Find",
@@ -3941,6 +3955,11 @@ bool MainComponent::perform(const ApplicationCommandTarget::InvocationInfo& info
             return true;
 
         case cmdEditInfo:
+            // Sidebar wins when it's focused on a renamable item; otherwise
+            // fall through to the library Edit Info path. Matches the
+            // dual-purpose label / shortcut declared in getCommandInfo.
+            if (sidebar_.hasKeyboardFocus(true) && sidebar_.beginRenameFocused())
+                return true;
             libraryTable_.triggerEditInfoForSelection();
             return true;
 

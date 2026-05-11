@@ -903,6 +903,33 @@ void SidebarComponent::mouseExit(const juce::MouseEvent&)
     setMouseCursor(juce::MouseCursor::NormalCursor);
 }
 
+bool SidebarComponent::isRenamableId(int sidebarId)
+{
+    // Renamable rows: playlists, artists, albums, podcasts, and user-set
+    // genres. The "(no genre)" row at noGenreId is reserved as a bucket
+    // label and not user-editable. All Music / All Podcasts are pseudo-rows
+    // (ids 1 / 2) and intentionally fall through.
+    return (sidebarId >= 1000 && sidebarId < 2000)                 // playlists
+        || (sidebarId >= 2000 && sidebarId < 3000)                 // artists
+        || (sidebarId >= 3000 && sidebarId < 4000)                 // albums
+        || (sidebarId >= 4000 && sidebarId < 5000)                 // podcasts
+        || (sidebarId >= 5000 && sidebarId < 6000
+            && sidebarId != UIConstants::noGenreId);               // genres
+}
+
+bool SidebarComponent::beginRenameFocused()
+{
+    if (focusedId_ < 0)                  return false;
+    if (! isRenamableId(focusedId_))     return false;
+    // A rename is already in progress: pressing Cmd-R again would otherwise
+    // commit-then-restart the editor on the same row, which feels janky.
+    // Returning true claims the keypress so it doesn't fall through to the
+    // library Edit Info command either.
+    if (inlineEditor_ != nullptr)        return true;
+    startRename(focusedId_);
+    return true;
+}
+
 void SidebarComponent::mouseDoubleClick(const juce::MouseEvent& e)
 {
     for (const auto& section : sections_)
@@ -911,22 +938,9 @@ void SidebarComponent::mouseDoubleClick(const juce::MouseEvent& e)
         for (const auto& item : section.items)
         {
             if (! item.bounds.contains(e.x, e.y)) continue;
-
-            // Renamable rows: playlists, artists, albums, podcasts, and
-            // user-set genres. The "(no genre)" row at noGenreId is
-            // reserved as a bucket label and not user-editable.
-            const int id = item.id;
-            const bool isRenamable =
-                   (id >= 1000 && id < 2000)                 // playlists
-                || (id >= 2000 && id < 3000)                 // artists
-                || (id >= 3000 && id < 4000)                 // albums
-                || (id >= 4000 && id < 5000)                 // podcasts
-                || (id >= 5000 && id < 6000
-                    && id != UIConstants::noGenreId);        // genres
-
-            if (isRenamable)
+            if (isRenamableId(item.id))
             {
-                startRename(id);
+                startRename(item.id);
                 return;
             }
         }

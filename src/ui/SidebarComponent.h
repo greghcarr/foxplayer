@@ -93,6 +93,16 @@ public:
     int  focusedId() const { return focusedId_; }
     void clearFocus();
 
+    // True if the given sidebar id refers to a row whose label can be edited
+    // in-place: playlists, artists, albums, podcasts, user-set genres. The
+    // pseudo-rows (All Music, All Podcasts, "(no genre)") return false.
+    static bool isRenamableId(int sidebarId);
+
+    // Begin an inline rename on the focused row, if any, and only when that
+    // row is renamable. Returns true if the rename started. Used by the
+    // Cmd-R hotkey while the sidebar is the focused pane.
+    bool beginRenameFocused();
+
     // True while the user is mid-type-ahead in the sidebar (a printable
     // letter was pressed within the timeout window). MainComponent's Q
     // command consults this so a Q typed during type-ahead extends the
