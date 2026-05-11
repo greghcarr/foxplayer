@@ -12,3 +12,7 @@ void Stylus_activateAndShowWindow(void* /*nsWindowHandle*/) {}
 void Stylus_activateExistingWindow(void* /*nsWindowHandle*/) {}
 
 void Stylus_setDockReopenCallback(std::function<void()> /*callback*/) {}
+
+void Stylus_setAppActivatedCallback(std::function<void()> /*callback*/) {}
+
+void Stylus_setOptionTabMonitor(std::function<void(bool)> /*callback*/) {}

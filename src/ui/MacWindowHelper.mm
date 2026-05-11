@@ -130,3 +130,87 @@ void Stylus_setDockReopenCallback(std::function<void()> callback)
                name:NSApplicationDidBecomeActiveNotification
              object:nil];
 }
+
+// ---------------------------------------------------------------------------
+// "App became active" callback (always fires, regardless of which window is
+// key). Separate from the dock-reopen path because that one is gated on
+// "no visible windows" - we want a hook that runs even when the user just
+// switched between apps with all our windows still around.
+// ---------------------------------------------------------------------------
+
+@interface StylusActivationObserver : NSObject
+@property (nonatomic, copy) void (^onActivated)(void);
+- (void)appDidBecomeActive:(NSNotification*)note;
+@end
+
+@implementation StylusActivationObserver
+- (void)appDidBecomeActive:(NSNotification*)note
+{
+    if (_onActivated) _onActivated();
+}
+@end
+
+static StylusActivationObserver* gActivationObserver = nil;
+
+void Stylus_setAppActivatedCallback(std::function<void()> callback)
+{
+    if (gActivationObserver)
+    {
+        [NSNotificationCenter.defaultCenter removeObserver:gActivationObserver];
+#if !__has_feature(objc_arc)
+        [gActivationObserver release];
+#endif
+        gActivationObserver = nil;
+    }
+    if (! callback) return;
+
+    gActivationObserver = [[StylusActivationObserver alloc] init];
+    gActivationObserver.onActivated = ^{ callback(); };
+    [NSNotificationCenter.defaultCenter
+        addObserver:gActivationObserver
+           selector:@selector(appDidBecomeActive:)
+               name:NSApplicationDidBecomeActiveNotification
+             object:nil];
+}
+
+// ---------------------------------------------------------------------------
+// Option+Tab event monitor. Cocoa's NSTextInputContext (the IME) intercepts
+// Option-modified keystrokes before keyDown: dispatch and converts them to
+// character insertions via insertText:. That bypasses JUCE-side key handling
+// entirely, and modifier state read inside the IME callback can be stale.
+// A local NSEvent monitor sees the keystroke before any dispatch and can
+// return nil to swallow it, so we route Option+Tab / Option+Shift+Tab to
+// the editor's Next / Previous buttons reliably.
+// ---------------------------------------------------------------------------
+
+static id gOptionTabMonitor = nil;
+
+void Stylus_setOptionTabMonitor(std::function<void(bool shift)> callback)
+{
+    if (gOptionTabMonitor)
+    {
+        [NSEvent removeMonitor:gOptionTabMonitor];
+        gOptionTabMonitor = nil;
+    }
+    if (! callback) return;
+
+    // Copy the std::function into a __block so it's captured by value and
+    // outlives the call to addLocalMonitor.
+    __block std::function<void(bool)> cb = std::move(callback);
+
+    gOptionTabMonitor = [NSEvent
+        addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+                                     handler:^NSEvent* (NSEvent* event) {
+        // 0x30 is Apple's hardware-independent virtual keycode for Tab.
+        // Modifier flags carry NSDeviceIndependent variants for option /
+        // shift, which is exactly what we want to match against.
+        if ([event keyCode] == 0x30
+            && (([event modifierFlags] & NSEventModifierFlagOption) != 0))
+        {
+            const BOOL shift = ([event modifierFlags] & NSEventModifierFlagShift) != 0;
+            cb(shift ? true : false);
+            return nil;   // swallow - no IME, no keyDown, no character insert
+        }
+        return event;
+    }];
+}

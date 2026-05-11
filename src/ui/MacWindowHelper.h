@@ -16,3 +16,20 @@ void Stylus_activateExistingWindow(void* nsWindowHandle);
 // windows are visible (NSApplicationDidBecomeActiveNotification with no
 // visible windows). Pass nullptr to unregister.
 void Stylus_setDockReopenCallback(std::function<void()> callback);
+
+// Registers a callback fired on every NSApplicationDidBecomeActiveNotification,
+// regardless of which Stylus window has key status. Used to surface dialog
+// windows that may have ended up behind the main window after the app
+// reactivates. Pass nullptr to unregister.
+void Stylus_setAppActivatedCallback(std::function<void()> callback);
+
+// Installs / removes a low-level NSEvent monitor for Option+Tab and
+// Option+Shift+Tab. Cocoa's IME routes these through insertText: rather than
+// keyDown:, which means JUCE-side KeyListeners and InputFilters can't see
+// them reliably (the modifier flags can also be stale by the time the IME's
+// callback fires). A local NSEvent monitor sees the keystroke before any
+// dispatch and can return nil to swallow it entirely. shift is true when
+// Option+Shift+Tab fires, false for plain Option+Tab.
+// Call with non-null callback when an Edit Info dialog opens; pass nullptr
+// when it closes so we don't leak the monitor.
+void Stylus_setOptionTabMonitor(std::function<void(bool shift)> callback);
