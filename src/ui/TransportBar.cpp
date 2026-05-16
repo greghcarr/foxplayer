@@ -875,7 +875,7 @@ void TransportBar::paint(juce::Graphics& g)
     const auto clip = g.getClipBounds();
 
     if (hasTrack_ && !seekBarBounds_.isEmpty()
-        && seekBarBounds_.expanded(0, seekThumbHalfExtent).contains(clip))
+        && seekBarBounds_.expanded(seekThumbHalfExtent, seekThumbHalfExtent).contains(clip))
     {
         g.fillAll(Color::transportBg);
         g.setColour(Color::seekBarTrack);
@@ -1758,10 +1758,14 @@ void TransportBar::updateDisplay()
     // Targeted repaint of just the seek bar: the disc spin is GPU-driven by
     // the CALayer overlay, so the message-thread timer only needs to redraw
     // the moving thumb. The bg, gradient, info text, and buttons are static
-    // during playback. Expand the dirty rect vertically to cover the thumb
-    // circle, which extends past the bar's top and bottom edges.
+    // during playback. Expand the dirty rect both vertically AND horizontally
+    // to cover the thumb circle — the thumb's centre rides the bar edges at
+    // pos≈0 and pos≈1, so half of it extends outside seekBarBounds_'s left /
+    // right edges. Without the horizontal expansion the off-track half stays
+    // unrepainted and the thumb renders as a half-circle until something
+    // else (mouse hover, full paint) invalidates the surrounding region.
     if (!draggingSeek_ && !seekBarBounds_.isEmpty())
-        repaint(seekBarBounds_.expanded(0, seekThumbHalfExtent));
+        repaint(seekBarBounds_.expanded(seekThumbHalfExtent, seekThumbHalfExtent));
 }
 
 juce::String TransportBar::formatSeconds(double secs) const
