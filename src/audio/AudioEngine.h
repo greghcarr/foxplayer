@@ -58,6 +58,12 @@ public:
     // 1 once the fade completes; resets to 0 on next track load / disable.
     float normalizationCheckOpacity() const;
 
+    // True while the check-overlay fade is actively running (between the
+    // moment a fade is triggered and kRampDurationMs later). Used by the
+    // UI animator to keep ticking through the fade rather than treating
+    // its 0-alpha first frame as a settled "off" state.
+    bool  isCheckFadeInProgress() const;
+
     // Read-only access to the loaded track. MainComponent uses this to
     // recognise late LUFS analysis results that target the playing file.
     const TrackInfo& currentTrack() const { return currentTrack_; }

@@ -4537,15 +4537,21 @@ void MainComponent::updateNormalizeOverlay()
 {
     const bool  spinner = engine_.isLufsAnalysisPending();
     const float alpha   = engine_.normalizationCheckOpacity();
+    const bool  fading  = engine_.isCheckFadeInProgress();
 
     normalizeButton_.setShowSpinner(spinner);
     normalizeButton_.setCheckAlpha(alpha);
 
-    // Stop the animator once both overlays are at a stable rest. Spinner
-    // off means analysis isn't pending (so no rotation to advance), and
-    // alpha pinned at 0 or 1 means the check is fully shown / hidden and
-    // not mid-fade. Anything else and we keep ticking.
+    // Stop the animator once both overlays are at a stable rest:
+    //   - no spinner spinning,
+    //   - no check-fade in progress,
+    //   - and alpha pinned at one of its endpoints.
+    // Without the fading guard, a freshly-triggered fade-in would stop the
+    // animator on its very first tick (the smoothstep value at t=0 is 0,
+    // which the original atRest check treated as "settled off"), and the
+    // check would never reach full opacity.
     const bool atRest = ! spinner
+                        && ! fading
                         && (alpha <= 0.001f || alpha >= 0.999f);
     if (atRest && normalizeAnimator_.isTimerRunning())
         normalizeAnimator_.stopTimer();

@@ -162,6 +162,12 @@ bool AudioEngine::isLufsAnalysisPending() const
     return normalizeVolume_ && trackLoaded_ && ! lufsKnown_;
 }
 
+bool AudioEngine::isCheckFadeInProgress() const
+{
+    if (checkFadeStartMs_ == 0) return false;
+    return (juce::Time::currentTimeMillis() - checkFadeStartMs_) < kRampDurationMs;
+}
+
 float AudioEngine::normalizationCheckOpacity() const
 {
     // Off: feature disabled entirely, no overlay at all.
