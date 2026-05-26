@@ -174,6 +174,46 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiscPreferencesPanel)
 };
 
+// ---- Sync panel --------------------------------------------------------------
+// "Allow iPhone Sync" toggle + current PIN display + Regenerate button +
+// bound address/port readout. Drives MainComponent's SyncServer lifecycle
+// via setEnableHandler / setRegenerateHandler. The panel itself doesn't
+// own a SyncServer instance: MainComponent does. This keeps the
+// PreferencesWindow oblivious to the sync subsystem's headers.
+class SyncPreferencesPanel : public juce::Component,
+                             private juce::Timer
+{
+public:
+    static constexpr const char* kEnabledKey = "sync.enabled";
+
+    explicit SyncPreferencesPanel(juce::ApplicationProperties& props);
+    ~SyncPreferencesPanel() override;
+
+    void paint(juce::Graphics& g) override;
+    void resized() override;
+
+    // MainComponent wires these so the panel doesn't pull in the
+    // SyncServer / SyncPinManager headers.
+    std::function<void(bool)>          onEnableToggled;
+    std::function<void()>              onRegeneratePin;
+    std::function<juce::String()>      pinProvider;
+    std::function<int()>               portProvider;
+    std::function<bool()>              isRunningProvider;
+
+private:
+    void timerCallback() override;
+    void refresh();
+
+    juce::ApplicationProperties& props_;
+    juce::ToggleButton           enableToggle_;
+    juce::Label                  pinLabel_;
+    juce::Label                  pinValue_;
+    juce::TextButton             regenerateButton_;
+    juce::Label                  portLabel_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SyncPreferencesPanel)
+};
+
 // ---- Sidebar + panel host ----------------------------------------------------
 // Left-hand category list + right-hand content area. Add a new category by
 // extending the Category enum and wiring a new panel in PreferencesComponent.
@@ -188,7 +228,7 @@ public:
     void mouseDown(const juce::MouseEvent& e) override;
 
 private:
-    enum class Category { Audio, Library, Display, Misc };
+    enum class Category { Audio, Library, Display, Misc, Sync };
 
     struct SidebarItem
     {
@@ -214,11 +254,13 @@ private:
     std::unique_ptr<LibraryPreferencesPanel> libraryPanel_;
     std::unique_ptr<DisplayPreferencesPanel> displayPanel_;
     std::unique_ptr<MiscPreferencesPanel>    miscPanel_;
+    std::unique_ptr<SyncPreferencesPanel>    syncPanel_;
 
 public:
     LibraryPreferencesPanel& libraryPanel() { return *libraryPanel_; }
     DisplayPreferencesPanel& displayPanel() { return *displayPanel_; }
     AudioPreferencesPanel&   audioPanel()   { return *audioPanel_; }
+    SyncPreferencesPanel&    syncPanel()    { return *syncPanel_; }
 
 private:
 
@@ -251,6 +293,10 @@ public:
     // Direct access to the display panel so MainComponent can wire up the
     // album-art-mode change callback.
     DisplayPreferencesPanel* displayPanel();
+
+    // Direct access to the sync panel so MainComponent can wire its
+    // enable / regenerate handlers and the live pin / port readers.
+    SyncPreferencesPanel*    syncPanel();
 
     // Direct access to the audio panel so MainComponent can wire up the
     // volume-normalisation callback (loaded state is delivered via the

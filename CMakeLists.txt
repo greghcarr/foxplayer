@@ -78,6 +78,9 @@ set(STYLUS_APP_SOURCES
     src/ui/SidebarComponent.cpp
     src/ui/AnalysisLogWindow.cpp
     src/ui/PreferencesWindow.cpp
+    src/sync/SyncPinManager.cpp
+    src/sync/SyncManifestBuilder.cpp
+    src/sync/SyncServer.cpp
 )
 
 if (APPLE)
@@ -86,6 +89,7 @@ if (APPLE)
         src/ui/MacWindowHelper.mm
         src/ui/NowPlayingBridge.mm
         src/ui/RecordSpinnerLayer.mm
+        src/sync/SyncServerBonjour.mm
     )
 else()
     list(APPEND STYLUS_APP_SOURCES
@@ -94,6 +98,7 @@ else()
         src/ui/NowPlayingBridge_Win.cpp
         src/ui/RecordSpinnerLayer_Win.cpp
         src/audio/MediaFoundationReader.cpp
+        src/sync/SyncServerBonjour_Win.cpp
     )
 endif()
 

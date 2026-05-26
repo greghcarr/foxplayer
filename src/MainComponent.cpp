@@ -1027,6 +1027,51 @@ MainComponent::MainComponent()
         transportBar_.setUseStaticAlbumArt(
             s->getBoolValue(DisplayPreferencesPanel::kUseStaticAlbumArtKey, false));
 
+    // Sync panel: toggle starts / stops the SyncServer + Bonjour
+    // advertisement. The PIN + port readouts are pulled from the
+    // panel's polling timer via the provider closures below.
+    syncServer_ = std::make_unique<SyncServer>(
+        syncPinManager_,
+        [this] { return musicFolders_; },
+        [this] { return podcastFolders_; },
+        [this] { return fullLibrary_; },
+        *playlistStore_);
+
+    if (auto* syncPanel = preferencesWindow_->syncPanel())
+    {
+        syncPanel->pinProvider       = [this] { return syncPinManager_.currentPin(); };
+        syncPanel->portProvider      = [this] { return syncServer_ ? syncServer_->boundPort() : 0; };
+        syncPanel->isRunningProvider = [this] { return syncServer_ && syncServer_->isRunning(); };
+        syncPanel->onRegeneratePin   = [this] { syncPinManager_.regenerate(); };
+        syncPanel->onEnableToggled   = [this](bool on)
+        {
+            if (on)
+            {
+                if (syncServer_ && syncServer_->start())
+                {
+                    syncBonjour_.publish(
+                        juce::SystemStats::getComputerName(),
+                        syncServer_->boundPort());
+                }
+            }
+            else
+            {
+                syncBonjour_.stop();
+                if (syncServer_) syncServer_->stop();
+            }
+        };
+    }
+
+    // Honour the persisted toggle on launch.
+    if (auto* s = appProperties_.getUserSettings();
+        s != nullptr
+     && s->getBoolValue(SyncPreferencesPanel::kEnabledKey, false))
+    {
+        if (syncServer_->start())
+            syncBonjour_.publish(juce::SystemStats::getComputerName(),
+                                 syncServer_->boundPort());
+    }
+
     // Wire the Audio panel: forwards "Normalize playback volume" toggles
     // straight to the engine, which mixes the per-track LUFS-based offset
     // with the user volume on the next loadTrack and live on toggle.

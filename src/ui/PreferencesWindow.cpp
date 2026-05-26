@@ -623,6 +623,100 @@ void MiscPreferencesPanel::resized()
 }
 
 // ============================================================================
+// SyncPreferencesPanel
+// ============================================================================
+
+SyncPreferencesPanel::SyncPreferencesPanel(juce::ApplicationProperties& props)
+    : props_(props)
+{
+    enableToggle_.setButtonText("Allow iPhone Sync");
+    enableToggle_.setToggleState(
+        props_.getUserSettings()->getBoolValue(kEnabledKey, false),
+        juce::dontSendNotification);
+    enableToggle_.onClick = [this]
+    {
+        const auto on = enableToggle_.getToggleState();
+        props_.getUserSettings()->setValue(kEnabledKey, on);
+        if (onEnableToggled) onEnableToggled(on);
+        refresh();
+    };
+    addAndMakeVisible(enableToggle_);
+
+    pinLabel_.setText("Current PIN", juce::dontSendNotification);
+    pinLabel_.setColour(juce::Label::textColourId, Color::textSecondary);
+    addAndMakeVisible(pinLabel_);
+
+    pinValue_.setText("------", juce::dontSendNotification);
+    pinValue_.setFont(juce::Font(juce::FontOptions().withHeight(28.0f)));
+    pinValue_.setColour(juce::Label::textColourId, Color::textPrimary);
+    addAndMakeVisible(pinValue_);
+
+    regenerateButton_.setButtonText("Regenerate PIN");
+    regenerateButton_.onClick = [this]
+    {
+        if (onRegeneratePin) onRegeneratePin();
+        refresh();
+    };
+    addAndMakeVisible(regenerateButton_);
+
+    portLabel_.setText("", juce::dontSendNotification);
+    portLabel_.setColour(juce::Label::textColourId, Color::textSecondary);
+    addAndMakeVisible(portLabel_);
+
+    // Light polling so the panel re-renders if MainComponent regenerates
+    // the PIN from outside our UI (e.g. brute-force lockout).
+    startTimer(1000);
+}
+
+SyncPreferencesPanel::~SyncPreferencesPanel()
+{
+    stopTimer();
+}
+
+void SyncPreferencesPanel::paint(juce::Graphics& g)
+{
+    g.fillAll(Color::background);
+}
+
+void SyncPreferencesPanel::resized()
+{
+    auto area = getLocalBounds().reduced(24);
+    enableToggle_.setBounds(area.removeFromTop(32));
+    area.removeFromTop(20);
+
+    pinLabel_.setBounds(area.removeFromTop(18));
+    pinValue_.setBounds(area.removeFromTop(36));
+    area.removeFromTop(8);
+    regenerateButton_.setBounds(area.removeFromTop(28)
+                                    .removeFromLeft(160));
+    area.removeFromTop(28);
+    portLabel_.setBounds(area.removeFromTop(18));
+
+    refresh();
+}
+
+void SyncPreferencesPanel::timerCallback()
+{
+    refresh();
+}
+
+void SyncPreferencesPanel::refresh()
+{
+    pinValue_.setText(pinProvider ? pinProvider() : juce::String("------"),
+                      juce::dontSendNotification);
+    if (isRunningProvider && portProvider && isRunningProvider())
+    {
+        portLabel_.setText(
+            juce::String("Listening on port ") + juce::String(portProvider()),
+            juce::dontSendNotification);
+    }
+    else
+    {
+        portLabel_.setText("Not listening.", juce::dontSendNotification);
+    }
+}
+
+// ============================================================================
 // PreferencesComponent
 // ============================================================================
 
@@ -634,15 +728,18 @@ PreferencesComponent::PreferencesComponent(juce::AudioDeviceManager& dm,
     items_.push_back({ Category::Library, "Library", {} });
     items_.push_back({ Category::Display, "Display", {} });
     items_.push_back({ Category::Misc,    "Misc",    {} });
+    items_.push_back({ Category::Sync,    "Sync",    {} });
 
     audioPanel_   = std::make_unique<AudioPreferencesPanel>(deviceManager_, appProperties_);
     libraryPanel_ = std::make_unique<LibraryPreferencesPanel>();
     displayPanel_ = std::make_unique<DisplayPreferencesPanel>(appProperties);
     miscPanel_    = std::make_unique<MiscPreferencesPanel>(appProperties);
+    syncPanel_    = std::make_unique<SyncPreferencesPanel>(appProperties);
     addChildComponent(*libraryPanel_);
     addChildComponent(*audioPanel_);
     addChildComponent(*displayPanel_);
     addChildComponent(*miscPanel_);
+    addChildComponent(*syncPanel_);
 
     showPanel(current_);
     setSize(640, 480);
@@ -655,6 +752,7 @@ void PreferencesComponent::showPanel(Category c)
     if (libraryPanel_) libraryPanel_->setVisible(c == Category::Library);
     if (displayPanel_) displayPanel_->setVisible(c == Category::Display);
     if (miscPanel_)    miscPanel_->setVisible(c == Category::Misc);
+    if (syncPanel_)    syncPanel_->setVisible(c == Category::Sync);
     repaint();
 }
 
@@ -713,6 +811,7 @@ void PreferencesComponent::resized()
     if (libraryPanel_) libraryPanel_->setBounds(content);
     if (displayPanel_) displayPanel_->setBounds(content);
     if (miscPanel_)    miscPanel_->setBounds(content);
+    if (syncPanel_)    syncPanel_->setBounds(content);
 }
 
 void PreferencesComponent::mouseDown(const juce::MouseEvent& e)
@@ -788,6 +887,11 @@ LibraryPreferencesPanel* PreferencesWindow::libraryPanel()
 DisplayPreferencesPanel* PreferencesWindow::displayPanel()
 {
     return prefsComponent_ != nullptr ? &prefsComponent_->displayPanel() : nullptr;
+}
+
+SyncPreferencesPanel* PreferencesWindow::syncPanel()
+{
+    return prefsComponent_ != nullptr ? &prefsComponent_->syncPanel() : nullptr;
 }
 
 AudioPreferencesPanel* PreferencesWindow::audioPanel()

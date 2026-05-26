@@ -19,6 +19,9 @@
 #include "ui/LoadingIndicator.h"
 #include "ui/StatusBarItem.h"
 #include "ui/NowPlayingBridge.h"
+#include "sync/SyncServer.h"
+#include "sync/SyncServerBonjour.h"
+#include "sync/SyncPinManager.h"
 #include <JuceHeader.h>
 #include <map>
 #include <set>
@@ -427,6 +430,13 @@ private:
     std::unique_ptr<PlaylistStore>      playlistStore_;
     std::unique_ptr<AnalysisLogWindow>  analysisLogWindow_;
     std::unique_ptr<PreferencesWindow>  preferencesWindow_;
+    // Mac -> iPhone library sync. The server only listens while the
+    // "Allow iPhone Sync" toggle in Preferences is on; the Bonjour
+    // advertisement is started / stopped alongside it. PIN manager
+    // owns the pairing PIN + bearer tokens.
+    SyncPinManager                      syncPinManager_;
+    std::unique_ptr<SyncServer>         syncServer_;
+    SyncServerBonjour                   syncBonjour_;
     juce::ApplicationCommandManager     commandManager_;
     StatusBarItem                       statusBarItem_;
     NowPlayingBridge                    nowPlaying_;
