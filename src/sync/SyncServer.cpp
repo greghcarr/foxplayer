@@ -20,12 +20,18 @@ namespace
     {
         // Read into a memory buffer one byte at a time until \r\n\r\n.
         // Header sizes are tiny so the per-byte read cost is fine.
+        // shouldBlock = true so each call waits for one byte rather
+        // than returning 0 the instant the kernel buffer is empty.
+        // The previous shouldBlock = false treated "no data yet" the
+        // same as EOF, so we'd drop the connection as soon as the
+        // headers arrived in more than one TCP packet (which is
+        // every iOS request).
         juce::MemoryBlock buf;
         char b = 0;
         int run = 0;
         while (run < 8 * 1024)
         {
-            const auto n = sock.read(&b, 1, false);
+            const auto n = sock.read(&b, 1, true);
             if (n <= 0) return false;
             buf.append(&b, 1);
             ++run;
@@ -49,13 +55,17 @@ namespace
                     juce::MemoryBlock&     out,
                     int                    n)
     {
+        // shouldBlock = true (same reasoning as readUntilDoubleCRLF).
+        // JUCE will block until either n bytes have been read or the
+        // connection is closed; we then loop in case the read came
+        // back short.
         out.setSize((size_t) n);
         int got = 0;
         while (got < n)
         {
             const auto r = sock.read((char*) out.getData() + got,
                                      n - got,
-                                     false);
+                                     true);
             if (r <= 0) return false;
             got += r;
         }
