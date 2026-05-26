@@ -166,6 +166,13 @@ public:
     // CALayer overlay is hidden and the art is painted in JUCE.
     void setUseStaticAlbumArt(bool useStatic);
 
+    // Dims the spinning-disc overlay (which sits in a CALayer above the
+    // JUCE-painted bar on macOS and so doesn't pick up MainComponent's
+    // dialog lock overlay). Called by MainComponent whenever any dialog
+    // lock overlay's visibility changes so the disc matches the rest of
+    // the dimmed window.
+    void setDiscDimmed(bool dim);
+
     // juce::Component
     void paint(juce::Graphics& g) override;
     void resized() override;

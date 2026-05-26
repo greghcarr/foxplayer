@@ -38,6 +38,13 @@ void RecordSpinnerLayer::setSpinning(bool shouldSpin)
     }
 }
 
+void RecordSpinnerLayer::setDimmed(bool dim)
+{
+    if (dim == dimmed_) return;
+    dimmed_ = dim;
+    repaint();
+}
+
 void RecordSpinnerLayer::timerCallback()
 {
     const auto now = juce::Time::currentTimeMillis();
@@ -71,6 +78,9 @@ void RecordSpinnerLayer::paint(juce::Graphics& g)
                          .rotated(static_cast<float>(angleRadians_))
                          .translated(cx, cy);
 
+    // Match the macOS path's 0.5 dim alpha when a dialog is up; otherwise
+    // draw at full opacity.
+    g.setOpacity(dimmed_ ? 0.5f : 1.0f);
     g.drawImageTransformed(image_, transform, false);
 }
 

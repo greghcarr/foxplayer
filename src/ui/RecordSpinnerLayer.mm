@@ -19,14 +19,14 @@ static constexpr double kRotationSeconds = 1.8;
 @property (nonatomic, assign) CGFloat currentAngle;
 - (void)setDiscImage:(CGImageRef)cg;
 - (void)setSpinning:(BOOL)spinning;
-- (void)updateDimForKeyState;
+- (void)setDimmed:(BOOL)dim;
 @end
 
-// Dim factor applied to the view when its window isn't key. Keeps the disc
-// from looking jarringly bright next to the JUCE-rendered chrome that macOS
-// has darkened for the inactive state. Tuned to roughly match the appearance
-// of the rest of the bar on resign-key.
-static const CGFloat kInactiveDimAlpha = 0.5;
+// Dim factor applied to the disc while a modal-style dialog is open. Matches
+// the visual weight of the lock overlay JUCE paints over the rest of the
+// window in the same state, so the disc doesn't stand out unnaturally bright
+// against the dimmed transport bar.
+static const CGFloat kDialogDimAlpha = 0.5;
 
 @implementation StylusRecordSpinnerView
 
@@ -64,30 +64,14 @@ static const CGFloat kInactiveDimAlpha = 0.5;
     return self;
 }
 
-// Re-subscribe to window-key notifications whenever the view moves to a new
-// window, and apply the current dim state immediately. Without this the disc
-// stays at full alpha when its window isn't key, which makes it stand out
-// against JUCE's inactive-state rendering of the rest of the bar.
-- (void)viewDidMoveToWindow
+// Caller-driven dim. Previously the disc auto-dimmed on resign-key but that
+// happened any time the user switched apps, which looked wrong because the
+// JUCE-rendered transport bar doesn't dim on resign-key. Now the dim is
+// requested explicitly by MainComponent whenever it raises a dialog lock
+// overlay over the main window.
+- (void)setDimmed:(BOOL)dim
 {
-    [super viewDidMoveToWindow];
-    NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
-    [nc removeObserver:self name:NSWindowDidBecomeKeyNotification object:nil];
-    [nc removeObserver:self name:NSWindowDidResignKeyNotification object:nil];
-    if (self.window != nil)
-    {
-        [nc addObserver:self selector:@selector(updateDimForKeyState)
-                   name:NSWindowDidBecomeKeyNotification object:self.window];
-        [nc addObserver:self selector:@selector(updateDimForKeyState)
-                   name:NSWindowDidResignKeyNotification object:self.window];
-    }
-    [self updateDimForKeyState];
-}
-
-- (void)updateDimForKeyState
-{
-    const BOOL isKey = (self.window != nil && self.window.isKeyWindow);
-    self.alphaValue = isKey ? 1.0 : kInactiveDimAlpha;
+    self.alphaValue = dim ? kDialogDimAlpha : 1.0;
 }
 
 // Fired when the view moves between displays with different backing scales
@@ -273,6 +257,13 @@ void RecordSpinnerLayer::setSpinning(bool shouldSpin)
     if (discView_ == nullptr) return;
     auto* view = (__bridge StylusRecordSpinnerView*) discView_;
     [view setSpinning:(shouldSpin ? YES : NO)];
+}
+
+void RecordSpinnerLayer::setDimmed(bool dim)
+{
+    if (discView_ == nullptr) return;
+    auto* view = (__bridge StylusRecordSpinnerView*) discView_;
+    [view setDimmed:(dim ? YES : NO)];
 }
 
 } // namespace Stylus

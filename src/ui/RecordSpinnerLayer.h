@@ -36,6 +36,13 @@ public:
     // layer freezes at its current rotation (the GPU keeps the angle).
     void setSpinning(bool shouldSpin);
 
+    // Drops the disc's opacity to match the lock-overlay dim applied to the
+    // rest of the window when a Stylus dialog (Edit Info, Preferences,
+    // Quit confirm, etc.) is open. Driven by MainComponent rather than by
+    // window-key state - dimming on app-deactivation looked wrong because
+    // the rest of the window doesn't dim on resign-key.
+    void setDimmed(bool dim);
+
 private:
     void* discView_ { nullptr };  // StylusRecordSpinnerView*
 
@@ -53,6 +60,8 @@ public:
 
     void setImage(const juce::Image& image);
     void setSpinning(bool shouldSpin);
+    // See macOS class comment - dim is driven by dialog state, not focus.
+    void setDimmed(bool dim);
 
     void paint(juce::Graphics& g) override;
 
@@ -62,6 +71,7 @@ private:
     juce::Image image_;
     double      angleRadians_ { 0.0 };
     bool        spinning_     { false };
+    bool        dimmed_       { false };
     juce::int64 lastTickMs_   { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RecordSpinnerLayer)

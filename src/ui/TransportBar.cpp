@@ -787,6 +787,11 @@ void TransportBar::setUseStaticAlbumArt(bool useStatic)
     repaint();
 }
 
+void TransportBar::setDiscDimmed(bool dim)
+{
+    recordSpinner_.setDimmed(dim);
+}
+
 void TransportBar::setCanGoPrev(bool can)
 {
     prevButton_.setEnabled(can);

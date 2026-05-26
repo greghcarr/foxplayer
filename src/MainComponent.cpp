@@ -3254,6 +3254,16 @@ void MainComponent::resized()
     quitLockOverlay_.setBounds(getLocalBounds());
     if (quitLockOverlay_.isVisible())
         quitLockOverlay_.toFront(false);
+
+    // The spinning-disc overlay sits in a CALayer above the JUCE-painted
+    // bar and so doesn't pick up the dim of the lock overlays naturally.
+    // Mirror their dim state explicitly. resized() is the natural place
+    // because every lock-overlay show/hide call site pairs setVisible
+    // with resized() — so a single update here covers them all.
+    const bool anyDialogUp = prefsLockOverlay_.isVisible()
+                          || editInfoLockOverlay_.isVisible()
+                          || quitLockOverlay_.isVisible();
+    transportBar_.setDiscDimmed(anyDialogUp);
 }
 
 bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
